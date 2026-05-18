@@ -1,20 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs/promises';
-import { existsSync, copyFileSync } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const usersPath = path.join(__dirname, 'data', 'users.json');
-const equipmentsSource = path.join(__dirname, 'data', 'equipments.json');
-
-const IS_VERCEL = !!process.env.VERCEL;
-const equipmentsPath = IS_VERCEL ? '/tmp/equipments.json' : equipmentsSource;
+import { query, rowToEquipment } from './db.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'gestion-it-secret-2024';
 
@@ -25,13 +13,10 @@ app.use(express.json());
 
 // ─── In-memory monitoring stores ─────────────────────────────────────────────
 
-// userId -> { userId, username, name, role, loginAt, lastSeen, ip }
-const activeSessions = new Map();
-// token -> userId  (for logout and expiry cleanup)
-const tokenToUserId = new Map();
-// activity log — most recent first, capped at 500 entries
-const activityLog = [];
-let activityCounter = 0;
+const activeSessions = new Map();  // userId  → session info
+const tokenToUserId  = new Map();  // token   → userId
+const activityLog    = [];
+let   activityCounter = 0;
 
 function getClientIp(req) {
   return (
@@ -56,38 +41,6 @@ function logActivity(userId, username, name, action, details, ip) {
   if (activityLog.length > 500) activityLog.pop();
 }
 
-// ─── File helpers ─────────────────────────────────────────────────────────────
-
-async function readEquipments() {
-  if (IS_VERCEL && !existsSync(equipmentsPath)) {
-    copyFileSync(equipmentsSource, equipmentsPath);
-  }
-  try {
-    const content = await fs.readFile(equipmentsPath, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return [];
-  }
-}
-
-async function writeEquipments(equipments) {
-  await fs.writeFile(equipmentsPath, JSON.stringify(equipments, null, 2), 'utf-8');
-}
-
-async function readUsers() {
-  try {
-    const content = await fs.readFile(usersPath, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return [];
-  }
-}
-
-async function writeUsers(users) {
-  if (IS_VERCEL) throw new Error('User management requires a database on Vercel.');
-  await fs.writeFile(usersPath, JSON.stringify(users, null, 2), 'utf-8');
-}
-
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 
 function authenticate(req, res, next) {
@@ -96,15 +49,13 @@ function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Token manquant. Veuillez vous connecter.' });
 
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user  = jwt.verify(token, JWT_SECRET);
     req.token = token;
-    // Keep lastSeen fresh
     if (activeSessions.has(req.user.id)) {
       activeSessions.get(req.user.id).lastSeen = new Date().toISOString();
     }
     next();
   } catch {
-    // Token expired — clean up session
     const userId = tokenToUserId.get(token);
     if (userId) {
       const s = activeSessions.get(userId);
@@ -143,42 +94,43 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ message: 'Identifiant et mot de passe requis.' });
   }
 
-  const users = await readUsers();
-  const user = users.find((u) => u.username === username);
-  if (!user) return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
+  try {
+    const { rows } = await query('SELECT * FROM users WHERE username = $1', [username]);
+    const user = rows[0];
+    if (!user) return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
 
-  const permissions = user.permissions || [];
-  const token = jwt.sign(
-    { id: user.id, username: user.username, name: user.name, role: user.role, permissions },
-    JWT_SECRET,
-    { expiresIn: '8h' }
-  );
+    const permissions = user.permissions ?? [];
+    const token = jwt.sign(
+      { id: user.id, username: user.username, name: user.name, role: user.role, permissions },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
 
-  const ip = getClientIp(req);
-  const now = new Date().toISOString();
+    const ip  = getClientIp(req);
+    const now = new Date().toISOString();
 
-  // If user was already logged in with a previous token, revoke it
-  for (const [t, uid] of tokenToUserId.entries()) {
-    if (uid === user.id) tokenToUserId.delete(t);
+    for (const [t, uid] of tokenToUserId.entries()) {
+      if (uid === user.id) tokenToUserId.delete(t);
+    }
+
+    activeSessions.set(user.id, {
+      userId: user.id, username: user.username, name: user.name,
+      role: user.role, permissions, loginAt: now, lastSeen: now, ip
+    });
+    tokenToUserId.set(token, user.id);
+    logActivity(user.id, user.username, user.name, 'Connexion', `Connexion depuis ${ip}`, ip);
+
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, name: user.name, role: user.role, permissions }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur serveur lors de la connexion.' });
   }
-
-  activeSessions.set(user.id, {
-    userId: user.id,
-    username: user.username,
-    name: user.name,
-    role: user.role,
-    permissions,
-    loginAt: now,
-    lastSeen: now,
-    ip
-  });
-  tokenToUserId.set(token, user.id);
-  logActivity(user.id, user.username, user.name, 'Connexion', `Connexion depuis ${ip}`, ip);
-
-  res.json({ token, user: { id: user.id, username: user.username, name: user.name, role: user.role, permissions } });
 });
 
 app.get('/api/auth/me', authenticate, (req, res) => {
@@ -200,7 +152,7 @@ app.get('/api/admin/sessions', authenticate, requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/activities', authenticate, requireAdmin, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
   const userId = req.query.userId ? Number(req.query.userId) : null;
   const filtered = userId ? activityLog.filter((a) => a.userId === userId) : activityLog;
   res.json(filtered.slice(0, limit));
@@ -209,8 +161,15 @@ app.get('/api/admin/activities', authenticate, requireAdmin, (req, res) => {
 // ─── User routes (admin only) ─────────────────────────────────────────────────
 
 app.get('/api/users', authenticate, requireAdmin, async (req, res) => {
-  const users = await readUsers();
-  res.json(users.map(({ password, ...u }) => ({ ...u, permissions: u.permissions || [] })));
+  try {
+    const { rows } = await query(
+      'SELECT id, username, name, role, permissions FROM users ORDER BY id'
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la récupération des utilisateurs.' });
+  }
 });
 
 app.post('/api/users', authenticate, requireAdmin, async (req, res) => {
@@ -218,39 +177,61 @@ app.post('/api/users', authenticate, requireAdmin, async (req, res) => {
   if (!username || !name || !role || !password) {
     return res.status(400).json({ message: 'Tous les champs sont requis.' });
   }
-  const users = await readUsers();
-  if (users.find((u) => u.username === username)) {
-    return res.status(409).json({ message: 'Cet identifiant est déjà utilisé.' });
+  try {
+    const hashed    = await bcrypt.hash(password, 10);
+    const safePerms = Array.isArray(permissions) ? permissions : [];
+    const { rows } = await query(
+      `INSERT INTO users (username, name, role, password, permissions)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, username, name, role, permissions`,
+      [username.trim(), name.trim(), role, hashed, safePerms]
+    );
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Création utilisateur', `Compte "${username}" (${role}) créé`, getClientIp(req));
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'Cet identifiant est déjà utilisé.' });
+    }
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la création.' });
   }
-  const hashed = await bcrypt.hash(password, 10);
-  const safePerms = Array.isArray(permissions) ? permissions : [];
-  const newUser = { id: Math.max(0, ...users.map((u) => u.id)) + 1, username, name, role, password: hashed, permissions: safePerms };
-  users.push(newUser);
-  await writeUsers(users);
-  const { password: _, ...safeUser } = newUser;
-  logActivity(req.user.id, req.user.username, req.user.name, 'Création utilisateur', `Compte "${username}" (${role}) créé`, getClientIp(req));
-  res.status(201).json(safeUser);
 });
 
 app.put('/api/users/:id', authenticate, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const users = await readUsers();
-  const index = users.findIndex((u) => u.id === id);
-  if (index === -1) return res.status(404).json({ message: 'Utilisateur introuvable.' });
-
   const { username, name, role, password, permissions } = req.body;
-  users[index] = {
-    ...users[index],
-    username: username || users[index].username,
-    name: name || users[index].name,
-    role: role || users[index].role,
-    permissions: Array.isArray(permissions) ? permissions : (users[index].permissions || []),
-    ...(password ? { password: await bcrypt.hash(password, 10) } : {})
-  };
-  await writeUsers(users);
-  const { password: _, ...safeUser } = users[index];
-  logActivity(req.user.id, req.user.username, req.user.name, 'Modification utilisateur', `Compte "${safeUser.username}" modifié`, getClientIp(req));
-  res.json(safeUser);
+  try {
+    let pwClause = '';
+    const params = [
+      username, name, role,
+      Array.isArray(permissions) ? permissions : null,
+      id
+    ];
+    if (password) {
+      pwClause = ', password = $6';
+      params.splice(4, 0, await bcrypt.hash(password, 10));
+      params[params.length - 1] = id;
+    }
+    const { rows } = await query(
+      `UPDATE users
+       SET username    = COALESCE($1, username),
+           name        = COALESCE($2, name),
+           role        = COALESCE($3, role),
+           permissions = COALESCE($4, permissions)
+           ${pwClause}
+       WHERE id = $5
+       RETURNING id, username, name, role, permissions`,
+      params
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Utilisateur introuvable.' });
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Modification utilisateur', `Compte "${rows[0].username}" modifié`, getClientIp(req));
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la modification.' });
+  }
 });
 
 app.delete('/api/users/:id', authenticate, requireAdmin, async (req, res) => {
@@ -258,71 +239,126 @@ app.delete('/api/users/:id', authenticate, requireAdmin, async (req, res) => {
   if (req.user.id === id) {
     return res.status(400).json({ message: 'Vous ne pouvez pas supprimer votre propre compte.' });
   }
-  const users = await readUsers();
-  const target = users.find((u) => u.id === id);
-  const filtered = users.filter((u) => u.id !== id);
-  if (filtered.length === users.length) return res.status(404).json({ message: 'Utilisateur introuvable.' });
-  await writeUsers(filtered);
-  logActivity(req.user.id, req.user.username, req.user.name, 'Suppression utilisateur', `Compte "${target?.username}" supprimé`, getClientIp(req));
-  res.status(204).send();
+  try {
+    const { rows } = await query(
+      'DELETE FROM users WHERE id = $1 RETURNING username', [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Utilisateur introuvable.' });
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Suppression utilisateur', `Compte "${rows[0].username}" supprimé`, getClientIp(req));
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la suppression.' });
+  }
 });
 
 // ─── Equipment routes ─────────────────────────────────────────────────────────
 
 app.get('/api/equipments', authenticate, requirePermission('lecture'), async (req, res) => {
-  const equipments = await readEquipments();
-  res.json(equipments);
+  try {
+    const { rows } = await query('SELECT * FROM equipments ORDER BY id');
+    res.json(rows.map(rowToEquipment));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la récupération des équipements.' });
+  }
 });
 
 app.get('/api/equipments/export', authenticate, requirePermission('lecture'), async (req, res) => {
-  const equipments = await readEquipments();
-  logActivity(req.user.id, req.user.username, req.user.name, 'Export CSV', `Export de ${equipments.length} équipements`, getClientIp(req));
-  const header = [
-    'id', 'name', 'type', 'brand', 'model', 'serialNumber', 'ipAddress',
-    'location', 'department', 'status', 'purchaseDate', 'warranty',
-    'lastMaintenance', 'visited', 'technicianName', 'visitDate', 'interventionDetails'
-  ];
-  const csvRows = equipments.map((equipment) =>
-    header.map((field) => JSON.stringify(equipment[field] ?? '')).join(',')
-  );
-  res.setHeader('Content-Type', 'text/csv;charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="equipements.csv"');
-  res.send([header.join(','), ...csvRows].join('\n'));
+  try {
+    const { rows } = await query('SELECT * FROM equipments ORDER BY id');
+    const equipments = rows.map(rowToEquipment);
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Export CSV', `Export de ${equipments.length} équipements`, getClientIp(req));
+    const header = [
+      'id','name','type','brand','model','serialNumber','ipAddress',
+      'location','department','status','purchaseDate','warranty',
+      'lastMaintenance','visited','technicianName','visitDate','interventionDetails'
+    ];
+    const csvRows = equipments.map((e) =>
+      header.map((f) => JSON.stringify(e[f] ?? '')).join(',')
+    );
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="equipements.csv"');
+    res.send([header.join(','), ...csvRows].join('\n'));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de l\'export.' });
+  }
 });
 
 app.post('/api/equipments', authenticate, requirePermission('ecriture'), async (req, res) => {
-  const equipments = await readEquipments();
-  const newEquipment = {
-    ...req.body,
-    id: Math.max(0, ...equipments.map((item) => item.id)) + 1
-  };
-  equipments.push(newEquipment);
-  await writeEquipments(equipments);
-  logActivity(req.user.id, req.user.username, req.user.name, 'Ajout équipement', `"${newEquipment.name}" ajouté (${newEquipment.type})`, getClientIp(req));
-  res.status(201).json(newEquipment);
+  const e = req.body;
+  try {
+    const { rows } = await query(
+      `INSERT INTO equipments
+         (name, type, brand, model, serial_number, ip_address, location, department,
+          status, purchase_date, warranty, last_maintenance, visited,
+          technician_name, visit_date, intervention_details)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       RETURNING *`,
+      [
+        e.name, e.type, e.brand??'', e.model??'', e.serialNumber??'',
+        e.ipAddress??'', e.location??'', e.department??'', e.status??'actif',
+        e.purchaseDate??'', e.warranty??'', e.lastMaintenance??'', e.visited??false,
+        e.technicianName??'', e.visitDate??'', e.interventionDetails??''
+      ]
+    );
+    const created = rowToEquipment(rows[0]);
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Ajout équipement', `"${created.name}" ajouté (${created.type})`, getClientIp(req));
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la création.' });
+  }
 });
 
 app.put('/api/equipments/:id', authenticate, requirePermission('modification'), async (req, res) => {
   const id = Number(req.params.id);
-  const equipments = await readEquipments();
-  const index = equipments.findIndex((item) => item.id === id);
-  if (index === -1) return res.status(404).json({ message: 'Équipement introuvable' });
-  const previous = equipments[index];
-  equipments[index] = { ...req.body, id };
-  await writeEquipments(equipments);
-  logActivity(req.user.id, req.user.username, req.user.name, 'Modification équipement', `"${previous.name}" modifié`, getClientIp(req));
-  res.json(equipments[index]);
+  const e  = req.body;
+  try {
+    const { rows } = await query(
+      `UPDATE equipments SET
+         name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
+         location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
+         last_maintenance=$12, visited=$13, technician_name=$14,
+         visit_date=$15, intervention_details=$16
+       WHERE id=$17
+       RETURNING *`,
+      [
+        e.name, e.type, e.brand??'', e.model??'', e.serialNumber??'',
+        e.ipAddress??'', e.location??'', e.department??'', e.status??'actif',
+        e.purchaseDate??'', e.warranty??'', e.lastMaintenance??'', e.visited??false,
+        e.technicianName??'', e.visitDate??'', e.interventionDetails??'', id
+      ]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Équipement introuvable' });
+    const updated = rowToEquipment(rows[0]);
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Modification équipement', `"${updated.name}" modifié`, getClientIp(req));
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la modification.' });
+  }
 });
 
 app.delete('/api/equipments/:id', authenticate, requirePermission('modification'), async (req, res) => {
   const id = Number(req.params.id);
-  const equipments = await readEquipments();
-  const target = equipments.find((item) => item.id === id);
-  const filtered = equipments.filter((item) => item.id !== id);
-  if (filtered.length === equipments.length) return res.status(404).json({ message: 'Équipement introuvable' });
-  await writeEquipments(filtered);
-  logActivity(req.user.id, req.user.username, req.user.name, 'Suppression équipement', `"${target?.name}" supprimé`, getClientIp(req));
-  res.status(204).send();
+  try {
+    const { rows } = await query(
+      'DELETE FROM equipments WHERE id=$1 RETURNING name', [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Équipement introuvable' });
+    logActivity(req.user.id, req.user.username, req.user.name,
+      'Suppression équipement', `"${rows[0].name}" supprimé`, getClientIp(req));
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Erreur lors de la suppression.' });
+  }
 });
 
 app.get('/health', (req, res) => {
