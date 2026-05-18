@@ -1,0 +1,42 @@
+[
+  {
+    "id": 1,
+    "username": "admin",
+    "password": "$2b$10$7P4Au7b1HIXsMN7Hyl.nJuHDjIoQKFOaPnnbLIyVGKepz0ovIjpti",
+    "role": "admin",
+    "name": "Administrateur",
+    "permissions": ["lecture", "ecriture", "modification"]
+  },
+  {
+    "id": 2,
+    "username": "technicien",
+    "password": "$2b$10$rCk4nkJsHM5gFoEyr6S9A.iuCkMkhWnhCV/05NODOZ5mDGLeJ1DA6",
+    "role": "technicien",
+    "name": "Technicien IT",
+    "permissions": ["lecture", "ecriture", "modification"]
+  },
+  {
+    "id": 3,
+    "username": "utilisateur",
+    "password": "$2b$10$bLZc5aPurOrXeN3tx.zpseg5R3tQNqrCqcblO.PNyMDOR2lcyueFy",
+    "role": "user",
+    "name": "Utilisateur",
+    "permissions": ["lecture"]
+  },
+  {
+    "id": 4,
+    "username": "edem",
+    "name": "HATOR EDEM",
+    "role": "technicien",
+    "password": "$2b$10$TSex4KWxh0.VqlVytTh1UemYK.ApMfBed1pApaM85uz9JDbQ6n41S",
+    "permissions": ["lecture", "ecriture", "modification"]
+  },
+  {
+    "id": 5,
+    "username": "pasca",
+    "name": "PASCALINE BESSAN",
+    "role": "user",
+    "password": "$2b$10$6uRA9GPNkdF4k9N0wtftbOPE/zRt/teA64zCyiUnHp0raWKViRikS",
+    "permissions": ["lecture"]
+  }
+]
