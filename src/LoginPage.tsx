@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Monitor, Lock, User, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Monitor, Lock, User, Eye, EyeOff } from 'lucide-react';
 
 interface LoginUser {
   id: number;
@@ -16,11 +16,6 @@ interface LoginPageProps {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
-const roleLabels: Record<string, { label: string; color: string }> = {
-  admin: { label: 'Administrateur', color: 'bg-red-100 text-red-700' },
-  technicien: { label: 'Technicien', color: 'bg-blue-100 text-blue-700' },
-  user: { label: 'Utilisateur', color: 'bg-gray-100 text-gray-700' }
-};
 
 const LoginPage = ({ onLogin }: LoginPageProps) => {
   const [username, setUsername] = useState('');
@@ -147,45 +142,6 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             </button>
           </form>
 
-          {/* Comptes de démonstration */}
-          <div className="mt-6 pt-6 border-t border-gray-100">
-            <p className="text-xs text-gray-500 font-medium mb-3 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Comptes disponibles
-            </p>
-            <div className="space-y-2">
-              {[
-                { username: 'admin', password: 'admin2024', role: 'admin', desc: 'Accès complet (CRUD)' },
-                { username: 'technicien', password: 'tech2024', role: 'technicien', desc: 'Lecture seule' },
-                { username: 'utilisateur', password: 'user2024', role: 'user', desc: 'Lecture seule' }
-              ].map((account) => {
-                const roleInfo = roleLabels[account.role] ?? { label: account.role, color: 'bg-gray-100 text-gray-700' };
-                return (
-                  <button
-                    key={account.username}
-                    type="button"
-                    onClick={() => {
-                      setUsername(account.username);
-                      setPassword(account.password);
-                      setError(null);
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition text-left"
-                  >
-                    <div>
-                      <span className="text-sm font-mono font-medium text-gray-800">{account.username}</span>
-                      <span className="text-xs text-gray-400 ml-2">/ {account.password}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400">{account.desc}</span>
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${roleInfo.color}`}>
-                        {roleInfo.label}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
       </div>
     </div>
