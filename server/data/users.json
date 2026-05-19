@@ -54,5 +54,12 @@
     "permissions": [
       "lecture"
     ]
+  },
+  {
+    "id": 6,
+    "username": "piteur",
+    "name": "PITEUR AFANOU",
+    "role": "user",
+    "password": "$2b$10$pizehq3FNj81FcA0k39cM.tX.5.sxN5H67HIcmjyAbAtMOa9WsdLq"
   }
 ]
