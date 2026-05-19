@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -522,6 +522,88 @@ app.delete('/api/equipments/:id', authenticate, requirePermission('modification'
   } catch (err) {
     handleError(err, res, 'Erreur lors de la suppression.');
   }
+}));
+
+// ─── Transfer ────────────────────────────────────────────────────────────────
+
+app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+
+  const { toLocation, toDepartment, reason, technicianName, notes } = req.body;
+  if (!toLocation || !toDepartment) {
+    return res.status(400).json({ message: 'Nouvelle localisation et département requis.' });
+  }
+
+  const { rows: current } = await query('SELECT * FROM equipments WHERE id=$1', [id]);
+  if (!current[0]) return res.status(404).json({ message: 'Équipement introuvable.' });
+
+  const old = rowToEquipment(current[0]);
+  const { rows } = await query(
+    'UPDATE equipments SET location=$1, department=$2 WHERE id=$3 RETURNING *',
+    [toLocation, toDepartment, id]
+  );
+  const updated = rowToEquipment(rows[0]);
+  const ip = getClientIp(req);
+
+  await logEquipmentEvent({
+    equipmentId: id, equipmentName: old.name, equipmentType: old.type,
+    department: toDepartment, action: 'Transfert',
+    details: `Transféré de "${old.location}" (${old.department}) → "${toLocation}" (${toDepartment}). Raison: ${reason || 'Non précisée'}${notes ? '. Notes: ' + notes : ''}.`,
+    changes: [
+      { field: 'location', from: old.location, to: toLocation },
+      { field: 'department', from: old.department, to: toDepartment },
+    ],
+    technician: technicianName || req.user.name,
+    userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+  });
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'Transfert équipement', `"${old.name}" transféré vers "${toLocation}"`, ip);
+
+  res.json(updated);
+}));
+
+// ─── Documents ────────────────────────────────────────────────────────────────
+
+app.post('/api/equipments/:id/documents', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+
+  const { filename, fileType, fileSize, fileData, description } = req.body;
+  if (!filename || !fileData) return res.status(400).json({ message: 'filename et fileData requis.' });
+  if (fileData.length > 4_200_000) return res.status(400).json({ message: 'Fichier trop volumineux (max 3 Mo).' });
+
+  const doc = await addDocument({
+    equipmentId: id, filename, fileType: fileType || '', fileSize: fileSize || 0,
+    fileData, description: description || '', uploadedBy: req.user.name
+  });
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'Ajout document', `"${filename}" ajouté à l'équipement #${id}`, getClientIp(req));
+  res.status(201).json(doc);
+}));
+
+app.get('/api/equipments/:id/documents', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+  res.json(await getDocuments(id));
+}));
+
+app.get('/api/documents/:id/download', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid document ID' });
+  const doc = await getDocumentData(id);
+  if (!doc) return res.status(404).json({ message: 'Document introuvable.' });
+  res.json({ filename: doc.filename, fileType: doc.file_type, fileData: doc.file_data });
+}));
+
+app.delete('/api/documents/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid document ID' });
+  const deleted = await deleteDocument(id);
+  if (!deleted) return res.status(404).json({ message: 'Document introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'Suppression document', `"${deleted.filename}" supprimé`, getClientIp(req));
+  res.status(204).send();
 }));
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

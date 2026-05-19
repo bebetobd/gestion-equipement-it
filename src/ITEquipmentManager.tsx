@@ -1,28 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Plus,
-  Search,
-  Edit,
-  Trash2,
-  Monitor,
-  Wifi,
-  Server,
-  Printer,
-  User,
-  Users,
-  Calendar,
-  MapPin,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Info,
-  Clock,
-  ShieldCheck,
-  Download,
-  ChevronDown,
-  RefreshCcw,
-  LogOut,
-  Activity
+  Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
+  User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
+  XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
+  RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -73,6 +54,25 @@ interface Equipment {
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
+
+interface EquipmentDoc {
+  id: number;
+  equipmentId: number;
+  filename: string;
+  fileType: string;
+  fileSize: number;
+  description: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+interface TransferForm {
+  toLocation: string;
+  toDepartment: string;
+  reason: string;
+  technicianName: string;
+  notes: string;
+}
 
 const defaultFormData: EquipmentFormData = {
   name: '',
@@ -281,6 +281,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Transfer
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<Equipment | null>(null);
+  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', reason: 'Réorganisation', technicianName: '', notes: '' });
+  const [transferLoading, setTransferLoading] = useState(false);
+
+  // Documents
+  const [detailsTab, setDetailsTab] = useState<'info' | 'transfers' | 'documents'>('info');
+  const [equipmentDocs, setEquipmentDocs] = useState<EquipmentDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [transferHistory, setTransferHistory] = useState<any[]>([]);
+  const [transfersLoading, setTransfersLoading] = useState(false);
+  const [newEquipDocs, setNewEquipDocs] = useState<{ file: File; description: string }[]>([]);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
@@ -697,6 +712,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     }
 
     await handleSaveEquipment(formData);
+
+    // Upload documents for new equipment
+    if (editingId === null && newEquipDocs.length > 0) {
+      const latestEquip = equipments[equipments.length - 1];
+      if (latestEquip) {
+        setUploadingDocs(true);
+        for (const { file, description } of newEquipDocs) {
+          await handleDocumentUpload(latestEquip.id, file, description);
+        }
+        setUploadingDocs(false);
+      }
+      setNewEquipDocs([]);
+    }
+
     setShowForm(false);
     resetForm();
   };
@@ -825,8 +854,123 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowExportMenu(false);
   };
 
+  // ─── Transfer ───────────────────────────────────────────────────────────────
+
+  const openTransferModal = (equipment: Equipment) => {
+    setTransferTarget(equipment);
+    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, reason: 'Réorganisation', technicianName: '', notes: '' });
+    setShowTransferModal(true);
+  };
+
+  const handleTransfer = async () => {
+    if (!transferTarget) return;
+    if (!transferForm.toLocation.trim() || !transferForm.toDepartment.trim()) {
+      alert('Localisation et département requis.');
+      return;
+    }
+    setTransferLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/${transferTarget.id}/transfer`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(transferForm),
+      });
+      if (response.status === 401) { handleUnauthorized(); return; }
+      if (!response.ok) throw new Error('Erreur transfert');
+      const updated = await response.json();
+      setEquipments((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      if (selectedEquipment?.id === updated.id) setSelectedEquipment(updated);
+      setShowTransferModal(false);
+    } catch {
+      alert('Impossible d\'effectuer le transfert.');
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  // ─── Documents ──────────────────────────────────────────────────────────────
+
+  const fetchDocuments = async (equipmentId: number) => {
+    setDocsLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/${equipmentId}/documents`, { headers: authHeaders() });
+      if (r.ok) setEquipmentDocs(await r.json());
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const fetchTransferHistory = async (equipmentId: number) => {
+    setTransfersLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/reports/equipment/${equipmentId}`, { headers: authHeaders() });
+      if (r.ok) {
+        const all = await r.json();
+        setTransferHistory(all.filter((ev: any) => ev.action === 'Transfert'));
+      }
+    } finally {
+      setTransfersLoading(false);
+    }
+  };
+
+  const handleDocumentUpload = async (equipmentId: number, file: File, description: string) => {
+    return new Promise<EquipmentDoc | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const fileData = (reader.result as string).split(',')[1];
+        try {
+          const r = await fetch(`${API_BASE}/${equipmentId}/documents`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ filename: file.name, fileType: file.type, fileSize: file.size, fileData, description }),
+          });
+          if (r.ok) resolve(await r.json());
+          else resolve(null);
+        } catch { resolve(null); }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleDeleteDocument = async (docId: number) => {
+    if (!window.confirm('Supprimer ce document ?')) return;
+    const r = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: 'DELETE', headers: authHeaders() });
+    if (r.ok || r.status === 204) {
+      setEquipmentDocs((prev) => prev.filter((d) => d.id !== docId));
+    }
+  };
+
+  const downloadDocument = async (docId: number) => {
+    const r = await fetch(`${API_BASE_URL}/api/documents/${docId}/download`, { headers: authHeaders() });
+    if (!r.ok) return;
+    const { filename, fileType, fileData } = await r.json();
+    const link = document.createElement('a');
+    link.href = `data:${fileType};base64,${fileData}`;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleNewEquipDocAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const valid = files.filter((f) => f.size <= 3 * 1024 * 1024);
+    if (valid.length < files.length) alert('Certains fichiers dépassent 3 Mo et ont été ignorés.');
+    setNewEquipDocs((prev) => [...prev, ...valid.map((f) => ({ file: f, description: '' }))]);
+    e.target.value = '';
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} o`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  };
+
   const openDetailsModal = (equipment: Equipment) => {
     setSelectedEquipment(equipment);
+    setDetailsTab('info');
+    setEquipmentDocs([]);
+    setTransferHistory([]);
     setShowDetailsModal(true);
   };
 
@@ -1140,10 +1284,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
+                          {canModify && (
+                            <button
+                              onClick={() => openTransferModal(equipment)}
+                              className="text-purple-600 hover:text-purple-900"
+                              title="Transférer"
+                            >
+                              <ArrowRightLeft className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => openDetailsModal(equipment)}
                             className="text-gray-600 hover:text-gray-900"
-                            title="Voir détails"
+                            title="Voir détails / Documents"
                           >
                             <Info className="w-4 h-4" />
                           </button>
@@ -1358,13 +1511,45 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   )}
                 </div>
 
+                {/* Documents à l'achat (nouveau équipement seulement) */}
+                {editingId === null && (
+                  <div className="border-t pt-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm font-medium text-gray-700">Documents d'achat (optionnel)</span>
+                      <span className="text-xs text-gray-400">PDF, images — max 3 Mo chacun</span>
+                    </div>
+                    <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                      <Upload className="w-4 h-4" />
+                      Ajouter des fichiers
+                      <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleNewEquipDocAdd} />
+                    </label>
+                    {newEquipDocs.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {newEquipDocs.map((d, i) => (
+                          <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                            <File className="w-4 h-4 text-gray-400 shrink-0" />
+                            <span className="text-xs text-gray-700 truncate flex-1">{d.file.name}</span>
+                            <span className="text-xs text-gray-400">{formatFileSize(d.file.size)}</span>
+                            <input
+                              type="text"
+                              placeholder="Description…"
+                              value={d.description}
+                              onChange={(e) => setNewEquipDocs((prev) => prev.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                              className="text-xs border border-gray-200 rounded px-2 py-1 w-36"
+                            />
+                            <button onClick={() => setNewEquipDocs((prev) => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-3 pt-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowForm(false);
-                      resetForm();
-                    }}
+                    onClick={() => { setShowForm(false); resetForm(); setNewEquipDocs([]); }}
                     className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >
                     Annuler
@@ -1372,9 +1557,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <button
                     type="button"
                     onClick={handleSubmit}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    disabled={uploadingDocs}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
                   >
-                    {editingId !== null ? 'Modifier' : 'Ajouter'}
+                    {uploadingDocs ? 'Upload…' : editingId !== null ? 'Modifier' : 'Ajouter'}
                   </button>
                 </div>
               </div>
@@ -1383,119 +1569,223 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         )}
 
         {showDetailsModal && selectedEquipment && (
-          <div
-            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
-            onClick={() => setShowDetailsModal(false)}
-          >
-            <div
-              className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold">Détails de l'équipement</h3>
-                <button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="text-gray-500 hover:text-gray-900"
-                  aria-label="Fermer"
-                >
-                  ✕
-                </button>
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">{selectedEquipment.name}</h3>
+                  <p className="text-xs text-gray-500">{selectedEquipment.brand} {selectedEquipment.model} · {selectedEquipment.serialNumber}</p>
+                </div>
+                <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
               </div>
 
-              <div className="space-y-3 text-sm text-gray-700">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Nom :</span>
-                  <span>{selectedEquipment.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Type :</span>
-                  <span>{equipmentTypes.find((t) => t.value === selectedEquipment.type)?.label}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Marque :</span>
-                  <span>{selectedEquipment.brand}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Modèle :</span>
-                  <span>{selectedEquipment.model}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">N° de série :</span>
-                  <span>{selectedEquipment.serialNumber}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">IP :</span>
-                  <span>{selectedEquipment.ipAddress || 'N/A'}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Localisation :</span>
-                  <span>{selectedEquipment.location}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Département :</span>
-                  <span>{selectedEquipment.department}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Statut :</span>
-                  <span className={statusColors[selectedEquipment.status]}>{selectedEquipment.status}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Achat :</span>
-                  <span>{selectedEquipment.purchaseDate || 'N/A'}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Garantie :</span>
-                  <span>{selectedEquipment.warranty || 'N/A'}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">Dernière maintenance :</span>
-                  <span>{selectedEquipment.lastMaintenance || 'N/A'}</span>
-                </div>
-                <div className="border-t pt-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <User className="w-4 h-4 text-gray-400" />
-                    <span className="font-semibold">Technicien :</span>
-                    <span>{selectedEquipment.technicianName || 'Non renseigné'}</span>
-                  </div>
-                  {selectedEquipment.visitDate && (
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-gray-400" />
-                      <span className="font-semibold">Date de visite :</span>
-                      <span>
-                        {new Date(selectedEquipment.visitDate).toLocaleDateString('fr-FR', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  {selectedEquipment.interventionDetails && (
-                    <div className="mt-3 p-3 rounded-lg bg-gray-50 text-gray-700">
-                      <div className="flex items-center gap-2 mb-2">
-                        <AlertTriangle className="w-4 h-4 text-gray-400" />
-                        <span className="font-semibold">Intervention :</span>
+              {/* Tabs */}
+              <div className="flex border-b px-6">
+                {([['info', 'Informations', Info], ['transfers', 'Transferts', ArrowRightLeft], ['documents', 'Documents', FileText]] as const).map(([tab, label, Icon]) => (
+                  <button key={tab} onClick={() => {
+                    setDetailsTab(tab);
+                    if (tab === 'documents' && equipmentDocs.length === 0) fetchDocuments(selectedEquipment.id);
+                    if (tab === 'transfers' && transferHistory.length === 0) fetchTransferHistory(selectedEquipment.id);
+                  }}
+                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition ${detailsTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                    <Icon className="w-4 h-4" />{label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+
+                {/* ── Infos ── */}
+                {detailsTab === 'info' && (
+                  <div className="space-y-2 text-sm text-gray-700">
+                    {[
+                      ['Type', equipmentTypes.find((t) => t.value === selectedEquipment.type)?.label],
+                      ['Localisation', selectedEquipment.location],
+                      ['Département', selectedEquipment.department],
+                      ['Statut', selectedEquipment.status],
+                      ['Adresse IP', selectedEquipment.ipAddress || 'N/A'],
+                      ['N° de série', selectedEquipment.serialNumber],
+                      ['Date d\'achat', selectedEquipment.purchaseDate || 'N/A'],
+                      ['Garantie', selectedEquipment.warranty || 'N/A'],
+                      ['Dernière maintenance', selectedEquipment.lastMaintenance || 'N/A'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex gap-2">
+                        <span className="font-semibold w-44 shrink-0 text-gray-600">{label}</span>
+                        <span>{value}</span>
                       </div>
-                      <p>{selectedEquipment.interventionDetails}</p>
+                    ))}
+                    {selectedEquipment.visited && (
+                      <div className="border-t pt-3 mt-3 space-y-1">
+                        <div className="flex gap-2"><span className="font-semibold w-44 shrink-0 text-gray-600">Technicien</span><span>{selectedEquipment.technicianName}</span></div>
+                        {selectedEquipment.visitDate && <div className="flex gap-2"><span className="font-semibold w-44 shrink-0 text-gray-600">Date visite</span><span>{new Date(selectedEquipment.visitDate).toLocaleDateString('fr-FR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' })}</span></div>}
+                        {selectedEquipment.interventionDetails && <div className="mt-2 p-3 bg-gray-50 rounded-lg"><p className="text-xs font-semibold text-gray-500 mb-1">Intervention</p><p>{selectedEquipment.interventionDetails}</p></div>}
+                      </div>
+                    )}
+                    {canModify && (
+                      <div className="pt-3 border-t">
+                        <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm text-white hover:bg-purple-700">
+                          <ArrowRightLeft className="w-4 h-4" /> Transférer cet équipement
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Transferts ── */}
+                {detailsTab === 'transfers' && (
+                  <div>
+                    {transfersLoading ? <p className="text-center py-10 text-gray-400">Chargement…</p> : transferHistory.length === 0 ? (
+                      <div className="text-center py-10 text-gray-400">
+                        <ArrowRightLeft className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                        <p>Aucun transfert enregistré.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {transferHistory.map((ev) => (
+                          <div key={ev.id} className="flex gap-3 rounded-lg border border-purple-100 bg-purple-50 p-3">
+                            <ArrowRightLeft className="w-4 h-4 text-purple-500 shrink-0 mt-0.5" />
+                            <div className="text-sm">
+                              <p className="font-medium text-gray-800">{ev.details}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {new Date(ev.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                                {ev.technician && ` · Technicien : ${ev.technician}`}
+                                {` · Par ${ev.userName}`}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Documents ── */}
+                {detailsTab === 'documents' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-sm text-gray-500">{equipmentDocs.length} document(s)</p>
+                      <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">
+                        <Upload className="w-4 h-4" /> Ajouter
+                        <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={async (e) => {
+                          const files = Array.from(e.target.files || []);
+                          for (const f of files) {
+                            if (f.size > 3 * 1024 * 1024) { alert(`${f.name} dépasse 3 Mo.`); continue; }
+                            const doc = await handleDocumentUpload(selectedEquipment.id, f, '');
+                            if (doc) setEquipmentDocs((prev) => [...prev, doc]);
+                          }
+                          e.target.value = '';
+                        }} />
+                      </label>
                     </div>
-                  )}
-                </div>
+                    {docsLoading ? <p className="text-center py-10 text-gray-400">Chargement…</p> : equipmentDocs.length === 0 ? (
+                      <div className="text-center py-10 text-gray-400">
+                        <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                        <p>Aucun document attaché.</p>
+                        <p className="text-xs mt-1">Ajoutez des reçus, factures ou bons de livraison.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {equipmentDocs.map((doc) => (
+                          <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                            <File className="w-5 h-5 text-blue-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-800 truncate">{doc.filename}</p>
+                              <p className="text-xs text-gray-500">{formatFileSize(doc.fileSize)} · {doc.uploadedBy} · {new Date(doc.uploadedAt).toLocaleDateString('fr-FR')}</p>
+                              {doc.description && <p className="text-xs text-gray-400 italic">{doc.description}</p>}
+                            </div>
+                            <button onClick={() => downloadDocument(doc.id)} className="text-blue-600 hover:text-blue-800 p-1" title="Télécharger">
+                              <Download className="w-4 h-4" />
+                            </button>
+                            {canModify && (
+                              <button onClick={() => handleDeleteDocument(doc.id)} className="text-red-400 hover:text-red-600 p-1" title="Supprimer">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="flex justify-end mt-6">
-                <button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                >
-                  Fermer
-                </button>
+              {/* Footer */}
+              <div className="flex justify-end px-6 py-4 border-t">
+                <button onClick={() => setShowDetailsModal(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">Fermer</button>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* ── Transfer modal ───────────────────────────────────────────────── */}
+      {showTransferModal && transferTarget && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowTransferModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-5">
+              <ArrowRightLeft className="w-5 h-5 text-purple-600" />
+              <h3 className="text-lg font-bold text-gray-900">Transfert d'équipement</h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              <span className="font-medium text-gray-700">{transferTarget.name}</span> — actuellement à <span className="font-medium">{transferTarget.location}</span> ({transferTarget.department})
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nouvelle localisation *</label>
+                <input type="text" value={transferForm.toLocation}
+                  onChange={(e) => setTransferForm({ ...transferForm, toLocation: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  placeholder="Ex: Bureau 301, Salle serveurs…" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nouveau département *</label>
+                <input type="text" value={transferForm.toDepartment}
+                  onChange={(e) => setTransferForm({ ...transferForm, toDepartment: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  placeholder="Ex: Comptabilité, RH…" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Raison du transfert</label>
+                <select value={transferForm.reason}
+                  onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm">
+                  <option>Réorganisation</option>
+                  <option>Maintenance</option>
+                  <option>Demande du service</option>
+                  <option>Remplacement</option>
+                  <option>Autre</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
+                <input type="text" value={transferForm.technicianName}
+                  onChange={(e) => setTransferForm({ ...transferForm, technicianName: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  placeholder="Nom du technicien" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optionnel)</label>
+                <textarea value={transferForm.notes}
+                  onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  placeholder="Informations complémentaires…" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
+              <button onClick={handleTransfer} disabled={transferLoading}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-60 flex items-center gap-2">
+                {transferLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Reports modal ────────────────────────────────────────────────── */}
       {showReportsModal && (

@@ -140,6 +140,24 @@ async function initDB() {
       ON equipment_events(department)
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS equipment_documents (
+      id           SERIAL PRIMARY KEY,
+      equipment_id INTEGER NOT NULL,
+      filename     VARCHAR(500) NOT NULL,
+      file_type    VARCHAR(100) NOT NULL DEFAULT '',
+      file_size    INTEGER NOT NULL DEFAULT 0,
+      file_data    TEXT NOT NULL,
+      description  TEXT NOT NULL DEFAULT '',
+      uploaded_by  VARCHAR(200) NOT NULL DEFAULT '',
+      uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_equipment_documents_equipment_id
+      ON equipment_documents(equipment_id)
+  `);
+
   initialized = true;
 }
 
@@ -204,6 +222,58 @@ export async function getEventsByDepartment() {
     ORDER BY total_events DESC
   `);
   return rows;
+}
+
+export async function addDocument({ equipmentId, filename, fileType, fileSize, fileData, description, uploadedBy }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `INSERT INTO equipment_documents (equipment_id, filename, file_type, file_size, file_data, description, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING id, equipment_id, filename, file_type, file_size, description, uploaded_by, uploaded_at`,
+    [equipmentId, filename, fileType || '', fileSize || 0, fileData, description || '', uploadedBy || '']
+  );
+  return rowToDoc(rows[0]);
+}
+
+export async function getDocuments(equipmentId) {
+  await initDB();
+  const { rows } = await pool.query(
+    `SELECT id, equipment_id, filename, file_type, file_size, description, uploaded_by, uploaded_at
+     FROM equipment_documents WHERE equipment_id = $1 ORDER BY uploaded_at ASC`,
+    [equipmentId]
+  );
+  return rows.map(rowToDoc);
+}
+
+export async function getDocumentData(id) {
+  await initDB();
+  const { rows } = await pool.query(
+    'SELECT id, filename, file_type, file_data FROM equipment_documents WHERE id = $1',
+    [id]
+  );
+  return rows[0] || null;
+}
+
+export async function deleteDocument(id) {
+  await initDB();
+  const { rows } = await pool.query(
+    'DELETE FROM equipment_documents WHERE id = $1 RETURNING id, filename',
+    [id]
+  );
+  return rows[0] || null;
+}
+
+function rowToDoc(row) {
+  return {
+    id: row.id,
+    equipmentId: row.equipment_id,
+    filename: row.filename,
+    fileType: row.file_type,
+    fileSize: row.file_size,
+    description: row.description,
+    uploadedBy: row.uploaded_by,
+    uploadedAt: row.uploaded_at,
+  };
 }
 
 function rowToEvent(row) {
