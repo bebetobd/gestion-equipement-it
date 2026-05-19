@@ -57,6 +57,9 @@ async function initDB() {
     )
   `);
 
+  // Migration: add replaced_by_id if missing
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS replaced_by_id INTEGER DEFAULT NULL`);
+
   // Seed users from JSON if table is empty
   const { rows: uCount } = await pool.query('SELECT COUNT(*) FROM users');
   if (parseInt(uCount[0].count, 10) === 0) {
@@ -418,6 +421,23 @@ export function rowToEquipment(row) {
     visited: row.visited,
     technicianName: row.technician_name,
     visitDate: row.visit_date,
-    interventionDetails: row.intervention_details
+    interventionDetails: row.intervention_details,
+    replacedById: row.replaced_by_id ?? null,
   };
+}
+
+export async function getTransferEvents({ department, from, to, limit = 500 } = {}) {
+  await initDB();
+  const conditions = ["action = 'Transfert'"];
+  const params = [];
+  let i = 1;
+  if (from)       { conditions.push(`created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`created_at <= $${i++}`); params.push(to); }
+  if (department) { conditions.push(`changes::text ILIKE $${i++}`); params.push(`%${department}%`); }
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT * FROM equipment_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length}`,
+    params
+  );
+  return rows.map(rowToEvent);
 }

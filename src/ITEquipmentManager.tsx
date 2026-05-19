@@ -4,7 +4,7 @@ import {
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
   XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
-  Wrench, TriangleAlert, CircleCheck, Flame
+  Wrench, CircleCheck, Archive
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -32,7 +32,7 @@ interface ITEquipmentManagerProps {
 }
 
 type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante';
-type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant';
+type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant' | 'réformé';
 
 interface Equipment {
   id: number;
@@ -52,6 +52,7 @@ interface Equipment {
   technicianName: string;
   visitDate: string;
   interventionDetails: string;
+  replacedById?: number | null;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -95,6 +96,12 @@ interface MaintenanceRecord {
   closedAt: string | null;
   status: MaintenanceStatus;
   priority: MaintenancePriority;
+}
+
+interface ReformForm {
+  reason: string;
+  replacedById: number | null;
+  notes: string;
 }
 
 interface MaintenanceForm {
@@ -150,7 +157,8 @@ const statusColors: Record<EquipmentStatus, string> = {
   actif: 'bg-green-100 text-green-800',
   inactif: 'bg-gray-100 text-gray-800',
   maintenance: 'bg-yellow-100 text-yellow-800',
-  defaillant: 'bg-red-100 text-red-800'
+  defaillant: 'bg-red-100 text-red-800',
+  réformé: 'bg-purple-100 text-purple-800',
 };
 
 const sampleEquipments: Equipment[] = [
@@ -355,6 +363,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
   const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
+
+  // Transfer module
+  const [showTransferModule, setShowTransferModule] = useState(false);
+  const [allTransfers, setAllTransfers] = useState<any[]>([]);
+  const [transferModuleLoading, setTransferModuleLoading] = useState(false);
+  const [transferModuleFilter, setTransferModuleFilter] = useState({ department: '', from: '', to: '' });
+
+  // Reform
+  const [showReformModal, setShowReformModal] = useState(false);
+  const [reformTarget, setReformTarget] = useState<Equipment | null>(null);
+  const [reformForm, setReformForm] = useState<ReformForm>({ reason: '', replacedById: null, notes: '' });
+  const [reformLoading, setReformLoading] = useState(false);
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
@@ -972,6 +992,57 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     }
   };
 
+  const getTransferLocations = (ev: any) => {
+    const changes = Array.isArray(ev.changes) ? ev.changes : [];
+    const loc  = changes.find((c: any) => c.field === 'location');
+    const dept = changes.find((c: any) => c.field === 'department');
+    return {
+      fromLocation: loc?.from  || '',
+      toLocation:   loc?.to    || '',
+      fromDept:     dept?.from || '',
+      toDept:       dept?.to   || ev.department || '',
+    };
+  };
+
+  const fetchAllTransfers = async (filter = transferModuleFilter) => {
+    setTransferModuleLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.department) params.append('department', filter.department);
+      if (filter.from)       params.append('from', filter.from);
+      if (filter.to)         params.append('to', filter.to);
+      const r = await fetch(`${API_BASE_URL}/api/transfers?${params}`, { headers: authHeaders() });
+      if (r.ok) setAllTransfers(await r.json());
+    } catch {}
+    setTransferModuleLoading(false);
+  };
+
+  const openReformModal = (equipment: Equipment) => {
+    setReformTarget(equipment);
+    setReformForm({ reason: '', replacedById: null, notes: '' });
+    setShowReformModal(true);
+  };
+
+  const handleReform = async () => {
+    if (!reformTarget) return;
+    if (!reformForm.reason.trim()) { alert('Veuillez indiquer la raison de la réforme.'); return; }
+    setReformLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/${reformTarget.id}/reform`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(reformForm),
+      });
+      if (!r.ok) throw new Error();
+      const updated = await r.json();
+      setEquipments(prev => prev.map(e => e.id === updated.id ? updated : e));
+      setShowReformModal(false);
+    } catch {
+      alert('Impossible de réformer cet équipement.');
+    }
+    setReformLoading(false);
+  };
+
   const handleDocumentUpload = async (equipmentId: number, file: File, description: string) => {
     return new Promise<EquipmentDoc | null>((resolve) => {
       const reader = new FileReader();
@@ -1192,6 +1263,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     Gérer les utilisateurs
                   </button>
                 </>
+              )}
+              {canModify && (
+                <button
+                  type="button"
+                  onClick={() => { setShowTransferModule(true); fetchAllTransfers(); }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-purple-700 hover:bg-purple-100"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Transferts
+                </button>
               )}
               {canWrite && (
                 <button
@@ -1447,13 +1528,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <Wrench className="w-4 h-4" />
                             </button>
                           )}
-                          {canModify && (
+                          {canModify && equipment.status !== 'réformé' && (
                             <button
                               onClick={() => openTransferModal(equipment)}
                               className="text-purple-600 hover:text-purple-900"
                               title="Transférer"
                             >
                               <ArrowRightLeft className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canModify && equipment.status !== 'réformé' && (
+                            <button
+                              onClick={() => openReformModal(equipment)}
+                              className="text-gray-400 hover:text-gray-700"
+                              title="Réformer (mettre au rebut)"
+                            >
+                              <Archive className="w-4 h-4" />
                             </button>
                           )}
                           <button
@@ -1787,10 +1877,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         {selectedEquipment.interventionDetails && <div className="mt-2 p-3 bg-gray-50 rounded-lg"><p className="text-xs font-semibold text-gray-500 mb-1">Intervention</p><p>{selectedEquipment.interventionDetails}</p></div>}
                       </div>
                     )}
-                    {canModify && (
-                      <div className="pt-3 border-t">
+                    {/* Replacement info */}
+                    {(() => {
+                      const replacedBy = selectedEquipment.replacedById
+                        ? equipments.find(e => e.id === selectedEquipment.replacedById)
+                        : null;
+                      const replaces = equipments.find(e => e.replacedById === selectedEquipment.id);
+                      return (
+                        <>
+                          {selectedEquipment.status === 'réformé' && (
+                            <div className="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-200 text-sm">
+                              <p className="font-semibold text-purple-700 flex items-center gap-1"><Archive className="w-4 h-4" /> Équipement réformé (mis au rebut)</p>
+                              {replacedBy && <p className="text-purple-600 mt-1">Remplacé par : <span className="font-medium">{replacedBy.name}</span></p>}
+                            </div>
+                          )}
+                          {replaces && (
+                            <div className="mt-3 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm">
+                              <p className="text-blue-700">Remplace l'ancien équipement : <span className="font-medium">{replaces.name}</span> <span className="text-blue-400">(réformé)</span></p>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                    {canModify && selectedEquipment.status !== 'réformé' && (
+                      <div className="pt-3 border-t flex gap-2">
                         <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm text-white hover:bg-purple-700">
-                          <ArrowRightLeft className="w-4 h-4" /> Transférer cet équipement
+                          <ArrowRightLeft className="w-4 h-4" /> Transférer
+                        </button>
+                        <button onClick={() => { setSelectedEquipment(null); openReformModal(selectedEquipment); }} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <Archive className="w-4 h-4" /> Réformer
                         </button>
                       </div>
                     )}
@@ -2102,6 +2217,184 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Module Transferts ════════════════════════════════════════════ */}
+      {showTransferModule && (
+        <div className="fixed inset-0 z-40 flex flex-col bg-gray-50">
+          {/* Header */}
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
+                <ArrowRightLeft className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Module Transferts</h2>
+                <p className="text-sm text-gray-500">{allTransfers.length} transfert(s) enregistré(s)</p>
+              </div>
+            </div>
+            <button onClick={() => setShowTransferModule(false)} className="p-2 rounded-lg hover:bg-gray-100">
+              <XCircle className="w-6 h-6 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 shrink-0">
+            {[
+              { label: 'Total transferts', value: allTransfers.length, color: 'purple' },
+              { label: 'Ce mois', value: allTransfers.filter(t => new Date(t.createdAt) > new Date(Date.now() - 30*24*3600*1000)).length, color: 'blue' },
+              { label: 'Services touchés', value: new Set(allTransfers.map(t => t.department)).size, color: 'green' },
+              { label: 'Équipements déplacés', value: new Set(allTransfers.map(t => t.equipmentId)).size, color: 'orange' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+                <div className={`text-2xl font-bold text-${color}-600`}>{value}</div>
+                <div className="text-xs text-gray-500 mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
+            <select
+              value={transferModuleFilter.department}
+              onChange={e => setTransferModuleFilter(f => ({ ...f, department: e.target.value }))}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400"
+            >
+              <option value="">Tous les services</option>
+              {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+            <input type="date" value={transferModuleFilter.from}
+              onChange={e => setTransferModuleFilter(f => ({ ...f, from: e.target.value }))}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400" />
+            <input type="date" value={transferModuleFilter.to}
+              onChange={e => setTransferModuleFilter(f => ({ ...f, to: e.target.value }))}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400" />
+            <button onClick={() => fetchAllTransfers(transferModuleFilter)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2">
+              <Search className="w-4 h-4" /> Filtrer
+            </button>
+            <button onClick={() => { setTransferModuleFilter({ department: '', from: '', to: '' }); fetchAllTransfers({ department: '', from: '', to: '' }); }}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
+              <RefreshCcw className="w-4 h-4" /> Réinitialiser
+            </button>
+          </div>
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto px-6 pb-6">
+            {transferModuleLoading ? (
+              <div className="flex items-center justify-center h-40 text-gray-400">Chargement…</div>
+            ) : allTransfers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-gray-400">
+                <ArrowRightLeft className="w-10 h-10 mb-2 opacity-30" />
+                <p>Aucun transfert trouvé.</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      {['Date', 'Équipement', 'De (lieu · service)', 'Vers (lieu · service)', 'Technicien'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {allTransfers.map(ev => {
+                      const { fromLocation, toLocation, fromDept, toDept } = getTransferLocations(ev);
+                      return (
+                        <tr key={ev.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                            {new Date(ev.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-gray-900">{ev.equipmentName}</span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            <span className="font-medium">{fromLocation}</span>
+                            {fromDept && <span className="text-gray-400"> · {fromDept}</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1 font-medium text-purple-700">
+                              <ArrowRightLeft className="w-3 h-3" /> {toLocation}
+                            </span>
+                            {toDept && <span className="text-gray-400 ml-1">· {toDept}</span>}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">{ev.technician || ev.userName}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modale Réforme ═══════════════════════════════════════════════ */}
+      {showReformModal && reformTarget && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowReformModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+                <Archive className="w-5 h-5 text-gray-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Réformer l'équipement</h3>
+                <p className="text-sm text-gray-500">{reformTarget.name}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+                Cet équipement sera marqué comme <strong>réformé (mis au rebut)</strong> et ne pourra plus être transféré ni mis en maintenance.
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Raison de la réforme *</label>
+                <select value={reformForm.reason} onChange={e => setReformForm(f => ({ ...f, reason: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400">
+                  <option value="">— Sélectionner —</option>
+                  <option>Fin de vie / obsolescence</option>
+                  <option>Défaillance irréparable</option>
+                  <option>Casse / sinistre</option>
+                  <option>Vol / perte</option>
+                  <option>Remplacement planifié</option>
+                  <option>Autre</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Remplacé par un équipement existant</label>
+                <select value={reformForm.replacedById ?? ''} onChange={e => setReformForm(f => ({ ...f, replacedById: e.target.value ? Number(e.target.value) : null }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400">
+                  <option value="">— Aucun remplacement ou non encore enregistré —</option>
+                  {equipments.filter(e => e.id !== reformTarget.id && e.status !== 'réformé').map(e => (
+                    <option key={e.id} value={e.id}>{e.name} — {e.location}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes complémentaires</label>
+                <textarea rows={2} value={reformForm.notes} onChange={e => setReformForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Informations supplémentaires…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400" />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowReformModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
+              <button onClick={handleReform} disabled={reformLoading || !reformForm.reason}
+                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm disabled:opacity-50 flex items-center gap-2">
+                {reformLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                <Archive className="w-4 h-4" /> Confirmer la réforme
+              </button>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -695,6 +695,57 @@ app.delete('/api/maintenance/:id', authenticate, requirePermission('modification
   if (!deleted) return res.status(404).json({ message: 'Ticket introuvable.' });
   logActivity(req.user.id, req.user.username, req.user.name, 'Suppression ticket', `Ticket #${id} supprimé`, getClientIp(req));
   res.status(204).send();
+}));
+
+// ─── Transfers list ───────────────────────────────────────────────────────────
+
+app.get('/api/transfers', authenticate, asyncHandler(async (req, res) => {
+  const { department, from, to } = req.query;
+  const events = await getTransferEvents({
+    from: from || null,
+    to: to ? new Date(new Date(to).getTime() + 86399999).toISOString() : null,
+    department: department || null,
+  });
+  res.json(events);
+}));
+
+// ─── Reform (mise au rebut) ───────────────────────────────────────────────────
+
+app.post('/api/equipments/:id/reform', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+
+  const { reason, replacedById, notes } = req.body;
+  if (!reason?.trim()) return res.status(400).json({ message: 'La raison de la réforme est requise.' });
+
+  const { rows: current } = await query('SELECT * FROM equipments WHERE id=$1', [id]);
+  if (!current[0]) return res.status(404).json({ message: 'Équipement introuvable.' });
+  const old = rowToEquipment(current[0]);
+
+  let replacedByName = '';
+  if (replacedById) {
+    const { rows: newEq } = await query('SELECT name FROM equipments WHERE id=$1', [Number(replacedById)]);
+    if (newEq[0]) replacedByName = newEq[0].name;
+  }
+
+  const { rows } = await query(
+    'UPDATE equipments SET status=$1, replaced_by_id=$2 WHERE id=$3 RETURNING *',
+    ['réformé', replacedById ? Number(replacedById) : null, id]
+  );
+
+  const ip = getClientIp(req);
+  await logEquipmentEvent({
+    equipmentId: id, equipmentName: old.name, equipmentType: old.type,
+    department: old.department, action: 'Réforme',
+    details: `Équipement réformé (mis au rebut). Raison : ${reason}${replacedByName ? `. Remplacé par : ${replacedByName} (#${replacedById})` : ''}${notes ? `. Notes : ${notes}` : ''}.`,
+    changes: [],
+    technician: req.user.name,
+    userId: req.user.id, username: req.user.username, userName: req.user.name, ip,
+  });
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'Réforme équipement', `"${old.name}" réformé`, ip);
+
+  res.json(rowToEquipment(rows[0]));
 }));
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
