@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -408,14 +408,15 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
     );
 
     const created = rowToEquipment(rows[0]);
-    logActivity(
-      req.user.id,
-      req.user.username,
-      req.user.name,
-      'Ajout équipement',
-      `"${created.name}" ajouté (${created.type})`,
-      getClientIp(req)
-    );
+    const ip = getClientIp(req);
+    logActivity(req.user.id, req.user.username, req.user.name, 'Ajout équipement', `"${created.name}" ajouté (${created.type})`, ip);
+    logEquipmentEvent({
+      equipmentId: created.id, equipmentName: created.name, equipmentType: created.type,
+      department: created.department, action: 'Création',
+      details: `Équipement "${created.name}" (${created.brand} ${created.model}) ajouté au parc. Statut: ${created.status}`,
+      technician: created.technicianName,
+      userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+    });
 
     res.status(201).json(created);
   } catch (err) {
@@ -440,6 +441,10 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
 
   const e = req.body;
   try {
+    // Read old state to compute diff
+    const { rows: oldRows } = await query('SELECT * FROM equipments WHERE id=$1', [id]);
+    const old = oldRows[0] ? rowToEquipment(oldRows[0]) : null;
+
     const { rows } = await query(
       `UPDATE equipments SET
          name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
@@ -449,23 +454,11 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
        WHERE id=$17
        RETURNING *`,
       [
-        e.name,
-        e.type,
-        e.brand || '',
-        e.model || '',
-        e.serialNumber || '',
-        e.ipAddress || '',
-        e.location || '',
-        e.department || '',
-        e.status || 'actif',
-        e.purchaseDate || '',
-        e.warranty || '',
-        e.lastMaintenance || '',
-        e.visited || false,
-        e.technicianName || '',
-        e.visitDate || '',
-        e.interventionDetails || '',
-        id
+        e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
+        e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
+        e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
+        e.visited || false, e.technicianName || '', e.visitDate || '',
+        e.interventionDetails || '', id
       ]
     );
 
@@ -474,14 +467,26 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
     }
 
     const updated = rowToEquipment(rows[0]);
-    logActivity(
-      req.user.id,
-      req.user.username,
-      req.user.name,
-      'Modification équipement',
-      `"${updated.name}" modifié`,
-      getClientIp(req)
-    );
+    const ip = getClientIp(req);
+
+    // Compute field-level changes
+    const TRACKED = ['name','type','brand','model','serialNumber','ipAddress','location','department','status','purchaseDate','warranty','lastMaintenance','visited','technicianName','visitDate','interventionDetails'];
+    const changes = old ? TRACKED.filter(f => String(old[f]) !== String(updated[f])).map(f => ({ field: f, from: old[f], to: updated[f] })) : [];
+
+    // Determine action label
+    const isIntervention = old && !old.visited && updated.visited && updated.technicianName;
+    const actionLabel = isIntervention ? 'Intervention' : 'Modification';
+    const details = isIntervention
+      ? `Intervention de "${updated.technicianName}" le ${updated.visitDate || '–'}. ${updated.interventionDetails || ''}`
+      : `"${updated.name}" modifié (${changes.length} champ(s) changé(s))`;
+
+    logActivity(req.user.id, req.user.username, req.user.name, `${actionLabel} équipement`, `"${updated.name}" modifié`, ip);
+    logEquipmentEvent({
+      equipmentId: updated.id, equipmentName: updated.name, equipmentType: updated.type,
+      department: updated.department, action: actionLabel, details, changes,
+      technician: updated.technicianName,
+      userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+    });
 
     res.json(updated);
   } catch (err) {
@@ -505,19 +510,43 @@ app.delete('/api/equipments/:id', authenticate, requirePermission('modification'
       return res.status(404).json({ message: 'Équipement introuvable' });
     }
 
-    logActivity(
-      req.user.id,
-      req.user.username,
-      req.user.name,
-      'Suppression équipement',
-      `"${rows[0].name}" supprimé`,
-      getClientIp(req)
-    );
+    const ip = getClientIp(req);
+    logActivity(req.user.id, req.user.username, req.user.name, 'Suppression équipement', `"${rows[0].name}" supprimé`, ip);
+    logEquipmentEvent({
+      equipmentId: id, equipmentName: rows[0].name, equipmentType: '', department: '',
+      action: 'Suppression', details: `Équipement "${rows[0].name}" supprimé du parc`,
+      userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+    });
 
     res.status(204).send();
   } catch (err) {
     handleError(err, res, 'Erreur lors de la suppression.');
   }
+}));
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+app.get('/api/reports/equipment/:id', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+  const history = await getEquipmentHistory(id);
+  res.json(history);
+}));
+
+app.get('/api/reports/by-date', authenticate, asyncHandler(async (req, res) => {
+  const { from, to, department, type } = req.query;
+  const events = await getEventsByDateRange({
+    from: from || null,
+    to: to ? new Date(new Date(to).getTime() + 86399999).toISOString() : null,
+    department: department || null,
+    type: type || null,
+  });
+  res.json(events);
+}));
+
+app.get('/api/reports/by-department', authenticate, asyncHandler(async (req, res) => {
+  const stats = await getEventsByDepartment();
+  res.json(stats);
 }));
 
 // ─── Health check ─────────────────────────────────────────────────────────────

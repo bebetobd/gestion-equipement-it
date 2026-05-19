@@ -108,12 +108,123 @@ async function initDB() {
     }
   }
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS equipment_events (
+      id              SERIAL PRIMARY KEY,
+      equipment_id    INTEGER,
+      equipment_name  VARCHAR(200) NOT NULL DEFAULT '',
+      equipment_type  VARCHAR(50)  NOT NULL DEFAULT '',
+      department      VARCHAR(200) NOT NULL DEFAULT '',
+      action          VARCHAR(100) NOT NULL,
+      details         TEXT         NOT NULL DEFAULT '',
+      changes         TEXT         NOT NULL DEFAULT '[]',
+      technician      VARCHAR(200) NOT NULL DEFAULT '',
+      user_id         INTEGER,
+      username        VARCHAR(100) NOT NULL DEFAULT '',
+      user_name       VARCHAR(200) NOT NULL DEFAULT '',
+      ip              VARCHAR(50)  NOT NULL DEFAULT '',
+      created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_equipment_events_equipment_id
+      ON equipment_events(equipment_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_equipment_events_created_at
+      ON equipment_events(created_at)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_equipment_events_department
+      ON equipment_events(department)
+  `);
+
   initialized = true;
 }
 
 export async function query(text, params) {
   await initDB();
   return pool.query(text, params);
+}
+
+export async function logEquipmentEvent({ equipmentId, equipmentName, equipmentType, department, action, details, changes = [], technician = '', userId, username, userName, ip }) {
+  await initDB();
+  return pool.query(
+    `INSERT INTO equipment_events
+       (equipment_id, equipment_name, equipment_type, department, action, details, changes, technician, user_id, username, user_name, ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [equipmentId, equipmentName, equipmentType, department, action, details, JSON.stringify(changes), technician, userId, username, userName, ip]
+  );
+}
+
+export async function getEquipmentHistory(equipmentId) {
+  await initDB();
+  const { rows } = await pool.query(
+    `SELECT * FROM equipment_events WHERE equipment_id = $1 ORDER BY created_at ASC`,
+    [equipmentId]
+  );
+  return rows.map(rowToEvent);
+}
+
+export async function getEventsByDateRange({ from, to, department, type, limit = 500 }) {
+  await initDB();
+  const conditions = ['1=1'];
+  const params = [];
+  let i = 1;
+
+  if (from) { conditions.push(`created_at >= $${i++}`); params.push(from); }
+  if (to)   { conditions.push(`created_at <= $${i++}`); params.push(to); }
+  if (department) { conditions.push(`department = $${i++}`); params.push(department); }
+  if (type)       { conditions.push(`equipment_type = $${i++}`); params.push(type); }
+
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT * FROM equipment_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT $${i}`,
+    params
+  );
+  return rows.map(rowToEvent);
+}
+
+export async function getEventsByDepartment() {
+  await initDB();
+  const { rows } = await pool.query(`
+    SELECT
+      department,
+      COUNT(*) AS total_events,
+      COUNT(DISTINCT equipment_id) AS equipment_count,
+      COUNT(*) FILTER (WHERE action = 'Création') AS creations,
+      COUNT(*) FILTER (WHERE action = 'Modification') AS modifications,
+      COUNT(*) FILTER (WHERE action = 'Intervention') AS interventions,
+      COUNT(*) FILTER (WHERE action = 'Suppression') AS suppressions,
+      MAX(created_at) AS last_activity
+    FROM equipment_events
+    WHERE department != ''
+    GROUP BY department
+    ORDER BY total_events DESC
+  `);
+  return rows;
+}
+
+function rowToEvent(row) {
+  let changes = [];
+  try { changes = JSON.parse(row.changes || '[]'); } catch {}
+  return {
+    id: row.id,
+    equipmentId: row.equipment_id,
+    equipmentName: row.equipment_name,
+    equipmentType: row.equipment_type,
+    department: row.department,
+    action: row.action,
+    details: row.details,
+    changes,
+    technician: row.technician,
+    userId: row.user_id,
+    username: row.username,
+    userName: row.user_name,
+    ip: row.ip,
+    createdAt: row.created_at,
+  };
 }
 
 // Maps a PostgreSQL row (snake_case) → Equipment JS object (camelCase)

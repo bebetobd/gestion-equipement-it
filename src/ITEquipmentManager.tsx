@@ -216,6 +216,40 @@ interface ActivityEntry {
   ip: string;
 }
 
+interface FieldChange {
+  field: string;
+  from: string | boolean;
+  to: string | boolean;
+}
+
+interface EquipmentEvent {
+  id: number;
+  equipmentId: number;
+  equipmentName: string;
+  equipmentType: string;
+  department: string;
+  action: string;
+  details: string;
+  changes: FieldChange[];
+  technician: string;
+  userId: number;
+  username: string;
+  userName: string;
+  ip: string;
+  createdAt: string;
+}
+
+interface DeptStat {
+  department: string;
+  total_events: string;
+  equipment_count: string;
+  creations: string;
+  modifications: string;
+  interventions: string;
+  suppressions: string;
+  last_activity: string;
+}
+
 const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) => {
   const isAdmin = currentUser.role === 'admin';
   const roleInfo = roleDisplay[currentUser.role] ?? { label: currentUser.role, classes: 'bg-gray-100 text-gray-700' };
@@ -258,6 +292,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [monitoringCountdown, setMonitoringCountdown] = useState(10);
   const activityUserFilterRef = useRef<number | null>(null);
 
+  // ── Reports state ──────────────────────────────────────────────────────────
+  const [showReportsModal, setShowReportsModal] = useState(false);
+  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department'>('equipment');
+  const [reportEquipmentId, setReportEquipmentId] = useState<number | ''>('');
+  const [reportHistory, setReportHistory] = useState<EquipmentEvent[]>([]);
+  const [reportHistoryLoading, setReportHistoryLoading] = useState(false);
+  const [reportDateFrom, setReportDateFrom] = useState('');
+  const [reportDateTo, setReportDateTo] = useState('');
+  const [reportDeptFilter, setReportDeptFilter] = useState('');
+  const [reportTypeFilter, setReportTypeFilter] = useState('');
+  const [reportDateEvents, setReportDateEvents] = useState<EquipmentEvent[]>([]);
+  const [reportDateLoading, setReportDateLoading] = useState(false);
+  const [reportDeptStats, setReportDeptStats] = useState<DeptStat[]>([]);
+  const [reportDeptLoading, setReportDeptLoading] = useState(false);
+
   // Close export dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -268,6 +317,99 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // ─── Reports helpers ──────────────────────────────────────────────────────
+
+  const fetchReportHistory = async (equipmentId: number) => {
+    setReportHistoryLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reports/equipment/${equipmentId}`, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) setReportHistory(await res.json());
+    } catch {}
+    setReportHistoryLoading(false);
+  };
+
+  const fetchReportByDate = async () => {
+    setReportDateLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (reportDateFrom) params.set('from', reportDateFrom);
+      if (reportDateTo) params.set('to', reportDateTo);
+      if (reportDeptFilter) params.set('department', reportDeptFilter);
+      if (reportTypeFilter) params.set('type', reportTypeFilter);
+      const res = await fetch(`${API_BASE_URL}/api/reports/by-date?${params}`, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) setReportDateEvents(await res.json());
+    } catch {}
+    setReportDateLoading(false);
+  };
+
+  const fetchReportByDepartment = async () => {
+    setReportDeptLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reports/by-department`, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) setReportDeptStats(await res.json());
+    } catch {}
+    setReportDeptLoading(false);
+  };
+
+  const getEventActionStyle = (action: string) => {
+    if (action === 'Création')    return { dot: 'bg-blue-500',   badge: 'bg-blue-100 text-blue-700' };
+    if (action === 'Intervention')return { dot: 'bg-green-500',  badge: 'bg-green-100 text-green-700' };
+    if (action === 'Modification') return { dot: 'bg-yellow-500', badge: 'bg-yellow-100 text-yellow-700' };
+    if (action === 'Suppression')  return { dot: 'bg-red-500',    badge: 'bg-red-100 text-red-700' };
+    return { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-600' };
+  };
+
+  const FIELD_LABELS: Record<string, string> = {
+    name: 'Nom', type: 'Type', brand: 'Marque', model: 'Modèle',
+    serialNumber: 'N° Série', ipAddress: 'Adresse IP', location: 'Emplacement',
+    department: 'Département', status: 'Statut', purchaseDate: 'Date achat',
+    warranty: 'Garantie', lastMaintenance: 'Dernière maintenance',
+    visited: 'Visité', technicianName: 'Technicien',
+    visitDate: 'Date visite', interventionDetails: 'Détails intervention',
+  };
+
+  const exportReportPdf = (title: string, events: EquipmentEvent[]) => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text(title, 14, 14);
+    doc.setFontSize(9);
+    doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${events.length} événement(s)`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [['Date', 'Équipement', 'Type', 'Département', 'Action', 'Détails', 'Technicien', 'Utilisateur']],
+      body: events.map(ev => [
+        new Date(ev.createdAt).toLocaleString('fr-FR'),
+        ev.equipmentName, ev.equipmentType, ev.department,
+        ev.action, ev.details, ev.technician, ev.userName,
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`rapport-${Date.now()}.pdf`);
+  };
+
+  const exportReportExcel = (sheetName: string, events: EquipmentEvent[]) => {
+    const rows = events.map(ev => ({
+      'Date': new Date(ev.createdAt).toLocaleString('fr-FR'),
+      'Équipement': ev.equipmentName,
+      'Type': ev.equipmentType,
+      'Département': ev.department,
+      'Action': ev.action,
+      'Détails': ev.details,
+      'Technicien': ev.technician,
+      'Utilisateur': ev.userName,
+      'IP': ev.ip,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    XLSX.writeFile(wb, `rapport-${Date.now()}.xlsx`);
+  };
 
   // ─── Monitoring helpers ────────────────────────────────────────────────────
 
@@ -749,6 +891,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   >
                     <Activity className="w-4 h-4" />
                     Monitoring
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-indigo-700 hover:bg-indigo-100"
+                  >
+                    <Calendar className="w-4 h-4" />
+                    Rapports
                   </button>
                   <button
                     type="button"
@@ -1346,6 +1496,303 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         )}
       </div>
+
+      {/* ── Reports modal ────────────────────────────────────────────────── */}
+      {showReportsModal && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowReportsModal(false)}>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-indigo-600" />
+                <h2 className="text-lg font-bold text-gray-900">Module Rapports</h2>
+              </div>
+              <button onClick={() => setShowReportsModal(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-gray-100 shrink-0 px-6">
+              {([['equipment','Parcours équipement'],['date','Par date'],['department','Par service']] as const).map(([tab, label]) => (
+                <button key={tab} onClick={() => setReportsTab(tab)}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-6">
+
+              {/* ── Tab 1: Parcours équipement ── */}
+              {reportsTab === 'equipment' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={reportEquipmentId}
+                      onChange={e => {
+                        const id = Number(e.target.value);
+                        setReportEquipmentId(id || '');
+                        setReportHistory([]);
+                        if (id) fetchReportHistory(id);
+                      }}
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    >
+                      <option value="">— Sélectionner un équipement —</option>
+                      {equipments.map(eq => (
+                        <option key={eq.id} value={eq.id}>{eq.name} ({eq.brand} {eq.model})</option>
+                      ))}
+                    </select>
+                    {reportHistory.length > 0 && (
+                      <div className="flex gap-2 ml-auto">
+                        <button onClick={() => exportReportExcel(`Parcours ${reportHistory[0]?.equipmentName}`, reportHistory)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                        </button>
+                        <button onClick={() => exportReportPdf(`Parcours — ${reportHistory[0]?.equipmentName}`, reportHistory)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-red-500" /> PDF
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {reportHistoryLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+
+                  {!reportHistoryLoading && reportEquipmentId && reportHistory.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">Aucun événement enregistré pour cet équipement.</div>
+                  )}
+
+                  {reportHistory.length > 0 && (() => {
+                    const eq = equipments.find(e => e.id === reportEquipmentId);
+                    return (
+                      <div>
+                        {/* Equipment card */}
+                        {eq && (
+                          <div className="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 flex flex-wrap gap-4 text-sm">
+                            <div><span className="font-semibold text-indigo-800">{eq.name}</span> <span className="text-indigo-500">·</span> {eq.brand} {eq.model}</div>
+                            <div className="text-indigo-600">S/N: {eq.serialNumber || '—'}</div>
+                            <div className="text-indigo-600">IP: {eq.ipAddress || '—'}</div>
+                            <div className="text-indigo-600">Dept: {eq.department}</div>
+                            <div className="text-indigo-600">Statut: <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColors[eq.status]}`}>{eq.status}</span></div>
+                            <div className="text-indigo-600">{reportHistory.length} événement(s)</div>
+                          </div>
+                        )}
+
+                        {/* Timeline */}
+                        <div className="relative pl-6 space-y-0">
+                          <div className="absolute left-2 top-0 bottom-0 w-0.5 bg-gray-200" />
+                          {reportHistory.map((ev, i) => {
+                            const style = getEventActionStyle(ev.action);
+                            return (
+                              <div key={ev.id} className="relative pb-6">
+                                <div className={`absolute -left-4 mt-1 w-3 h-3 rounded-full ring-2 ring-white ${style.dot}`} />
+                                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{ev.action}</span>
+                                    <span className="text-xs text-gray-400">{new Date(ev.createdAt).toLocaleString('fr-FR')}</span>
+                                    {ev.technician && <span className="text-xs text-gray-500">Technicien: <strong>{ev.technician}</strong></span>}
+                                    <span className="text-xs text-gray-400 ml-auto">par {ev.userName} ({ev.username})</span>
+                                  </div>
+                                  <p className="text-sm text-gray-700">{ev.details}</p>
+                                  {ev.changes.length > 0 && (
+                                    <div className="mt-3 space-y-1">
+                                      {ev.changes.map((ch, j) => (
+                                        <div key={j} className="flex items-center gap-2 text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                                          <span className="font-medium text-gray-700">{FIELD_LABELS[ch.field] ?? ch.field}</span>
+                                          <span className="line-through text-gray-400">{String(ch.from)}</span>
+                                          <span className="text-gray-400">→</span>
+                                          <span className="font-medium text-gray-800">{String(ch.to)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── Tab 2: Par date ── */}
+              {reportsTab === 'date' && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-end gap-3 bg-gray-50 rounded-xl p-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
+                      <input type="date" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
+                      <input type="date" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Service</label>
+                      <select value={reportDeptFilter} onChange={e => setReportDeptFilter(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="">Tous</option>
+                        {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                      <select value={reportTypeFilter} onChange={e => setReportTypeFilter(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="">Tous</option>
+                        <option value="ordinateur">Ordinateur</option>
+                        <option value="reseau">Réseau</option>
+                        <option value="serveur">Serveur</option>
+                        <option value="imprimante">Imprimante</option>
+                      </select>
+                    </div>
+                    <button onClick={fetchReportByDate}
+                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                      <Search className="w-4 h-4" /> Rechercher
+                    </button>
+                    {reportDateEvents.length > 0 && (
+                      <>
+                        <button onClick={() => exportReportExcel('Rapport par date', reportDateEvents)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                        </button>
+                        <button onClick={() => exportReportPdf('Rapport par date', reportDateEvents)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-red-500" /> PDF
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {reportDateLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+
+                  {!reportDateLoading && reportDateEvents.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">Sélectionnez une période et cliquez sur Rechercher.</div>
+                  )}
+
+                  {reportDateEvents.length > 0 && (
+                    <div>
+                      <p className="text-sm text-gray-500 mb-3">{reportDateEvents.length} événement(s) trouvé(s)</p>
+                      <div className="overflow-x-auto rounded-xl border border-gray-100">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Date</th>
+                              <th className="px-4 py-2 text-left">Équipement</th>
+                              <th className="px-4 py-2 text-left">Département</th>
+                              <th className="px-4 py-2 text-left">Action</th>
+                              <th className="px-4 py-2 text-left">Détails</th>
+                              <th className="px-4 py-2 text-left">Technicien</th>
+                              <th className="px-4 py-2 text-left">Utilisateur</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {reportDateEvents.map(ev => {
+                              const style = getEventActionStyle(ev.action);
+                              return (
+                                <tr key={ev.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-500">{new Date(ev.createdAt).toLocaleString('fr-FR')}</td>
+                                  <td className="px-4 py-2 font-medium text-gray-900">{ev.equipmentName}</td>
+                                  <td className="px-4 py-2 text-gray-500">{ev.department}</td>
+                                  <td className="px-4 py-2"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{ev.action}</span></td>
+                                  <td className="px-4 py-2 text-gray-600 max-w-xs truncate" title={ev.details}>{ev.details}</td>
+                                  <td className="px-4 py-2 text-gray-500">{ev.technician || '—'}</td>
+                                  <td className="px-4 py-2 text-gray-500">{ev.userName}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Tab 3: Par service ── */}
+              {reportsTab === 'department' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Activité globale par service ({reportDeptStats.length} service(s))</p>
+                    <div className="flex gap-2">
+                      <button onClick={fetchReportByDepartment}
+                        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                        <RefreshCcw className="w-3.5 h-3.5" /> Actualiser
+                      </button>
+                      {reportDeptStats.length > 0 && (
+                        <button onClick={() => {
+                          const rows = reportDeptStats.map(d => ({
+                            'Service': d.department,
+                            'Équipements': d.equipment_count,
+                            'Total événements': d.total_events,
+                            'Créations': d.creations,
+                            'Modifications': d.modifications,
+                            'Interventions': d.interventions,
+                            'Suppressions': d.suppressions,
+                            'Dernière activité': d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
+                          }));
+                          const ws = XLSX.utils.json_to_sheet(rows);
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, ws, 'Par service');
+                          XLSX.writeFile(wb, `rapport-services-${Date.now()}.xlsx`);
+                        }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {reportDeptLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+
+                  {!reportDeptLoading && reportDeptStats.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">Aucune donnée — les événements s'enregistrent dès la première action sur un équipement.</div>
+                  )}
+
+                  {reportDeptStats.length > 0 && (
+                    <div className="space-y-3">
+                      {reportDeptStats.map(dept => {
+                        const total = Number(dept.total_events) || 1;
+                        const maxTotal = Math.max(...reportDeptStats.map(d => Number(d.total_events)));
+                        const barWidth = Math.round((Number(dept.total_events) / maxTotal) * 100);
+                        return (
+                          <div key={dept.department} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <MapPin className="w-4 h-4 text-indigo-400" />
+                                <span className="font-semibold text-gray-800">{dept.department}</span>
+                                <span className="text-xs text-gray-400">{dept.equipment_count} équipement(s)</span>
+                              </div>
+                              <span className="text-sm font-bold text-indigo-700">{dept.total_events} événements</span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
+                              <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth}%` }} />
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-xs">
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />{dept.creations} créations</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" />{dept.interventions} interventions</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />{dept.modifications} modifications</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{dept.suppressions} suppressions</span>
+                              {dept.last_activity && <span className="ml-auto text-gray-400">Dernière activité: {new Date(dept.last_activity).toLocaleDateString('fr-FR')}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Monitoring modal ─────────────────────────────────────────────── */}
       {showMonitoringModal && (
