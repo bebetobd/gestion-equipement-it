@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -603,6 +603,97 @@ app.delete('/api/documents/:id', authenticate, requirePermission('modification')
   if (!deleted) return res.status(404).json({ message: 'Document introuvable.' });
   logActivity(req.user.id, req.user.username, req.user.name,
     'Suppression document', `"${deleted.filename}" supprimé`, getClientIp(req));
+  res.status(204).send();
+}));
+
+// ─── Maintenance ─────────────────────────────────────────────────────────────
+
+app.get('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
+  const { status, equipmentId } = req.query;
+  res.json(await getMaintenance({ status, equipmentId: equipmentId ? Number(equipmentId) : null }));
+}));
+
+app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
+  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced } = req.body;
+  if (!failureDesc?.trim()) return res.status(400).json({ message: 'Description de la panne requise.' });
+
+  const record = await createMaintenance({
+    equipmentId: equipmentId || null,
+    failureDesc, diagnosis: diagnosis || '', solution: solution || '',
+    partsReplaced: partsReplaced || '', technician: technician || '',
+    openedBy: req.user.name, priority: priority || 'normale',
+    ...(equipmentId ? {} : {}),
+  });
+
+  // Enrich with equipment info if ID provided
+  if (equipmentId) {
+    const { rows } = await query('SELECT name, type, department FROM equipments WHERE id=$1', [equipmentId]);
+    if (rows[0]) {
+      await query(
+        'UPDATE maintenance_records SET equipment_name=$1, equipment_type=$2, department=$3 WHERE id=$4',
+        [rows[0].name, rows[0].type, rows[0].department, record.id]
+      );
+      record.equipmentName = rows[0].name;
+      record.equipmentType = rows[0].type;
+      record.department = rows[0].department;
+      // Set equipment status to maintenance
+      await query("UPDATE equipments SET status='maintenance' WHERE id=$1", [equipmentId]);
+      await logEquipmentEvent({
+        equipmentId, equipmentName: rows[0].name, equipmentType: rows[0].type,
+        department: rows[0].department, action: 'Maintenance',
+        details: `Ticket de maintenance ouvert — Panne: ${failureDesc}`,
+        technician: technician || '', userId: req.user.id,
+        username: req.user.username, userName: req.user.name, ip: getClientIp(req)
+      });
+    }
+  }
+
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'Ticket maintenance', `Ticket ouvert: ${failureDesc.substring(0, 60)}`, getClientIp(req));
+  res.status(201).json(record);
+}));
+
+app.put('/api/maintenance/:id', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid ID' });
+
+  const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc } = req.body;
+
+  const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority };
+  if (status) {
+    updates.status = status;
+    if (status === 'en_cours' && req.body.startedAt === undefined) updates.startedAt = new Date().toISOString();
+    if (status === 'résolu') {
+      updates.closedAt = new Date().toISOString();
+      // Get ticket to update equipment status
+      const { rows: ticket } = await query('SELECT equipment_id, equipment_name, equipment_type, department FROM maintenance_records WHERE id=$1', [id]);
+      if (ticket[0]?.equipment_id) {
+        await query("UPDATE equipments SET status='actif', last_maintenance=$1 WHERE id=$2",
+          [new Date().toISOString().split('T')[0], ticket[0].equipment_id]);
+        await logEquipmentEvent({
+          equipmentId: ticket[0].equipment_id, equipmentName: ticket[0].equipment_name,
+          equipmentType: ticket[0].equipment_type, department: ticket[0].department,
+          action: 'Maintenance', details: `Ticket #${id} résolu — Solution: ${solution || 'Non précisée'}`,
+          technician: technician || '', userId: req.user.id,
+          username: req.user.username, userName: req.user.name, ip: getClientIp(req)
+        });
+      }
+    }
+  }
+
+  const updated = await updateMaintenance(id, updates);
+  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name,
+    'MAJ maintenance', `Ticket #${id} mis à jour (${status || 'modification'})`, getClientIp(req));
+  res.json(updated);
+}));
+
+app.delete('/api/maintenance/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid ID' });
+  const deleted = await deleteMaintenance(id);
+  if (!deleted) return res.status(404).json({ message: 'Ticket introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Suppression ticket', `Ticket #${id} supprimé`, getClientIp(req));
   res.status(204).send();
 }));
 

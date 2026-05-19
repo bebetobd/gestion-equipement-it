@@ -3,7 +3,8 @@ import {
   Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
   XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
-  RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File
+  RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
+  Wrench, TriangleAlert, CircleCheck, Flame
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -72,6 +73,39 @@ interface TransferForm {
   reason: string;
   technicianName: string;
   notes: string;
+}
+
+type MaintenanceStatus = 'ouvert' | 'en_cours' | 'résolu';
+type MaintenancePriority = 'faible' | 'normale' | 'haute' | 'critique';
+
+interface MaintenanceRecord {
+  id: number;
+  equipmentId: number | null;
+  equipmentName: string;
+  equipmentType: string;
+  department: string;
+  failureDesc: string;
+  diagnosis: string;
+  solution: string;
+  partsReplaced: string;
+  technician: string;
+  openedBy: string;
+  openedAt: string;
+  startedAt: string | null;
+  closedAt: string | null;
+  status: MaintenanceStatus;
+  priority: MaintenancePriority;
+}
+
+interface MaintenanceForm {
+  equipmentId: number | null;
+  failureDesc: string;
+  diagnosis: string;
+  solution: string;
+  partsReplaced: string;
+  technician: string;
+  priority: MaintenancePriority;
+  status: MaintenanceStatus;
 }
 
 const defaultFormData: EquipmentFormData = {
@@ -250,6 +284,20 @@ interface DeptStat {
   last_activity: string;
 }
 
+const Section = ({ icon, title, color, children }: { icon: React.ReactNode; title: string; color: 'red' | 'yellow' | 'green' | 'blue'; children: React.ReactNode }) => {
+  const border = { red: 'border-red-200', yellow: 'border-yellow-200', green: 'border-green-200', blue: 'border-blue-200' }[color];
+  const bg = { red: 'bg-red-50', yellow: 'bg-yellow-50', green: 'bg-green-50', blue: 'bg-blue-50' }[color];
+  return (
+    <div className={`rounded-lg border ${border} ${bg} p-4`}>
+      <div className="flex items-center gap-2 mb-2">
+        {icon}
+        <span className="text-sm font-semibold text-gray-700">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+};
+
 const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) => {
   const isAdmin = currentUser.role === 'admin';
   const roleInfo = roleDisplay[currentUser.role] ?? { label: currentUser.role, classes: 'bg-gray-100 text-gray-700' };
@@ -296,6 +344,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [transfersLoading, setTransfersLoading] = useState(false);
   const [newEquipDocs, setNewEquipDocs] = useState<{ file: File; description: string }[]>([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
+
+  // Maintenance
+  const [showMaintenanceModule, setShowMaintenanceModule] = useState(false);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceFilter, setMaintenanceFilter] = useState<string>('all');
+  const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceRecord | null>(null);
+  const [showMaintenanceForm, setShowMaintenanceForm] = useState(false);
+  const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
+  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
+  const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
@@ -966,6 +1025,86 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
   };
 
+  // ─── Maintenance ────────────────────────────────────────────────────────────
+
+  const fetchMaintenance = async (status = 'all') => {
+    setMaintenanceLoading(true);
+    try {
+      const url = status === 'all' ? '/api/maintenance' : `/api/maintenance?status=${status}`;
+      const r = await fetch(`${API_BASE_URL}${url}`, { headers: authHeaders() });
+      if (r.ok) setMaintenanceRecords(await r.json());
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const openMaintenanceModule = () => {
+    setShowMaintenanceModule(true);
+    setSelectedMaintenance(null);
+    fetchMaintenance(maintenanceFilter);
+  };
+
+  const openSignalerPanne = (equipment: Equipment) => {
+    setMaintForm({ ...defaultMaintenanceForm, equipmentId: equipment.id });
+    setMaintenanceEditId(null);
+    setShowMaintenanceForm(true);
+    setShowMaintenanceModule(true);
+  };
+
+  const handleSaveMaintenance = async () => {
+    if (!maintenanceForm.failureDesc.trim()) { alert('Description de la panne requise.'); return; }
+    try {
+      if (maintenanceEditId !== null) {
+        const r = await fetch(`${API_BASE_URL}/api/maintenance/${maintenanceEditId}`, {
+          method: 'PUT', headers: authHeaders(), body: JSON.stringify(maintenanceForm),
+        });
+        if (r.ok) {
+          const updated = await r.json();
+          setMaintenanceRecords((prev) => prev.map((m) => m.id === maintenanceEditId ? updated : m));
+          setSelectedMaintenance(updated);
+        }
+      } else {
+        const r = await fetch(`${API_BASE_URL}/api/maintenance`, {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(maintenanceForm),
+        });
+        if (r.ok) {
+          const created = await r.json();
+          setMaintenanceRecords((prev) => [created, ...prev]);
+          // Refresh equipment list so status updates
+          fetchEquipments();
+        }
+      }
+      setShowMaintenanceForm(false);
+      setMaintForm(defaultMaintenanceForm);
+      setMaintenanceEditId(null);
+    } catch { alert('Erreur lors de la sauvegarde.'); }
+  };
+
+  const handleDeleteMaintenance = async (id: number) => {
+    if (!window.confirm('Supprimer ce ticket de maintenance ?')) return;
+    const r = await fetch(`${API_BASE_URL}/api/maintenance/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (r.ok || r.status === 204) {
+      setMaintenanceRecords((prev) => prev.filter((m) => m.id !== id));
+      if (selectedMaintenance?.id === id) setSelectedMaintenance(null);
+    }
+  };
+
+  const maintenanceStatusStyle: Record<string, string> = {
+    ouvert:   'bg-red-100 text-red-700',
+    en_cours: 'bg-yellow-100 text-yellow-700',
+    résolu:   'bg-green-100 text-green-700',
+  };
+  const maintenancePriorityStyle: Record<string, string> = {
+    faible:   'bg-gray-100 text-gray-600',
+    normale:  'bg-blue-100 text-blue-700',
+    haute:    'bg-orange-100 text-orange-700',
+    critique: 'bg-red-200 text-red-800 font-bold',
+  };
+
+  const fmtDate = (iso: string | null) => iso
+    ? new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—';
+
   const openDetailsModal = (equipment: Equipment) => {
     setSelectedEquipment(equipment);
     setDetailsTab('info');
@@ -1053,6 +1192,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     Gérer les utilisateurs
                   </button>
                 </>
+              )}
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={openMaintenanceModule}
+                  className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-orange-700 hover:bg-orange-100"
+                >
+                  <Wrench className="w-4 h-4" />
+                  Maintenance
+                  {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
+                    <span className="bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+                      {maintenanceRecords.filter(m => m.status !== 'résolu').length}
+                    </span>
+                  )}
+                </button>
               )}
               <button
                 onClick={onLogout}
@@ -1282,6 +1436,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               title="Supprimer"
                             >
                               <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canWrite && (
+                            <button
+                              onClick={() => openSignalerPanne(equipment)}
+                              className="text-orange-500 hover:text-orange-700"
+                              title="Signaler une panne"
+                            >
+                              <Wrench className="w-4 h-4" />
                             </button>
                           )}
                           {canModify && (
@@ -1720,6 +1883,229 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         )}
       </div>
+
+      {/* ── Maintenance module ───────────────────────────────────────────── */}
+      {showMaintenanceModule && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }}>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl mx-4 flex flex-col" style={{ maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div className="flex items-center gap-3">
+                <Wrench className="w-5 h-5 text-orange-600" />
+                <h2 className="text-lg font-bold text-gray-900">Module Maintenance</h2>
+                <span className="text-sm text-gray-500">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm text-white hover:bg-orange-700">
+                  <Plus className="w-4 h-4" /> Nouveau ticket
+                </button>
+                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="text-gray-400 hover:text-gray-700 text-xl ml-2">✕</button>
+              </div>
+            </div>
+
+            {/* Stats bar */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-3 bg-gray-50 border-b shrink-0">
+              {[
+                { label: 'Ouverts', status: 'ouvert', color: 'text-red-600', bg: 'bg-red-100' },
+                { label: 'En cours', status: 'en_cours', color: 'text-yellow-600', bg: 'bg-yellow-100' },
+                { label: 'Résolus', status: 'résolu', color: 'text-green-600', bg: 'bg-green-100' },
+              ].map(({ label, status, color, bg }) => (
+                <button key={status} onClick={() => { const f = maintenanceFilter === status ? 'all' : status; setMaintenanceFilter(f); fetchMaintenance(f); }}
+                  className={`flex items-center justify-between rounded-lg px-4 py-2 ${maintenanceFilter === status ? bg + ' ring-2 ring-offset-1 ' + color.replace('text', 'ring') : 'bg-white border border-gray-200'} transition`}>
+                  <span className="text-sm font-medium text-gray-700">{label}</span>
+                  <span className={`text-xl font-bold ${color}`}>{maintenanceRecords.filter(m => m.status === status).length}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Body */}
+            <div className="flex flex-1 overflow-hidden">
+
+              {/* List */}
+              <div className={`${selectedMaintenance || showMaintenanceForm ? 'w-2/5 border-r' : 'w-full'} overflow-y-auto`}>
+                {maintenanceLoading ? (
+                  <div className="text-center py-12 text-gray-400">Chargement…</div>
+                ) : maintenanceRecords.length === 0 ? (
+                  <div className="text-center py-16 text-gray-400">
+                    <Wrench className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">Aucun ticket de maintenance</p>
+                    <p className="text-sm mt-1">Cliquez sur "Nouveau ticket" pour en créer un.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    {maintenanceRecords.map(ticket => (
+                      <div key={ticket.id} onClick={() => { setSelectedMaintenance(ticket); setShowMaintenanceForm(false); }}
+                        className={`p-4 cursor-pointer hover:bg-gray-50 transition ${selectedMaintenance?.id === ticket.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`}>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${maintenanceStatusStyle[ticket.status]}`}>
+                              {ticket.status === 'ouvert' ? 'Ouvert' : ticket.status === 'en_cours' ? 'En cours' : 'Résolu'}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${maintenancePriorityStyle[ticket.priority]}`}>
+                              {ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1)}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-400 shrink-0">#{ticket.id}</span>
+                        </div>
+                        <p className="text-sm font-medium text-gray-800 line-clamp-2">{ticket.failureDesc}</p>
+                        {ticket.equipmentName && <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Monitor className="w-3 h-3" />{ticket.equipmentName}</p>}
+                        <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Detail panel */}
+              {selectedMaintenance && !showMaintenanceForm && (
+                <div className="flex-1 overflow-y-auto p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${maintenanceStatusStyle[selectedMaintenance.status]}`}>
+                          {selectedMaintenance.status === 'ouvert' ? 'Ouvert' : selectedMaintenance.status === 'en_cours' ? 'En cours' : 'Résolu'}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${maintenancePriorityStyle[selectedMaintenance.priority]}`}>
+                          {selectedMaintenance.priority}
+                        </span>
+                        <span className="text-xs text-gray-400">Ticket #{selectedMaintenance.id}</span>
+                      </div>
+                      {selectedMaintenance.equipmentName && (
+                        <p className="text-sm text-gray-500 flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />{selectedMaintenance.equipmentName} · {selectedMaintenance.department}</p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      {canWrite && (
+                        <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1">
+                          <Edit className="w-3.5 h-3.5" /> Modifier
+                        </button>
+                      )}
+                      {canModify && (
+                        <button onClick={() => handleDeleteMaintenance(selectedMaintenance.id)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 flex items-center gap-1">
+                          <Trash2 className="w-3.5 h-3.5" /> Supprimer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Timeline */}
+                  <div className="space-y-4">
+                    <Section icon={<AlertTriangle className="w-4 h-4 text-red-500" />} title="Description de la panne" color="red">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedMaintenance.failureDesc || <em className="text-gray-400">Non renseigné</em>}</p>
+                      <p className="text-xs text-gray-400 mt-2">Signalé le {fmtDate(selectedMaintenance.openedAt)} par {selectedMaintenance.openedBy}</p>
+                    </Section>
+
+                    <Section icon={<Search className="w-4 h-4 text-yellow-500" />} title="Diagnostic" color="yellow">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedMaintenance.diagnosis || <em className="text-gray-400">Diagnostic en attente</em>}</p>
+                      {selectedMaintenance.startedAt && <p className="text-xs text-gray-400 mt-2">Débuté le {fmtDate(selectedMaintenance.startedAt)}</p>}
+                    </Section>
+
+                    <Section icon={<CircleCheck className="w-4 h-4 text-green-500" />} title="Solution / Réparation" color="green">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedMaintenance.solution || <em className="text-gray-400">Réparation en attente</em>}</p>
+                      {selectedMaintenance.partsReplaced && <p className="text-xs text-gray-500 mt-1">🔧 Pièces remplacées : {selectedMaintenance.partsReplaced}</p>}
+                      {selectedMaintenance.technician && <p className="text-xs text-gray-500 mt-1">👷 Technicien : {selectedMaintenance.technician}</p>}
+                      {selectedMaintenance.closedAt && <p className="text-xs text-gray-400 mt-2">Résolu le {fmtDate(selectedMaintenance.closedAt)}</p>}
+                    </Section>
+                  </div>
+
+                  {/* Quick status change */}
+                  {canWrite && selectedMaintenance.status !== 'résolu' && (
+                    <div className="mt-4 pt-4 border-t flex gap-2">
+                      {selectedMaintenance.status === 'ouvert' && (
+                        <button onClick={async () => { const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ status: 'en_cours' }) }); if(r.ok) { const u = await r.json(); setMaintenanceRecords(p=>p.map(m=>m.id===u.id?u:m)); setSelectedMaintenance(u); fetchEquipments(); } }}
+                          className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
+                          Démarrer la réparation
+                        </button>
+                      )}
+                      <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu' }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                        className="flex-1 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700">
+                        Marquer comme résolu
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Form panel */}
+              {showMaintenanceForm && (
+                <div className="flex-1 overflow-y-auto p-6">
+                  <h3 className="text-base font-bold text-gray-800 mb-4">{maintenanceEditId ? 'Modifier le ticket' : 'Nouveau ticket de maintenance'}</h3>
+                  <div className="space-y-4">
+                    {!maintenanceEditId && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Équipement concerné</label>
+                        <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                          <option value="">— Sélectionner un équipement —</option>
+                          {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Priorité</label>
+                      <select value={maintenanceForm.priority} onChange={e => setMaintForm(f => ({ ...f, priority: e.target.value as MaintenancePriority }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                        <option value="faible">Faible</option>
+                        <option value="normale">Normale</option>
+                        <option value="haute">Haute</option>
+                        <option value="critique">Critique</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description de la panne *</label>
+                      <textarea rows={3} value={maintenanceForm.failureDesc} onChange={e => setMaintForm(f => ({ ...f, failureDesc: e.target.value }))}
+                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Diagnostic</label>
+                      <textarea rows={3} value={maintenanceForm.diagnosis} onChange={e => setMaintForm(f => ({ ...f, diagnosis: e.target.value }))}
+                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Solution / Réparation effectuée</label>
+                      <textarea rows={3} value={maintenanceForm.solution} onChange={e => setMaintForm(f => ({ ...f, solution: e.target.value }))}
+                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Pièces remplacées</label>
+                      <input type="text" value={maintenanceForm.partsReplaced} onChange={e => setMaintForm(f => ({ ...f, partsReplaced: e.target.value }))}
+                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
+                      <input type="text" value={maintenanceForm.technician} onChange={e => setMaintForm(f => ({ ...f, technician: e.target.value }))}
+                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    {maintenanceEditId && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+                        <select value={maintenanceForm.status} onChange={e => setMaintForm(f => ({ ...f, status: e.target.value as MaintenanceStatus }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                          <option value="ouvert">Ouvert</option>
+                          <option value="en_cours">En cours</option>
+                          <option value="résolu">Résolu</option>
+                        </select>
+                      </div>
+                    )}
+                    <div className="flex gap-3 pt-2">
+                      <button onClick={() => { setShowMaintenanceForm(false); setMaintenanceEditId(null); }}
+                        className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annuler</button>
+                      <button onClick={handleSaveMaintenance}
+                        className="flex-1 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700">
+                        {maintenanceEditId ? 'Enregistrer' : 'Créer le ticket'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Transfer modal ───────────────────────────────────────────────── */}
       {showTransferModal && transferTarget && (

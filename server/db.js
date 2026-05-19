@@ -158,6 +158,33 @@ async function initDB() {
       ON equipment_documents(equipment_id)
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_records (
+      id               SERIAL PRIMARY KEY,
+      equipment_id     INTEGER,
+      equipment_name   VARCHAR(200) NOT NULL DEFAULT '',
+      equipment_type   VARCHAR(50)  NOT NULL DEFAULT '',
+      department       VARCHAR(200) NOT NULL DEFAULT '',
+      failure_desc     TEXT NOT NULL DEFAULT '',
+      diagnosis        TEXT NOT NULL DEFAULT '',
+      solution         TEXT NOT NULL DEFAULT '',
+      parts_replaced   TEXT NOT NULL DEFAULT '',
+      technician       VARCHAR(200) NOT NULL DEFAULT '',
+      opened_by        VARCHAR(200) NOT NULL DEFAULT '',
+      opened_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+      started_at       TIMESTAMPTZ,
+      closed_at        TIMESTAMPTZ,
+      status           VARCHAR(20)  NOT NULL DEFAULT 'ouvert',
+      priority         VARCHAR(20)  NOT NULL DEFAULT 'normale'
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_maintenance_equipment_id ON maintenance_records(equipment_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_records(status)
+  `);
+
   initialized = true;
 }
 
@@ -261,6 +288,81 @@ export async function deleteDocument(id) {
     [id]
   );
   return rows[0] || null;
+}
+
+// ─── Maintenance ─────────────────────────────────────────────────────────────
+
+export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) {
+  await initDB();
+  const conditions = ['1=1'];
+  const params = [];
+  let i = 1;
+  if (status && status !== 'all') { conditions.push(`status = $${i++}`); params.push(status); }
+  if (equipmentId)               { conditions.push(`equipment_id = $${i++}`); params.push(equipmentId); }
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT * FROM maintenance_records WHERE ${conditions.join(' AND ')} ORDER BY opened_at DESC LIMIT $${i}`,
+    params
+  );
+  return rows.map(rowToMaintenance);
+}
+
+export async function createMaintenance(data) {
+  await initDB();
+  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority } = data;
+  const { rows } = await pool.query(
+    `INSERT INTO maintenance_records
+       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     RETURNING *`,
+    [equipmentId, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale']
+  );
+  return rowToMaintenance(rows[0]);
+}
+
+export async function updateMaintenance(id, data) {
+  await initDB();
+  const fields = [];
+  const params = [];
+  let i = 1;
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at' };
+  for (const [key, col] of Object.entries(map)) {
+    if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
+  }
+  if (fields.length === 0) return null;
+  params.push(id);
+  const { rows } = await pool.query(
+    `UPDATE maintenance_records SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+    params
+  );
+  return rows[0] ? rowToMaintenance(rows[0]) : null;
+}
+
+export async function deleteMaintenance(id) {
+  await initDB();
+  const { rows } = await pool.query('DELETE FROM maintenance_records WHERE id=$1 RETURNING id', [id]);
+  return rows[0] || null;
+}
+
+function rowToMaintenance(row) {
+  return {
+    id: row.id,
+    equipmentId: row.equipment_id,
+    equipmentName: row.equipment_name,
+    equipmentType: row.equipment_type,
+    department: row.department,
+    failureDesc: row.failure_desc,
+    diagnosis: row.diagnosis,
+    solution: row.solution,
+    partsReplaced: row.parts_replaced,
+    technician: row.technician,
+    openedBy: row.opened_by,
+    openedAt: row.opened_at,
+    startedAt: row.started_at,
+    closedAt: row.closed_at,
+    status: row.status,
+    priority: row.priority,
+  };
 }
 
 function rowToDoc(row) {
