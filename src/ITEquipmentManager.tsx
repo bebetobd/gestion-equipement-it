@@ -2282,6 +2282,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
               <RefreshCcw className="w-4 h-4" /> Réinitialiser
             </button>
+            {canModify && (
+              <button
+                onClick={() => {
+                  setTransferTarget(null);
+                  setTransferForm({ toLocation: '', toDepartment: '', reason: 'Réorganisation', technicianName: '', notes: '' });
+                  setShowTransferModal(true);
+                }}
+                className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Nouveau transfert
+              </button>
+            )}
           </div>
 
           {/* Table */}
@@ -2401,16 +2413,41 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       )}
 
       {/* ── Transfer modal ───────────────────────────────────────────────── */}
-      {showTransferModal && transferTarget && (
+      {showTransferModal && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowTransferModal(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-5">
               <ArrowRightLeft className="w-5 h-5 text-purple-600" />
               <h3 className="text-lg font-bold text-gray-900">Transfert d'équipement</h3>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
-              <span className="font-medium text-gray-700">{transferTarget.name}</span> — actuellement à <span className="font-medium">{transferTarget.location}</span> ({transferTarget.department})
-            </p>
+
+            {/* Sélecteur d'équipement (quand ouvert depuis le module) */}
+            {!transferTarget ? (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Équipement à transférer *</label>
+                <select
+                  defaultValue=""
+                  onChange={e => {
+                    const eq = equipments.find(x => x.id === Number(e.target.value)) ?? null;
+                    if (eq) {
+                      setTransferTarget(eq);
+                      setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department }));
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 text-sm"
+                >
+                  <option value="" disabled>— Sélectionner un équipement —</option>
+                  {equipments.filter(e => e.status !== 'réformé').map(e => (
+                    <option key={e.id} value={e.id}>{e.name} — {e.location} ({e.department})</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 mb-4">
+                <span className="font-medium text-gray-700">{transferTarget.name}</span> — actuellement à <span className="font-medium">{transferTarget.location}</span> ({transferTarget.department})
+              </p>
+            )}
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nouvelle localisation *</label>
@@ -2456,7 +2493,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
-              <button onClick={handleTransfer} disabled={transferLoading}
+              <button onClick={handleTransfer} disabled={transferLoading || !transferTarget}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-60 flex items-center gap-2">
                 {transferLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
