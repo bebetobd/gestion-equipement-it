@@ -19,10 +19,14 @@ import {
   Clock,
   ShieldCheck,
   Download,
+  ChevronDown,
   RefreshCcw,
   LogOut,
   Activity
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface AuthUser {
   id: number;
@@ -241,6 +245,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [userEditingId, setUserEditingId] = useState<number | null>(null);
   const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'] });
   const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
@@ -251,6 +257,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [monitoringLoading, setMonitoringLoading] = useState(false);
   const [monitoringCountdown, setMonitoringCountdown] = useState(10);
   const activityUserFilterRef = useRef<number | null>(null);
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // ─── Monitoring helpers ────────────────────────────────────────────────────
 
@@ -586,9 +603,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         handleUnauthorized();
         return;
       }
-      if (!response.ok) {
-        throw new Error('Export impossible');
-      }
+      if (!response.ok) throw new Error('Export impossible');
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -601,6 +616,71 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     } catch {
       alert('Impossible d\'exporter les équipements.');
     }
+    setShowExportMenu(false);
+  };
+
+  const EXPORT_COLUMNS = [
+    { key: 'id',                  label: 'ID' },
+    { key: 'name',                label: 'Nom' },
+    { key: 'type',                label: 'Type' },
+    { key: 'brand',               label: 'Marque' },
+    { key: 'model',               label: 'Modèle' },
+    { key: 'serialNumber',        label: 'N° Série' },
+    { key: 'ipAddress',           label: 'Adresse IP' },
+    { key: 'location',            label: 'Emplacement' },
+    { key: 'department',          label: 'Département' },
+    { key: 'status',              label: 'Statut' },
+    { key: 'purchaseDate',        label: 'Date achat' },
+    { key: 'warranty',            label: 'Garantie' },
+    { key: 'lastMaintenance',     label: 'Dernière maintenance' },
+    { key: 'visited',             label: 'Visité' },
+    { key: 'technicianName',      label: 'Technicien' },
+    { key: 'visitDate',           label: 'Date visite' },
+    { key: 'interventionDetails', label: 'Détails intervention' },
+  ] as const;
+
+  const handleExportExcel = () => {
+    const rows = filteredEquipments.map((e) =>
+      Object.fromEntries(
+        EXPORT_COLUMNS.map(({ key, label }) => [label, key === 'visited' ? (e[key] ? 'Oui' : 'Non') : (e[key as keyof Equipment] ?? '')])
+      )
+    );
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Équipements');
+    XLSX.writeFile(wb, 'equipements.xlsx');
+    setShowExportMenu(false);
+  };
+
+  const handleExportPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text('Liste des équipements IT', 14, 14);
+    doc.setFontSize(9);
+    doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${filteredEquipments.length} équipement(s)`, 14, 21);
+
+    autoTable(doc, {
+      startY: 26,
+      head: [['Nom', 'Type', 'Marque / Modèle', 'N° Série', 'IP', 'Emplacement', 'Département', 'Statut', 'Garantie', 'Visité']],
+      body: filteredEquipments.map((e) => [
+        e.name,
+        e.type,
+        `${e.brand} ${e.model}`.trim(),
+        e.serialNumber,
+        e.ipAddress,
+        e.location,
+        e.department,
+        e.status,
+        e.warranty,
+        e.visited ? 'Oui' : 'Non',
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+
+    doc.save('equipements.pdf');
+    setShowExportMenu(false);
   };
 
   const openDetailsModal = (equipment: Equipment) => {
@@ -782,13 +862,41 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <RefreshCcw className="w-4 h-4" />
                 Actualiser
               </button>
-              <button
-                onClick={handleExportCsv}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <Download className="w-4 h-4" />
-                Export CSV
-              </button>
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  onClick={() => setShowExportMenu((v) => !v)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <Download className="w-4 h-4" />
+                  Exporter
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white shadow-lg">
+                    <button
+                      onClick={handleExportCsv}
+                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                    >
+                      <Download className="w-4 h-4 text-gray-500" />
+                      CSV
+                    </button>
+                    <button
+                      onClick={handleExportExcel}
+                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Download className="w-4 h-4 text-green-600" />
+                      Excel (.xlsx)
+                    </button>
+                    <button
+                      onClick={handleExportPdf}
+                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-b-lg"
+                    >
+                      <Download className="w-4 h-4 text-red-500" />
+                      PDF
+                    </button>
+                  </div>
+                )}
+              </div>
               {canWrite && (
                 <button
                   onClick={openNewEquipmentForm}
