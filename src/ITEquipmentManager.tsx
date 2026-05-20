@@ -3935,6 +3935,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 Réinitialiser
               </button>
               {activityEntries.length > 0 && (
+                <>
                 <button
                   onClick={() => {
                     const rows = activityEntries.map(e => ({
@@ -3952,8 +3953,45 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   }}
                   className="ml-auto inline-flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm hover:bg-green-50"
                 >
-                  <Download className="w-4 h-4" /> Exporter Excel
+                  <Download className="w-4 h-4" /> Excel
                 </button>
+                <button
+                  onClick={() => {
+                    const doc = new jsPDF({ orientation: 'landscape' });
+                    const dateStr = new Date().toLocaleDateString('fr-FR');
+                    const filterLabel = [
+                      activityFilter.username ? `Utilisateur : ${activityFilter.username}` : '',
+                      activityFilter.action   ? `Action : ${activityFilter.action}` : '',
+                      activityFilter.dateFrom ? `Du : ${activityFilter.dateFrom}` : '',
+                      activityFilter.dateTo   ? `Au : ${activityFilter.dateTo}` : '',
+                    ].filter(Boolean).join('  |  ');
+                    doc.setFontSize(14);
+                    doc.text("Journal d'activité", 14, 14);
+                    doc.setFontSize(8);
+                    doc.text(`Exporté le ${dateStr} — ${activityEntries.length} entrée(s)${filterLabel ? `  |  ${filterLabel}` : ''}`, 14, 21);
+                    autoTable(doc, {
+                      startY: 26,
+                      head: [['Date / Heure', 'Utilisateur', 'Login', 'Action', 'Détails', 'IP']],
+                      body: activityEntries.map(e => [
+                        new Date(e.createdAt).toLocaleString('fr-FR'),
+                        e.userName,
+                        e.username,
+                        e.action,
+                        e.details || '—',
+                        e.ip || '—',
+                      ]),
+                      styles: { fontSize: 7, cellPadding: 2 },
+                      headStyles: { fillColor: [13, 148, 136] },
+                      alternateRowStyles: { fillColor: [245, 250, 250] },
+                      columnStyles: { 4: { cellWidth: 70 } },
+                    });
+                    doc.save(`journal-activite-${new Date().toISOString().slice(0,10)}.pdf`);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-red-300 text-red-700 rounded-lg text-sm hover:bg-red-50"
+                >
+                  <FileText className="w-4 h-4" /> PDF
+                </button>
+                </>
               )}
             </div>
           </div>
