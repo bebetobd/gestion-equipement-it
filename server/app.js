@@ -452,7 +452,7 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
 
     const created = rowToEquipment(rows[0]);
     const ip = getClientIp(req);
-    logActivity(req.user.id, req.user.username, req.user.name, 'Ajout équipement', `"${created.name}" ajouté (${created.type})`, ip);
+    logActivity(req.user.id, req.user.username, req.user.name, 'Ajout équipement', `"${created.name}" (${created.brand || ''} ${created.model || ''} — ${created.type}) ajouté, statut: ${created.status}`, ip);
     logEquipmentEvent({
       equipmentId: created.id, equipmentName: created.name, equipmentType: created.type,
       department: created.department, action: 'Création',
@@ -519,11 +519,19 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
     // Determine action label
     const isIntervention = old && !old.visited && updated.visited && updated.technicianName;
     const actionLabel = isIntervention ? 'Intervention' : 'Modification';
+    const FIELD_LABELS = {
+      name: 'Nom', type: 'Type', brand: 'Marque', model: 'Modèle', serialNumber: 'N° série',
+      ipAddress: 'IP', location: 'Localisation', department: 'Département', status: 'Statut',
+      purchaseDate: 'Achat', warranty: 'Garantie', lastMaintenance: 'Dernière maint.',
+      visited: 'Visité', technicianName: 'Technicien', visitDate: 'Date visite',
+      interventionDetails: 'Détails intervention'
+    };
+    const changesSummary = changes.map(c => `${FIELD_LABELS[c.field] || c.field}: ${c.from} → ${c.to}`).join(' | ');
     const details = isIntervention
       ? `Intervention de "${updated.technicianName}" le ${updated.visitDate || '–'}. ${updated.interventionDetails || ''}`
-      : `"${updated.name}" modifié (${changes.length} champ(s) changé(s))`;
+      : `"${updated.name}" — ${changesSummary || 'aucun champ modifié'}`;
 
-    logActivity(req.user.id, req.user.username, req.user.name, `${actionLabel} équipement`, `"${updated.name}" modifié`, ip);
+    logActivity(req.user.id, req.user.username, req.user.name, `${actionLabel} équipement`, details, ip);
     logEquipmentEvent({
       equipmentId: updated.id, equipmentName: updated.name, equipmentType: updated.type,
       department: updated.department, action: actionLabel, details, changes,
