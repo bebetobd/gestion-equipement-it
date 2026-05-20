@@ -377,6 +377,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showModulesMenu, setShowModulesMenu] = useState(false);
   const modulesMenuRef = useRef<HTMLDivElement>(null);
+  const [showSiteDropdown, setShowSiteDropdown] = useState(false);
+  const siteDropdownRef = useRef<HTMLDivElement>(null);
 
   // Transfer
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -472,6 +474,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       }
       if (modulesMenuRef.current && !modulesMenuRef.current.contains(e.target as Node)) {
         setShowModulesMenu(false);
+      }
+      if (siteDropdownRef.current && !siteDropdownRef.current.contains(e.target as Node)) {
+        setShowSiteDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -1492,41 +1497,68 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
         {/* ── Sélecteur de sites ── */}
         {(sites.length > 0 || isAdmin) && (
-          <div className="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100">
-              <Globe className="w-4 h-4 text-blue-500" />
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sites</span>
-              {isAdmin && (
-                <button onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
-                  className="ml-auto text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                  <Plus className="w-3 h-3" /> Gérer les sites
-                </button>
+          <div className="flex items-center gap-3 mb-6">
+            {/* Site dropdown */}
+            <div className="relative flex-1 max-w-sm" ref={siteDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowSiteDropdown(v => !v)}
+                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-blue-300 transition-colors"
+              >
+                <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  {selectedSiteId === null ? (
+                    <span className="text-sm text-gray-400">— Sélectionner un site —</span>
+                  ) : (() => {
+                    const s = sites.find(s => s.id === selectedSiteId);
+                    return s ? (
+                      <>
+                        <span className="text-sm font-semibold text-gray-800 block truncate">{s.name}</span>
+                        <span className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {equipments.filter(e => e.siteId === s.id).length} équip.</span>
+                      </>
+                    ) : null;
+                  })()}
+                </div>
+                <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showSiteDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showSiteDropdown && (
+                <div className="absolute left-0 top-full mt-1 w-full min-w-[260px] bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
+                  {sites.map(site => {
+                    const count = equipments.filter(e => e.siteId === site.id).length;
+                    const selected = selectedSiteId === site.id;
+                    return (
+                      <button key={site.id} type="button"
+                        onClick={() => { setSelectedSiteId(site.id); setShowSiteDropdown(false); }}
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                      >
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${selected ? 'bg-blue-500' : 'bg-gray-200'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${selected ? 'text-blue-700' : 'text-gray-800'}`}>{site.name}</p>
+                          <p className="text-xs text-gray-400 flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
+                          </p>
+                        </div>
+                        {selected && <CheckCircle className="w-4 h-4 text-blue-500 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                  {sites.length === 0 && (
+                    <p className="px-4 py-3 text-sm text-gray-400 text-center">Aucun site configuré.</p>
+                  )}
+                </div>
               )}
             </div>
-            <div className="flex items-stretch gap-0 overflow-x-auto">
-              {/* Tous les sites */}
+
+            {/* Admin: gérer les sites */}
+            {isAdmin && (
               <button
-                onClick={() => setSelectedSiteId(null)}
-                className={`flex-shrink-0 flex flex-col items-center justify-center px-5 py-3 text-sm font-medium border-b-2 transition-colors ${selectedSiteId === null ? 'border-blue-600 text-blue-700 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
+                className="inline-flex items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors shadow-sm"
               >
-                <span className="font-semibold">Tous</span>
-                <span className="text-xs opacity-70">{equipments.length} équip.</span>
+                <Plus className="w-4 h-4" /> Gérer les sites
               </button>
-              {sites.map(site => {
-                const count = equipments.filter(e => e.siteId === site.id).length;
-                return (
-                  <button key={site.id}
-                    onClick={() => setSelectedSiteId(site.id)}
-                    className={`flex-shrink-0 flex flex-col items-start justify-center px-5 py-3 text-sm border-b-2 border-l border-gray-100 transition-colors ${selectedSiteId === site.id ? 'border-b-blue-600 text-blue-700 bg-blue-50' : 'border-b-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
-                  >
-                    <span className="font-semibold">{site.name}</span>
-                    <span className="text-xs opacity-70 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            )}
           </div>
         )}
 
