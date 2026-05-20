@@ -817,6 +817,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     refreshMonitoring();
   }, [showMonitoringModal]);
 
+  // Auto-fetch activity log when filters change (debounced 400ms)
+  useEffect(() => {
+    if (!showActivityLog) return;
+    const timer = setTimeout(() => fetchActivityLog(activityFilter), 400);
+    return () => clearTimeout(timer);
+  }, [activityFilter, showActivityLog]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -3944,12 +3951,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   onChange={e => setActivityFilter(f => ({ ...f, dateTo: e.target.value }))}
                   className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400" />
               </div>
-              <button
-                onClick={() => fetchActivityLog(activityFilter)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700"
-              >
-                <Filter className="w-4 h-4" /> Filtrer
-              </button>
               <button
                 onClick={() => {
                   const reset = { username: '', dateFrom: '', dateTo: '', action: '' };
