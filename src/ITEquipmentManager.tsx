@@ -1384,18 +1384,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const notVisitedCount = equipments.filter((equipment) => !equipment.visited).length;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="relative overflow-hidden rounded-xl shadow-sm mb-6 bg-gradient-to-r from-slate-800 to-slate-700 p-6">
+          <div className="absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(circle at 80% 50%, #6366f1 0%, transparent 60%)'}} />
+          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Gestion des équipements informatiques</h1>
-              <p className="text-gray-600 mt-2">Suivi des équipements et accès protégé par rôle.</p>
+              <h1 className="text-3xl font-bold text-white">Gestion des équipements informatiques</h1>
+              <p className="text-slate-300 mt-1">Suivi des équipements et accès protégé par rôle.</p>
             </div>
             <div className="flex items-center gap-3">
               {/* User pill */}
-              <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-700">
-                <User className="w-4 h-4 text-gray-500" />
+              <div className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-slate-100">
+                <User className="w-4 h-4 text-slate-300" />
                 <span className="font-medium">{currentUser.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${roleInfo.classes}`}>{roleInfo.label}</span>
               </div>
@@ -1405,7 +1406,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   type="button"
                   onClick={() => setShowModulesMenu(v => !v)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-500 bg-slate-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-500 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1503,7 +1504,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button
                 type="button"
                 onClick={() => setShowSiteDropdown(v => !v)}
-                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-blue-300 transition-colors"
+                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-blue-400 hover:shadow-md transition-all"
               >
                 <Globe className="w-4 h-4 text-blue-500 shrink-0" />
                 <div className="flex-1 min-w-0">
@@ -1569,45 +1570,53 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow-sm p-5">
-            <div className="flex items-center gap-3 text-blue-600">
-              <Info className="w-5 h-5" />
+          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                <Info className="w-5 h-5 text-blue-600" />
+              </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-500">Total équipements</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Total équipements</div>
                 <div className="text-2xl font-bold text-gray-900">{equipments.length}</div>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-5">
-            <div className="flex items-center gap-3 text-yellow-600">
-              <Clock className="w-5 h-5" />
+          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-amber-400">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-amber-500" />
+              </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-500">Sous garantie 90j</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Sous garantie 90j</div>
                 <div className="text-2xl font-bold text-gray-900">{dueSoonCount}</div>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-5">
-            <div className="flex items-center gap-3 text-orange-600">
-              <ShieldCheck className="w-5 h-5" />
+          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-orange-500">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-orange-500" />
+              </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-500">Maintenance</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Maintenance</div>
                 <div className="text-2xl font-bold text-gray-900">{maintenanceCount}</div>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-5">
-            <div className="flex items-center gap-3 text-red-600">
-              <XCircle className="w-5 h-5" />
+          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-rose-500">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
+                <XCircle className="w-5 h-5 text-rose-500" />
+              </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-500">Non visités</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Non visités</div>
                 <div className="text-2xl font-bold text-gray-900">{notVisitedCount}</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="bg-white rounded-xl shadow-sm p-5 mb-6 border border-gray-100">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
@@ -1702,7 +1711,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
 
         {loading ? (
-          <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">Chargement des données...</div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center text-gray-400">Chargement des données…</div>
         ) : sites.length > 0 && selectedSiteId === null ? (
           <div className="bg-white rounded-lg shadow-sm p-16 flex flex-col items-center justify-center text-center">
             <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
@@ -1712,22 +1721,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <p className="text-sm text-gray-400 max-w-xs">Choisissez un site dans la barre ci-dessus pour afficher ses équipements.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[800px]">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Équipement</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Localisation</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Statut</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Passage technicien</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <thead>
+                  <tr className="bg-gradient-to-r from-slate-700 to-slate-600">
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Équipement</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Localisation</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Statut</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Passage technicien</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-100">
                   {filteredEquipments.map((equipment) => (
-                    <tr key={equipment.id} className="hover:bg-gray-50">
+                    <tr key={equipment.id} className="hover:bg-blue-50/40 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {getTypeIcon(equipment.type)}
