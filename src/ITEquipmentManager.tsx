@@ -375,6 +375,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [showModulesMenu, setShowModulesMenu] = useState(false);
+  const modulesMenuRef = useRef<HTMLDivElement>(null);
 
   // Transfer
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -462,11 +464,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reportUserDetail, setReportUserDetail] = useState<EquipmentEvent[]>([]);
   const [reportUserDetailLoading, setReportUserDetailLoading] = useState(false);
 
-  // Close export dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
         setShowExportMenu(false);
+      }
+      if (modulesMenuRef.current && !modulesMenuRef.current.contains(e.target as Node)) {
+        setShowModulesMenu(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -1382,80 +1387,105 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <h1 className="text-3xl font-bold text-gray-900">Gestion des équipements informatiques</h1>
               <p className="text-gray-600 mt-2">Suivi des équipements et accès protégé par rôle.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 justify-between lg:justify-end">
+            <div className="flex items-center gap-3">
+              {/* User pill */}
               <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-700">
                 <User className="w-4 h-4 text-gray-500" />
-                <span>{currentUser.name}</span>
+                <span className="font-medium">{currentUser.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${roleInfo.classes}`}>{roleInfo.label}</span>
               </div>
-              {isAdmin && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { setShowMonitoringModal(true); }}
-                    className="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-green-700 hover:bg-green-100"
-                  >
-                    <Activity className="w-4 h-4" />
-                    Monitoring
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-indigo-700 hover:bg-indigo-100"
-                  >
-                    <Calendar className="w-4 h-4" />
-                    Rapports
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowActivityLog(true); fetchActivityLog(); }}
-                    className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-teal-700 hover:bg-teal-100"
-                  >
-                    <ClipboardList className="w-4 h-4" />
-                    Journal d'activité
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { fetchUsers(); setShowUserModal(true); }}
-                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-blue-700 hover:bg-blue-100"
-                  >
-                    <Users className="w-4 h-4" />
-                    Gérer les utilisateurs
-                  </button>
-                </>
-              )}
-              {canModify && (
+
+              {/* Modules dropdown */}
+              <div className="relative" ref={modulesMenuRef}>
                 <button
                   type="button"
-                  onClick={() => { setShowTransferModule(true); fetchAllTransfers(); }}
-                  className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-purple-700 hover:bg-purple-100"
+                  onClick={() => setShowModulesMenu(v => !v)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
                 >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  Transferts
-                </button>
-              )}
-              {canWrite && (
-                <button
-                  type="button"
-                  onClick={openMaintenanceModule}
-                  className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-orange-700 hover:bg-orange-100"
-                >
-                  <Wrench className="w-4 h-4" />
-                  Maintenance
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                  Modules
                   {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
                     <span className="bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
                       {maintenanceRecords.filter(m => m.status !== 'résolu').length}
                     </span>
                   )}
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showModulesMenu ? 'rotate-180' : ''}`} />
                 </button>
-              )}
-              <button
-                onClick={onLogout}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-red-700 hover:bg-red-100"
-              >
-                <LogOut className="w-4 h-4" />
-                Déconnexion
-              </button>
+
+                {showModulesMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-gray-200 bg-white shadow-lg z-30 py-1 overflow-hidden">
+                    {canWrite && (
+                      <>
+                        <div className="px-3 pt-2 pb-1">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Opérations</p>
+                        </div>
+                        {canModify && (
+                          <button type="button"
+                            onClick={() => { setShowModulesMenu(false); setShowTransferModule(true); fetchAllTransfers(); }}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                            <ArrowRightLeft className="w-4 h-4 text-purple-500" />
+                            Transferts
+                          </button>
+                        )}
+                        <button type="button"
+                          onClick={() => { setShowModulesMenu(false); openMaintenanceModule(); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <Wrench className="w-4 h-4 text-orange-500" />
+                          Maintenance
+                          {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
+                            <span className="ml-auto bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+                              {maintenanceRecords.filter(m => m.status !== 'résolu').length}
+                            </span>
+                          )}
+                        </button>
+                      </>
+                    )}
+
+                    {isAdmin && (
+                      <>
+                        <div className="border-t border-gray-100 my-1" />
+                        <div className="px-3 pt-2 pb-1">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
+                        </div>
+                        <button type="button"
+                          onClick={() => { setShowModulesMenu(false); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <Calendar className="w-4 h-4 text-indigo-500" />
+                          Rapports
+                        </button>
+                        <button type="button"
+                          onClick={() => { setShowModulesMenu(false); setShowActivityLog(true); fetchActivityLog(); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <ClipboardList className="w-4 h-4 text-teal-500" />
+                          Journal d'activité
+                        </button>
+                        <button type="button"
+                          onClick={() => { setShowModulesMenu(false); setShowMonitoringModal(true); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <Activity className="w-4 h-4 text-green-500" />
+                          Monitoring
+                        </button>
+                        <button type="button"
+                          onClick={() => { setShowModulesMenu(false); fetchUsers(); setShowUserModal(true); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <Users className="w-4 h-4 text-blue-500" />
+                          Gérer les utilisateurs
+                        </button>
+                      </>
+                    )}
+
+                    <div className="border-t border-gray-100 my-1" />
+                    <button type="button"
+                      onClick={() => { setShowModulesMenu(false); onLogout(); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                      <LogOut className="w-4 h-4" />
+                      Déconnexion
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
