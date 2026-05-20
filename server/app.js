@@ -773,6 +773,63 @@ app.get('/api/reports/by-department', authenticate, asyncHandler(async (req, res
   res.json(stats);
 }));
 
+app.get('/api/reports/by-user', authenticate, asyncHandler(async (req, res) => {
+  const { from, to, department } = req.query;
+  const conditions = ["user_name != ''"];
+  const params = [];
+  let i = 1;
+  if (from)       { conditions.push(`created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (department) { conditions.push(`department = $${i++}`); params.push(department); }
+
+  const { rows } = await query(`
+    SELECT
+      user_name, username,
+      COUNT(*) AS total_actions,
+      COUNT(*) FILTER (WHERE action = 'Création')     AS creations,
+      COUNT(*) FILTER (WHERE action = 'Modification') AS modifications,
+      COUNT(*) FILTER (WHERE action = 'Intervention') AS interventions,
+      COUNT(*) FILTER (WHERE action = 'Transfert')    AS transferts,
+      COUNT(*) FILTER (WHERE action = 'Suppression')  AS suppressions,
+      COUNT(*) FILTER (WHERE action = 'Maintenance')  AS maintenances,
+      COUNT(*) FILTER (WHERE action = 'Réforme')      AS reformes,
+      COUNT(DISTINCT equipment_id)                     AS equipment_count,
+      COUNT(DISTINCT department)                       AS dept_count,
+      MAX(created_at)                                  AS last_action
+    FROM equipment_events
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY user_name, username
+    ORDER BY total_actions DESC
+  `, params);
+  res.json(rows);
+}));
+
+app.get('/api/reports/user-detail', authenticate, asyncHandler(async (req, res) => {
+  const { username, from, to, department } = req.query;
+  if (!username) return res.status(400).json({ message: 'username requis' });
+  const conditions = ['username = $1'];
+  const params = [username];
+  let i = 2;
+  if (from)       { conditions.push(`created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (department) { conditions.push(`department = $${i++}`); params.push(department); }
+  params.push(300);
+  const { rows } = await query(
+    `SELECT * FROM equipment_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT $${i}`,
+    params
+  );
+  res.json(rows.map(row => {
+    let changes = [];
+    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    return {
+      id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
+      equipmentType: row.equipment_type, department: row.department, action: row.action,
+      details: row.details, changes, technician: row.technician, userId: row.user_id,
+      username: row.username, userName: row.user_name, ip: row.ip, createdAt: row.created_at,
+    };
+  }));
+}));
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {

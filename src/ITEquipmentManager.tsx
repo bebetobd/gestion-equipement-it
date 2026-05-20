@@ -292,6 +292,22 @@ interface DeptStat {
   last_activity: string;
 }
 
+interface UserStat {
+  user_name: string;
+  username: string;
+  total_actions: string;
+  creations: string;
+  modifications: string;
+  interventions: string;
+  transferts: string;
+  suppressions: string;
+  maintenances: string;
+  reformes: string;
+  equipment_count: string;
+  dept_count: string;
+  last_action: string;
+}
+
 const Section = ({ icon, title, color, children }: { icon: React.ReactNode; title: string; color: 'red' | 'yellow' | 'green' | 'blue'; children: React.ReactNode }) => {
   const border = { red: 'border-red-200', yellow: 'border-yellow-200', green: 'border-green-200', blue: 'border-blue-200' }[color];
   const bg = { red: 'bg-red-50', yellow: 'bg-yellow-50', green: 'bg-green-50', blue: 'bg-blue-50' }[color];
@@ -388,7 +404,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
-  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department'>('equipment');
+  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user'>('equipment');
   const [reportEquipmentId, setReportEquipmentId] = useState<number | ''>('');
   const [reportHistory, setReportHistory] = useState<EquipmentEvent[]>([]);
   const [reportHistoryLoading, setReportHistoryLoading] = useState(false);
@@ -400,6 +416,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reportDateLoading, setReportDateLoading] = useState(false);
   const [reportDeptStats, setReportDeptStats] = useState<DeptStat[]>([]);
   const [reportDeptLoading, setReportDeptLoading] = useState(false);
+  const [reportUserStats, setReportUserStats] = useState<UserStat[]>([]);
+  const [reportUserLoading, setReportUserLoading] = useState(false);
+  const [reportUserFrom, setReportUserFrom] = useState('');
+  const [reportUserTo, setReportUserTo] = useState('');
+  const [reportUserDeptFilter, setReportUserDeptFilter] = useState('');
+  const [reportUserExpanded, setReportUserExpanded] = useState<string | null>(null);
+  const [reportUserDetail, setReportUserDetail] = useState<EquipmentEvent[]>([]);
+  const [reportUserDetailLoading, setReportUserDetailLoading] = useState(false);
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -447,6 +471,39 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (res.ok) setReportDeptStats(await res.json());
     } catch {}
     setReportDeptLoading(false);
+  };
+
+  const fetchReportByUser = async (opts?: { from?: string; to?: string; department?: string }) => {
+    setReportUserLoading(true);
+    setReportUserExpanded(null);
+    try {
+      const params = new URLSearchParams();
+      const from = opts?.from ?? reportUserFrom;
+      const to   = opts?.to   ?? reportUserTo;
+      const dept = opts?.department ?? reportUserDeptFilter;
+      if (from) params.set('from', from);
+      if (to)   params.set('to', to);
+      if (dept) params.set('department', dept);
+      const res = await fetch(`${API_BASE_URL}/api/reports/by-user?${params}`, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) setReportUserStats(await res.json());
+    } catch {}
+    setReportUserLoading(false);
+  };
+
+  const fetchUserDetail = async (username: string) => {
+    if (reportUserExpanded === username) { setReportUserExpanded(null); return; }
+    setReportUserExpanded(username);
+    setReportUserDetailLoading(true);
+    try {
+      const params = new URLSearchParams({ username });
+      if (reportUserFrom) params.set('from', reportUserFrom);
+      if (reportUserTo)   params.set('to', reportUserTo);
+      if (reportUserDeptFilter) params.set('department', reportUserDeptFilter);
+      const res = await fetch(`${API_BASE_URL}/api/reports/user-detail?${params}`, { headers: authHeaders() });
+      if (res.ok) setReportUserDetail(await res.json());
+    } catch {}
+    setReportUserDetailLoading(false);
   };
 
   const getEventActionStyle = (action: string) => {
@@ -2519,8 +2576,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             {/* Tabs */}
             <div className="flex border-b border-gray-100 shrink-0 px-6">
-              {([['equipment','Parcours équipement'],['date','Par date'],['department','Par service']] as const).map(([tab, label]) => (
-                <button key={tab} onClick={() => setReportsTab(tab)}
+              {([['equipment','Parcours équipement'],['date','Par date'],['department','Par service'],['user','Par utilisateur']] as const).map(([tab, label]) => (
+                <button key={tab} onClick={() => { setReportsTab(tab); if (tab === 'user' && reportUserStats.length === 0) fetchReportByUser(); }}
                   className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {label}
                 </button>
@@ -2764,7 +2821,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {reportDeptStats.length > 0 && (
                     <div className="space-y-3">
                       {reportDeptStats.map(dept => {
-                        const total = Number(dept.total_events) || 1;
                         const maxTotal = Math.max(...reportDeptStats.map(d => Number(d.total_events)));
                         const barWidth = Math.round((Number(dept.total_events) / maxTotal) * 100);
                         return (
@@ -2791,6 +2847,181 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Tab 4 : Par utilisateur ── */}
+              {reportsTab === 'user' && (
+                <div className="space-y-4">
+                  {/* Filtres */}
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Du</label>
+                      <input type="date" value={reportUserFrom} onChange={e => setReportUserFrom(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Au</label>
+                      <input type="date" value={reportUserTo} onChange={e => setReportUserTo(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Service</label>
+                      <select value={reportUserDeptFilter} onChange={e => setReportUserDeptFilter(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400">
+                        <option value="">Tous les services</option>
+                        {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button onClick={() => fetchReportByUser()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                      <Search className="w-4 h-4" /> Générer
+                    </button>
+                    <button onClick={() => { setReportUserFrom(''); setReportUserTo(''); setReportUserDeptFilter(''); fetchReportByUser({ from:'', to:'', department:'' }); }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      <RefreshCcw className="w-3.5 h-3.5" /> Réinitialiser
+                    </button>
+                    {reportUserStats.length > 0 && (
+                      <button onClick={() => {
+                        const rows = reportUserStats.map(u => ({
+                          'Utilisateur': u.user_name, 'Login': u.username,
+                          'Total actions': Number(u.total_actions),
+                          'Créations': Number(u.creations), 'Modifications': Number(u.modifications),
+                          'Interventions': Number(u.interventions), 'Transferts': Number(u.transferts),
+                          'Suppressions': Number(u.suppressions), 'Maintenances': Number(u.maintenances),
+                          'Réformes': Number(u.reformes),
+                          'Équipements traités': Number(u.equipment_count),
+                          'Services touchés': Number(u.dept_count),
+                          'Dernière action': u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
+                        }));
+                        const ws = XLSX.utils.json_to_sheet(rows);
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, 'Par utilisateur');
+                        XLSX.writeFile(wb, `rapport-utilisateurs-${Date.now()}.xlsx`);
+                      }} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                        <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                      </button>
+                    )}
+                  </div>
+
+                  {reportUserLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+
+                  {!reportUserLoading && reportUserStats.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">
+                      <User className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>Cliquez sur "Générer" pour afficher les rapports utilisateurs.</p>
+                    </div>
+                  )}
+
+                  {/* Résumé global */}
+                  {reportUserStats.length > 0 && (
+                    <>
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-center">
+                          <div className="text-2xl font-bold text-indigo-700">{reportUserStats.length}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Utilisateur(s) actif(s)</div>
+                        </div>
+                        <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-center">
+                          <div className="text-2xl font-bold text-blue-700">{reportUserStats.reduce((s, u) => s + Number(u.total_actions), 0)}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Actions au total</div>
+                        </div>
+                        <div className="rounded-xl border border-green-100 bg-green-50 p-3 text-center">
+                          <div className="text-2xl font-bold text-green-700">{reportUserStats.reduce((s, u) => s + Number(u.equipment_count), 0)}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Équipements traités</div>
+                        </div>
+                      </div>
+
+                      {/* Cartes par utilisateur */}
+                      <div className="space-y-2">
+                        {reportUserStats.map(user => {
+                          const total = Number(user.total_actions) || 1;
+                          const maxTotal = Math.max(...reportUserStats.map(u => Number(u.total_actions)));
+                          const barW = Math.round((Number(user.total_actions) / maxTotal) * 100);
+                          const isExpanded = reportUserExpanded === user.username;
+                          const pills = [
+                            { label: 'Créations',     value: Number(user.creations),     color: 'bg-blue-100 text-blue-700' },
+                            { label: 'Modifications', value: Number(user.modifications), color: 'bg-yellow-100 text-yellow-700' },
+                            { label: 'Interventions', value: Number(user.interventions), color: 'bg-green-100 text-green-700' },
+                            { label: 'Transferts',    value: Number(user.transferts),    color: 'bg-purple-100 text-purple-700' },
+                            { label: 'Suppressions',  value: Number(user.suppressions),  color: 'bg-red-100 text-red-700' },
+                            { label: 'Maintenance',   value: Number(user.maintenances),  color: 'bg-orange-100 text-orange-700' },
+                            { label: 'Réformes',      value: Number(user.reformes),      color: 'bg-gray-100 text-gray-700' },
+                          ].filter(p => p.value > 0);
+
+                          return (
+                            <div key={user.username} className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+                              {/* En-tête utilisateur */}
+                              <div className="flex items-center gap-4 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                                onClick={() => fetchUserDetail(user.username)}>
+                                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                                  <User className="w-5 h-5 text-indigo-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-semibold text-gray-900">{user.user_name}</span>
+                                    <span className="text-xs text-gray-400">@{user.username}</span>
+                                    <span className="text-xs text-gray-400">· {user.equipment_count} équipement(s) · {user.dept_count} service(s)</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                                      <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${barW}%` }} />
+                                    </div>
+                                    <span className="text-xs font-bold text-indigo-700 shrink-0">{user.total_actions} actions</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5 mt-2">
+                                    {pills.map(p => (
+                                      <span key={p.label} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${p.color}`}>
+                                        {p.value} {p.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="text-right text-xs text-gray-400 shrink-0">
+                                  {user.last_action && <p>Dernière action<br />{new Date(user.last_action).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>}
+                                  <ChevronDown className={`w-4 h-4 mx-auto mt-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                </div>
+                              </div>
+
+                              {/* Détail expandable */}
+                              {isExpanded && (
+                                <div className="border-t border-gray-100 bg-gray-50 px-4 py-3">
+                                  {reportUserDetailLoading ? (
+                                    <p className="text-center py-4 text-gray-400 text-sm">Chargement…</p>
+                                  ) : reportUserDetail.length === 0 ? (
+                                    <p className="text-center py-4 text-gray-400 text-sm">Aucun événement trouvé.</p>
+                                  ) : (
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                      {reportUserDetail.map(ev => {
+                                        const st = getEventActionStyle(ev.action);
+                                        return (
+                                          <div key={ev.id} className="flex items-start gap-3 text-xs bg-white rounded-lg px-3 py-2 border border-gray-100">
+                                            <span className={`inline-block w-2 h-2 rounded-full mt-1 shrink-0 ${st.dot}`} />
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center gap-2 flex-wrap">
+                                                <span className={`rounded-full px-2 py-0.5 font-medium ${st.badge}`}>{ev.action}</span>
+                                                <span className="font-medium text-gray-800">{ev.equipmentName}</span>
+                                                {ev.department && <span className="text-gray-400">· {ev.department}</span>}
+                                              </div>
+                                              <p className="text-gray-500 mt-0.5 truncate">{ev.details}</p>
+                                            </div>
+                                            <span className="text-gray-400 shrink-0 whitespace-nowrap">
+                                              {new Date(ev.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
