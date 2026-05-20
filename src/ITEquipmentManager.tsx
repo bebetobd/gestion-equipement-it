@@ -1386,19 +1386,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-xl shadow-sm mb-6 bg-gradient-to-r from-blue-950 to-blue-800 p-6">
+        <div className="relative rounded-xl shadow-lg mb-6 bg-gradient-to-r from-blue-700 to-blue-600 p-6">
           <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-            <div className="absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(circle at 80% 50%, #6366f1 0%, transparent 60%)'}} />
+            <div className="absolute inset-0 opacity-20" style={{backgroundImage:'radial-gradient(circle at 85% 40%, #93c5fd 0%, transparent 55%)'}} />
+            <div className="absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(circle at 10% 80%, #1e3a8a 0%, transparent 50%)'}} />
           </div>
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white">Gestion des équipements informatiques</h1>
-              <p className="text-slate-300 mt-1">Suivi des équipements et accès protégé par rôle.</p>
+              <h1 className="text-3xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
+              <p className="text-blue-100 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
             </div>
             <div className="flex items-center gap-3">
               {/* User pill */}
-              <div className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-slate-100">
-                <User className="w-4 h-4 text-slate-300" />
+              <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm text-white backdrop-blur-sm">
+                <User className="w-4 h-4 text-blue-100" />
                 <span className="font-medium">{currentUser.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${roleInfo.classes}`}>{roleInfo.label}</span>
               </div>
@@ -1408,7 +1409,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   type="button"
                   onClick={() => setShowModulesMenu(v => !v)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-500 bg-slate-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-500 transition-colors"
+                  className="inline-flex items-center gap-2 rounded-lg border border-white/25 bg-white/15 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-white/25 transition-colors backdrop-blur-sm"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
