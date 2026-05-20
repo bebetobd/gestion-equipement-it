@@ -1671,6 +1671,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
         {loading ? (
           <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">Chargement des données...</div>
+        ) : sites.length > 0 && selectedSiteId === null ? (
+          <div className="bg-white rounded-lg shadow-sm p-16 flex flex-col items-center justify-center text-center">
+            <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+              <Globe className="w-8 h-8 text-blue-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-700 mb-1">Sélectionnez un site</h3>
+            <p className="text-sm text-gray-400 max-w-xs">Choisissez un site dans la barre ci-dessus pour afficher ses équipements.</p>
+          </div>
         ) : (
           <div className="bg-white rounded-lg shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
