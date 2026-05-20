@@ -440,7 +440,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
   const [activityUserFilter, setActivityUserFilter] = useState<number | null>(null);
   const [monitoringLoading, setMonitoringLoading] = useState(false);
-  const [monitoringCountdown, setMonitoringCountdown] = useState(10);
   const activityUserFilterRef = useRef<number | null>(null);
 
   // ── Reports state ──────────────────────────────────────────────────────────
@@ -659,7 +658,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const refreshMonitoring = async () => {
     setMonitoringLoading(true);
-    setMonitoringCountdown(10);
     await Promise.all([fetchSessions(), fetchActivities(activityUserFilterRef.current)]);
     setMonitoringLoading(false);
   };
@@ -813,13 +811,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     fetchSites();
   }, []);
 
-  // Real-time monitoring polling
+  // Load monitoring data when modal opens
   useEffect(() => {
     if (!showMonitoringModal || !isAdmin) return;
     refreshMonitoring();
-    const dataTimer = setInterval(refreshMonitoring, 10000);
-    const countTimer = setInterval(() => setMonitoringCountdown((v) => (v <= 1 ? 10 : v - 1)), 1000);
-    return () => { clearInterval(dataTimer); clearInterval(countTimer); };
   }, [showMonitoringModal]);
 
   useEffect(() => {
@@ -3464,7 +3459,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {monitoringLoading
                     ? <div className="w-3 h-3 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                     : <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
-                  <span>{monitoringLoading ? 'Actualisation…' : `Prochaine dans ${monitoringCountdown}s`}</span>
+                  <span>{monitoringLoading ? 'Actualisation…' : 'En direct'}</span>
                 </div>
                 <button
                   onClick={refreshMonitoring}

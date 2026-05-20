@@ -4,6 +4,7 @@
 
 import jwt from 'jsonwebtoken';
 import { activeSessions, tokenToUserId, logActivity } from './monitoring.js';
+import { updateSessionLastSeen, deleteSession } from './db.js';
 
 /**
  * Centralized error handler
@@ -41,19 +42,24 @@ export function authenticate(req, res, next) {
     const jwtSecret = process.env.JWT_SECRET || 'gestion-it-secret-2024';
     req.user = jwt.verify(token, jwtSecret);
     req.token = token;
-    
+
+    // Update lastSeen in DB (fire-and-forget) and local cache
+    updateSessionLastSeen(req.user.id).catch(() => {});
     if (activeSessions.has(req.user.id)) {
       activeSessions.get(req.user.id).lastSeen = new Date().toISOString();
     }
-    
+
     next();
   } catch (err) {
-    const userId = tokenToUserId.get(token);
+    // Try to get user info from expired token payload
+    const decoded = jwt.decode(token);
+    const userId = tokenToUserId.get(token) ?? decoded?.id;
     if (userId) {
       const s = activeSessions.get(userId);
-      logActivity(userId, s?.username, s?.name, 'Déconnexion', 'Session expirée automatiquement', 'N/A');
+      logActivity(userId, s?.username ?? decoded?.username, s?.name ?? decoded?.name, 'Déconnexion', 'Session expirée automatiquement', 'N/A');
       activeSessions.delete(userId);
       tokenToUserId.delete(token);
+      deleteSession(userId).catch(() => {});
     }
     res.status(401).json({ message: 'Token invalide ou expiré. Veuillez vous reconnecter.' });
   }

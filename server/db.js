@@ -219,6 +219,18 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_created_at ON user_activity_log(created_at)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_action     ON user_activity_log(action)`);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      user_id   INTEGER PRIMARY KEY,
+      username  VARCHAR(100) NOT NULL,
+      name      VARCHAR(200) NOT NULL DEFAULT '',
+      role      VARCHAR(50)  NOT NULL DEFAULT 'user',
+      ip        VARCHAR(50)  NOT NULL DEFAULT '',
+      login_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
   initialized = true;
 }
 
@@ -528,6 +540,38 @@ export async function insertActivityLog({ userId, username, userName, action, de
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [userId ?? null, username || '', userName || '', action || '', details || '', ip || '']
   );
+}
+
+export async function upsertSession({ userId, username, name, role, ip, loginAt, lastSeen }) {
+  await initDB();
+  await pool.query(
+    `INSERT INTO user_sessions (user_id, username, name, role, ip, login_at, last_seen)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (user_id) DO UPDATE SET
+       username = EXCLUDED.username, name = EXCLUDED.name, role = EXCLUDED.role,
+       ip = EXCLUDED.ip, login_at = EXCLUDED.login_at, last_seen = EXCLUDED.last_seen`,
+    [userId, username || '', name || '', role || 'user', ip || '',
+     loginAt || new Date().toISOString(), lastSeen || new Date().toISOString()]
+  );
+}
+
+export async function deleteSession(userId) {
+  await initDB();
+  await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
+}
+
+export async function updateSessionLastSeen(userId) {
+  await initDB();
+  await pool.query('UPDATE user_sessions SET last_seen = NOW() WHERE user_id = $1', [userId]);
+}
+
+export async function queryActiveSessions() {
+  await initDB();
+  const { rows } = await pool.query('SELECT * FROM user_sessions ORDER BY last_seen DESC');
+  return rows.map(r => ({
+    userId: r.user_id, username: r.username, name: r.name,
+    role: r.role, ip: r.ip, loginAt: r.login_at, lastSeen: r.last_seen,
+  }));
 }
 
 export async function queryActivityLog({ username, dateFrom, dateTo, action, limit = 200 } = {}) {

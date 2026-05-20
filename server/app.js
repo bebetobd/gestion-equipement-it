@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -116,19 +116,20 @@ app.get('/api/auth/me', authenticate, (req, res) => {
   res.json(req.user);
 });
 
-app.post('/api/auth/logout', authenticate, (req, res) => {
+app.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   const ip = getClientIp(req);
   logActivity(req.user.id, req.user.username, req.user.name, 'Déconnexion', 'Déconnexion volontaire', ip);
   activeSessions.delete(req.user.id);
   tokenToUserId.delete(req.token);
+  await deleteSession(req.user.id);
   res.status(204).send();
-});
+}));
 
 // ─── Admin monitoring routes ──────────────────────────────────────────────────
 
-app.get('/api/admin/sessions', authenticate, requireAdmin, (req, res) => {
-  res.json(getActiveSessions());
-});
+app.get('/api/admin/sessions', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  res.json(await getActiveSessions());
+}));
 
 app.get('/api/admin/activities', authenticate, requireAdmin, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);

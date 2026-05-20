@@ -2,9 +2,9 @@
  * Session and activity monitoring
  */
 
-import { insertActivityLog } from './db.js';
+import { insertActivityLog, upsertSession, deleteSession, queryActiveSessions } from './db.js';
 
-export const activeSessions = new Map();  // userId → session info
+export const activeSessions = new Map();  // userId → session info (local cache)
 export const tokenToUserId = new Map();   // token → userId
 
 const activityLog = [];
@@ -75,39 +75,36 @@ export function getActivityLog(userId = null, limit = 100) {
 }
 
 /**
- * Get all active sessions
- * @returns {array} Array of session objects
+ * Get all active sessions from DB
+ * @returns {Promise<array>} Array of session objects
  */
-export function getActiveSessions() {
-  return Array.from(activeSessions.values());
+export async function getActiveSessions() {
+  return queryActiveSessions();
 }
 
 /**
- * Create session entry
+ * Create session entry (in-memory cache + DB)
  * @param {object} sessionData - Session data
  */
-export function createSession(sessionData) {
+export async function createSession(sessionData) {
   activeSessions.set(sessionData.userId, sessionData);
+  upsertSession(sessionData).catch(() => {});
 }
 
 /**
  * Clear user sessions and tokens
  * @param {number} userId - User ID
  */
-export function clearUserSessions(userId) {
-  // Remove from active sessions
+export async function clearUserSessions(userId) {
   activeSessions.delete(userId);
-  
-  // Remove all tokens for this user
   for (const [token, uid] of tokenToUserId.entries()) {
-    if (uid === userId) {
-      tokenToUserId.delete(token);
-    }
+    if (uid === userId) tokenToUserId.delete(token);
   }
+  deleteSession(userId).catch(() => {});
 }
 
 /**
- * Clear all sessions and tokens (useful for logout or admin force logout)
+ * Clear all sessions and tokens
  */
 export function clearAllSessions() {
   activeSessions.clear();
