@@ -113,7 +113,7 @@ export const validators = {
    * @returns {object} { valid: boolean, error?: string }
    */
   equipmentStatus(status) {
-    const validStatuses = ['actif', 'inactif', 'maintenance', 'defaillant'];
+    const validStatuses = ['actif', 'inactif', 'maintenance', 'defaillant', 'réformé'];
     if (!status || !validStatuses.includes(status)) {
       return { valid: false, error: `Status must be one of: ${validStatuses.join(', ')}` };
     }

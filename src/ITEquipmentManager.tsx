@@ -978,11 +978,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   ] as const;
 
   const handleExportExcel = () => {
-    const rows = filteredEquipments.map((e) =>
-      Object.fromEntries(
+    const rows = filteredEquipments.map((e) => {
+      const row = Object.fromEntries(
         EXPORT_COLUMNS.map(({ key, label }) => [label, key === 'visited' ? (e[key] ? 'Oui' : 'Non') : (e[key as keyof Equipment] ?? '')])
-      )
-    );
+      );
+      row['Site'] = e.siteId ? (sites.find(s => s.id === e.siteId)?.name ?? '') : '';
+      return row;
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Équipements');
@@ -999,7 +1001,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
     autoTable(doc, {
       startY: 26,
-      head: [['Nom', 'Type', 'Marque / Modèle', 'N° Série', 'IP', 'Emplacement', 'Département', 'Statut', 'Garantie', 'Visité']],
+      head: [['Nom', 'Type', 'Marque / Modèle', 'N° Série', 'IP', 'Emplacement', 'Site', 'Département', 'Statut', 'Garantie', 'Visité']],
       body: filteredEquipments.map((e) => [
         e.name,
         e.type,
@@ -1007,6 +1009,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         e.serialNumber,
         e.ipAddress,
         e.location,
+        e.siteId ? (sites.find(s => s.id === e.siteId)?.name ?? '') : '',
         e.department,
         e.status,
         e.warranty,
