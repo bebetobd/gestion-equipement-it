@@ -1381,15 +1381,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-xl shadow-lg mb-6 p-6" style={{background:'linear-gradient(135deg, #1c1917 0%, #292524 50%, #44403c 100%)'}}>
+        <div className="relative rounded-xl shadow-sm mb-6 p-6" style={{background:'linear-gradient(to right, #1e293b, #334155)'}}>
           <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-            <div className="absolute inset-0 opacity-20" style={{backgroundImage:'radial-gradient(ellipse at 80% 25%, #d97706 0%, transparent 50%)'}} />
-            <div className="absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(ellipse at 5% 85%, #a8a29e 0%, transparent 50%)'}} />
+            <div className="absolute inset-0 opacity-0" />
           </div>
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
-              <p className="text-stone-300 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
+              <p className="text-slate-400 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
             </div>
             <div className="flex items-center gap-3">
               {/* User pill */}
