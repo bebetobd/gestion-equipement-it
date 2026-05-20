@@ -1676,7 +1676,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {canWrite && (
               <button
                 onClick={openNewEquipmentForm}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white shadow-sm transition-all hover:opacity-90 active:scale-95"
+                style={{background:'linear-gradient(135deg, #0f1b35 0%, #1a3a6b 45%, #1e5799 100%)'}}
               >
                 <Plus className="w-4 h-4" />
                 Nouvel équipement
