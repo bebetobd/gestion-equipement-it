@@ -131,11 +131,12 @@ app.get('/api/admin/sessions', authenticate, requireAdmin, asyncHandler(async (r
   res.json(await getActiveSessions());
 }));
 
-app.get('/api/admin/activities', authenticate, requireAdmin, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+app.get('/api/admin/activities', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 200, 500);
   const userId = req.query.userId ? Number(req.query.userId) : null;
-  res.json(getActivityLog(userId, limit));
-});
+  const entries = await queryActivityLog({ userId, limit });
+  res.json(entries);
+}));
 
 app.get('/api/admin/activity-log', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   const { username, dateFrom, dateTo, action, limit } = req.query;

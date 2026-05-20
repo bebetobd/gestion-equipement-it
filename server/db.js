@@ -574,11 +574,12 @@ export async function queryActiveSessions() {
   }));
 }
 
-export async function queryActivityLog({ username, dateFrom, dateTo, action, limit = 200 } = {}) {
+export async function queryActivityLog({ userId, username, dateFrom, dateTo, action, limit = 200 } = {}) {
   await initDB();
   const conditions = [];
   const params = [];
   let i = 1;
+  if (userId)   { conditions.push(`user_id = $${i++}`); params.push(userId); }
   if (username) { conditions.push(`username = $${i++}`); params.push(username); }
   if (action)   { conditions.push(`action ILIKE $${i++}`); params.push(`%${action}%`); }
   if (dateFrom) { conditions.push(`created_at >= $${i++}`); params.push(dateFrom); }
@@ -590,7 +591,9 @@ export async function queryActivityLog({ username, dateFrom, dateTo, action, lim
     params
   );
   return rows.map(r => ({
-    id: r.id, userId: r.user_id, username: r.username, userName: r.user_name,
-    action: r.action, details: r.details, ip: r.ip, createdAt: r.created_at
+    id: r.id, userId: r.user_id, username: r.username,
+    name: r.user_name, userName: r.user_name,
+    action: r.action, details: r.details, ip: r.ip,
+    timestamp: r.created_at, createdAt: r.created_at
   }));
 }
