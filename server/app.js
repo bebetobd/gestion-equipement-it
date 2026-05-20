@@ -559,7 +559,7 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
 
-  const { toLocation, toDepartment, reason, technicianName, notes } = req.body;
+  const { toLocation, toDepartment, toSiteId, reason, technicianName, notes } = req.body;
   if (!toLocation || !toDepartment) {
     return res.status(400).json({ message: 'Nouvelle localisation et département requis.' });
   }
@@ -568,26 +568,51 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
   if (!current[0]) return res.status(404).json({ message: 'Équipement introuvable.' });
 
   const old = rowToEquipment(current[0]);
+  const newSiteId = toSiteId !== undefined ? (toSiteId || null) : old.siteId;
+
   const { rows } = await query(
-    'UPDATE equipments SET location=$1, department=$2 WHERE id=$3 RETURNING *',
-    [toLocation, toDepartment, id]
+    'UPDATE equipments SET location=$1, department=$2, site_id=$3 WHERE id=$4 RETURNING *',
+    [toLocation, toDepartment, newSiteId, id]
   );
   const updated = rowToEquipment(rows[0]);
   const ip = getClientIp(req);
 
+  // Resolve site names for the event log
+  let fromSiteName = '', toSiteName = '';
+  if (old.siteId) {
+    const { rows: sr } = await query('SELECT name FROM sites WHERE id=$1', [old.siteId]);
+    fromSiteName = sr[0]?.name || `Site #${old.siteId}`;
+  }
+  if (newSiteId && newSiteId !== old.siteId) {
+    const { rows: sr } = await query('SELECT name FROM sites WHERE id=$1', [newSiteId]);
+    toSiteName = sr[0]?.name || `Site #${newSiteId}`;
+  }
+
+  const siteChanged = newSiteId !== old.siteId;
+  const locationChanged = toLocation !== old.location;
+  const deptChanged = toDepartment !== old.department;
+
+  let detailParts = [];
+  if (locationChanged || deptChanged)
+    detailParts.push(`Bureau: "${old.location}" (${old.department}) → "${toLocation}" (${toDepartment})`);
+  if (siteChanged)
+    detailParts.push(`Site: "${fromSiteName || 'Aucun'}" → "${toSiteName || 'Aucun'}"`);
+
+  const changes = [];
+  if (locationChanged) changes.push({ field: 'location', from: old.location, to: toLocation });
+  if (deptChanged) changes.push({ field: 'department', from: old.department, to: toDepartment });
+  if (siteChanged) changes.push({ field: 'siteId', from: old.siteId, to: newSiteId, fromName: fromSiteName, toName: toSiteName });
+
   await logEquipmentEvent({
     equipmentId: id, equipmentName: old.name, equipmentType: old.type,
     department: toDepartment, action: 'Transfert',
-    details: `Transféré de "${old.location}" (${old.department}) → "${toLocation}" (${toDepartment}). Raison: ${reason || 'Non précisée'}${notes ? '. Notes: ' + notes : ''}.`,
-    changes: [
-      { field: 'location', from: old.location, to: toLocation },
-      { field: 'department', from: old.department, to: toDepartment },
-    ],
+    details: `${detailParts.join(' | ')}. Raison: ${reason || 'Non précisée'}${notes ? '. Notes: ' + notes : ''}.`,
+    changes,
     technician: technicianName || req.user.name,
     userId: req.user.id, username: req.user.username, userName: req.user.name, ip
   });
   logActivity(req.user.id, req.user.username, req.user.name,
-    'Transfert équipement', `"${old.name}" transféré vers "${toLocation}"`, ip);
+    'Transfert équipement', `"${old.name}" transféré vers "${toLocation}"${siteChanged ? ` (${toSiteName})` : ''}`, ip);
 
   res.json(updated);
 }));

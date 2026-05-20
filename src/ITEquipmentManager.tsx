@@ -72,6 +72,7 @@ interface EquipmentDoc {
 interface TransferForm {
   toLocation: string;
   toDepartment: string;
+  toSiteId: number | null;
   reason: string;
   technicianName: string;
   notes: string;
@@ -378,7 +379,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Transfer
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferTarget, setTransferTarget] = useState<Equipment | null>(null);
-  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', reason: 'Réorganisation', technicianName: '', notes: '' });
+  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '' });
   const [transferLoading, setTransferLoading] = useState(false);
 
   // Documents
@@ -1028,7 +1029,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openTransferModal = (equipment: Equipment) => {
     setTransferTarget(equipment);
-    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, reason: 'Réorganisation', technicianName: '', notes: '' });
+    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, toSiteId: equipment.siteId ?? null, reason: 'Réorganisation', technicianName: '', notes: '' });
     setShowTransferModal(true);
   };
 
@@ -1122,11 +1123,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const changes = Array.isArray(ev.changes) ? ev.changes : [];
     const loc  = changes.find((c: any) => c.field === 'location');
     const dept = changes.find((c: any) => c.field === 'department');
+    const site = changes.find((c: any) => c.field === 'siteId');
     return {
-      fromLocation: loc?.from  || '',
-      toLocation:   loc?.to    || '',
-      fromDept:     dept?.from || '',
-      toDept:       dept?.to   || ev.department || '',
+      fromLocation: loc?.from      || '',
+      toLocation:   loc?.to        || '',
+      fromDept:     dept?.from     || '',
+      toDept:       dept?.to       || ev.department || '',
+      fromSiteName: site?.fromName || (site?.from ? `Site #${site.from}` : ''),
+      toSiteName:   site?.toName   || (site?.to   ? `Site #${site.to}`   : ''),
+      siteChanged:  !!site,
     };
   };
 
@@ -2473,7 +2478,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button
                 onClick={() => {
                   setTransferTarget(null);
-                  setTransferForm({ toLocation: '', toDepartment: '', reason: 'Réorganisation', technicianName: '', notes: '' });
+                  setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '' });
                   setShowTransferModal(true);
                 }}
                 className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2"
@@ -2497,14 +2502,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      {['Date', 'Équipement', 'De (lieu · service)', 'Vers (lieu · service)', 'Technicien'].map(h => (
+                      {['Date', 'Équipement', 'Type', 'De', 'Vers', 'Technicien'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {allTransfers.map(ev => {
-                      const { fromLocation, toLocation, fromDept, toDept } = getTransferLocations(ev);
+                      const { fromLocation, toLocation, fromDept, toDept, fromSiteName, toSiteName, siteChanged } = getTransferLocations(ev);
+                      const locationChanged = fromLocation !== toLocation || fromDept !== toDept;
                       return (
                         <tr key={ev.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
@@ -2513,11 +2519,27 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           <td className="px-4 py-3">
                             <span className="font-medium text-gray-900">{ev.equipmentName}</span>
                           </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              {siteChanged && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                  <Globe className="w-3 h-3" /> Site
+                                </span>
+                              )}
+                              {locationChanged && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                                  <Building2 className="w-3 h-3" /> Bureau
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-gray-600">
+                            {siteChanged && fromSiteName && <p className="text-xs text-blue-600 font-medium">{fromSiteName}</p>}
                             <span className="font-medium">{fromLocation}</span>
                             {fromDept && <span className="text-gray-400"> · {fromDept}</span>}
                           </td>
                           <td className="px-4 py-3">
+                            {siteChanged && toSiteName && <p className="text-xs text-blue-600 font-medium flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" />{toSiteName}</p>}
                             <span className="inline-flex items-center gap-1 font-medium text-purple-700">
                               <ArrowRightLeft className="w-3 h-3" /> {toLocation}
                             </span>
@@ -2721,7 +2743,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     const eq = equipments.find(x => x.id === Number(e.target.value)) ?? null;
                     if (eq) {
                       setTransferTarget(eq);
-                      setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department }));
+                      setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department, toSiteId: eq.siteId ?? null }));
                     }
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 text-sm"
@@ -2733,14 +2755,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </select>
               </div>
             ) : (
-              <p className="text-sm text-gray-500 mb-4">
-                <span className="font-medium text-gray-700">{transferTarget.name}</span> — actuellement à <span className="font-medium">{transferTarget.location}</span> ({transferTarget.department})
-              </p>
+              <div className="mb-4 rounded-lg bg-purple-50 border border-purple-100 px-3 py-2 text-sm text-gray-600 space-y-0.5">
+                <p><span className="font-semibold text-gray-800">{transferTarget.name}</span></p>
+                <p>Bureau actuel : <span className="font-medium">{transferTarget.location || '—'}</span> · {transferTarget.department || '—'}</p>
+                {transferTarget.siteId && <p>Site actuel : <span className="font-medium">{sites.find(s => s.id === transferTarget.siteId)?.name ?? `Site #${transferTarget.siteId}`}</span></p>}
+              </div>
             )}
 
-            <div className="space-y-4">
+            <div className="space-y-3">
+              {/* ── Site destination ── */}
+              {sites.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Globe className="inline w-3.5 h-3.5 mr-1 text-blue-500" />Transfert de site (optionnel)
+                  </label>
+                  <select value={transferForm.toSiteId ?? ''}
+                    onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm">
+                    <option value="">— Même site / Aucun site —</option>
+                    {sites.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} — {s.city}, {s.country}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {/* ── Bureau / localisation ── */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nouvelle localisation *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <Building2 className="inline w-3.5 h-3.5 mr-1 text-purple-500" />Nouveau bureau / localisation *
+                </label>
                 <input type="text" value={transferForm.toLocation}
                   onChange={(e) => setTransferForm({ ...transferForm, toLocation: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
@@ -2759,6 +2802,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm">
                   <option>Réorganisation</option>
+                  <option>Transfert de site</option>
                   <option>Maintenance</option>
                   <option>Demande du service</option>
                   <option>Remplacement</option>
