@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -368,6 +368,46 @@ app.get('/api/equipments/export', authenticate, requirePermission('lecture'), as
   }
 }));
 
+// ─── Sites ────────────────────────────────────────────────────────────────────
+
+app.get('/api/sites', authenticate, asyncHandler(async (req, res) => {
+  res.json(await getSites());
+}));
+
+app.post('/api/sites', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { name, city, country, address, description } = req.body;
+  if (!name?.trim()) return res.status(400).json({ message: 'Le nom du site est requis.' });
+  const site = await createSite({ name: name.trim(), city, country, address, description });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Création site', `Site "${name}" créé`, getClientIp(req));
+  res.status(201).json(site);
+}));
+
+app.put('/api/sites/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid site ID' });
+  const { name, city, country, address, description } = req.body;
+  if (!name?.trim()) return res.status(400).json({ message: 'Le nom du site est requis.' });
+  const site = await updateSite(id, { name: name.trim(), city, country, address, description });
+  if (!site) return res.status(404).json({ message: 'Site introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Modification site', `Site "${name}" modifié`, getClientIp(req));
+  res.json(site);
+}));
+
+app.delete('/api/sites/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid site ID' });
+  try {
+    const deleted = await deleteSite(id);
+    if (!deleted) return res.status(404).json({ message: 'Site introuvable.' });
+    logActivity(req.user.id, req.user.username, req.user.name, 'Suppression site', `Site #${id} supprimé`, getClientIp(req));
+    res.status(204).send();
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+}));
+
+// ─── Equipments ───────────────────────────────────────────────────────────────
+
 app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
   // Validate equipment data
   const validation = validateEquipment(req.body);
@@ -384,26 +424,15 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
       `INSERT INTO equipments
          (name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+          technician_name, visit_date, intervention_details, site_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [
-        e.name,
-        e.type,
-        e.brand || '',
-        e.model || '',
-        e.serialNumber || '',
-        e.ipAddress || '',
-        e.location || '',
-        e.department || '',
-        e.status || 'actif',
-        e.purchaseDate || '',
-        e.warranty || '',
-        e.lastMaintenance || '',
-        e.visited || false,
-        e.technicianName || '',
-        e.visitDate || '',
-        e.interventionDetails || ''
+        e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
+        e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
+        e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
+        e.visited || false, e.technicianName || '', e.visitDate || '',
+        e.interventionDetails || '', e.siteId || null
       ]
     );
 
@@ -450,15 +479,15 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
          name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
          location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
          last_maintenance=$12, visited=$13, technician_name=$14,
-         visit_date=$15, intervention_details=$16
-       WHERE id=$17
+         visit_date=$15, intervention_details=$16, site_id=$17
+       WHERE id=$18
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
-        e.interventionDetails || '', id
+        e.interventionDetails || '', e.siteId || null, id
       ]
     );
 

@@ -112,6 +112,21 @@ async function initDB() {
   }
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS sites (
+      id          SERIAL PRIMARY KEY,
+      name        VARCHAR(200) NOT NULL,
+      city        VARCHAR(100) NOT NULL DEFAULT '',
+      country     VARCHAR(100) NOT NULL DEFAULT '',
+      address     TEXT         NOT NULL DEFAULT '',
+      description TEXT         NOT NULL DEFAULT '',
+      created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // Migration: add site_id to equipments
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS site_id INTEGER DEFAULT NULL`);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS equipment_events (
       id              SERIAL PRIMARY KEY,
       equipment_id    INTEGER,
@@ -423,7 +438,55 @@ export function rowToEquipment(row) {
     visitDate: row.visit_date,
     interventionDetails: row.intervention_details,
     replacedById: row.replaced_by_id ?? null,
+    siteId: row.site_id ?? null,
   };
+}
+
+// ─── Sites ────────────────────────────────────────────────────────────────────
+
+export async function getSites() {
+  await initDB();
+  const { rows } = await pool.query(`
+    SELECT s.*, COUNT(e.id)::int AS equipment_count
+    FROM sites s
+    LEFT JOIN equipments e ON e.site_id = s.id
+    GROUP BY s.id
+    ORDER BY s.country, s.city, s.name
+  `);
+  return rows.map(r => ({
+    id: r.id, name: r.name, city: r.city, country: r.country,
+    address: r.address, description: r.description,
+    createdAt: r.created_at, equipmentCount: r.equipment_count,
+  }));
+}
+
+export async function createSite({ name, city, country, address, description }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `INSERT INTO sites (name, city, country, address, description)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [name, city || '', country || '', address || '', description || '']
+  );
+  return { ...rows[0], equipmentCount: 0 };
+}
+
+export async function updateSite(id, { name, city, country, address, description }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `UPDATE sites SET name=$1, city=$2, country=$3, address=$4, description=$5 WHERE id=$6 RETURNING *`,
+    [name, city || '', country || '', address || '', description || '', id]
+  );
+  return rows[0] || null;
+}
+
+export async function deleteSite(id) {
+  await initDB();
+  const { rows: linked } = await pool.query('SELECT COUNT(*) FROM equipments WHERE site_id=$1', [id]);
+  if (parseInt(linked[0].count, 10) > 0) {
+    throw Object.assign(new Error('Ce site possède des équipements. Réaffectez-les avant de supprimer le site.'), { status: 409 });
+  }
+  const { rows } = await pool.query('DELETE FROM sites WHERE id=$1 RETURNING id', [id]);
+  return rows[0] || null;
 }
 
 export async function getTransferEvents({ department, from, to, limit = 500 } = {}) {

@@ -4,7 +4,7 @@ import {
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
   XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
-  Wrench, CircleCheck, Archive
+  Wrench, CircleCheck, Archive, Globe, Building2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -53,6 +53,7 @@ interface Equipment {
   visitDate: string;
   interventionDetails: string;
   replacedById?: number | null;
+  siteId?: number | null;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -98,6 +99,25 @@ interface MaintenanceRecord {
   priority: MaintenancePriority;
 }
 
+interface Site {
+  id: number;
+  name: string;
+  city: string;
+  country: string;
+  address: string;
+  description: string;
+  createdAt: string;
+  equipmentCount: number;
+}
+
+interface SiteForm {
+  name: string;
+  city: string;
+  country: string;
+  address: string;
+  description: string;
+}
+
 interface ReformForm {
   reason: string;
   replacedById: number | null;
@@ -131,7 +151,8 @@ const defaultFormData: EquipmentFormData = {
   visited: false,
   technicianName: '',
   visitDate: '',
-  interventionDetails: ''
+  interventionDetails: '',
+  siteId: null,
 };
 
 const equipmentTypes = [
@@ -379,6 +400,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
   const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
+
+  // Sites
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const [showSiteModal, setShowSiteModal] = useState(false);
+  const defaultSiteForm: SiteForm = { name: '', city: '', country: '', address: '', description: '' };
+  const [siteForm, setSiteForm] = useState<SiteForm>(defaultSiteForm);
+  const [editingSiteId, setEditingSiteId] = useState<number | null>(null);
+  const [siteLoading, setSiteLoading] = useState(false);
 
   // Transfer module
   const [showTransferModule, setShowTransferModule] = useState(false);
@@ -763,6 +793,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   useEffect(() => {
     fetchEquipments();
     fetchUsers();
+    fetchSites();
   }, []);
 
   // Real-time monitoring polling
@@ -1049,6 +1080,41 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     }
   };
 
+  const fetchSites = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/sites`, { headers: authHeaders() });
+      if (r.ok) setSites(await r.json());
+    } catch {}
+  };
+
+  const handleSaveSite = async () => {
+    if (!siteForm.name.trim()) { alert('Le nom du site est requis.'); return; }
+    setSiteLoading(true);
+    try {
+      const url = editingSiteId ? `${API_BASE_URL}/api/sites/${editingSiteId}` : `${API_BASE_URL}/api/sites`;
+      const r = await fetch(url, {
+        method: editingSiteId ? 'PUT' : 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(siteForm),
+      });
+      if (!r.ok) { const d = await r.json(); alert(d.message || 'Erreur'); return; }
+      await fetchSites();
+      setEditingSiteId(null);
+      setSiteForm(defaultSiteForm);
+    } catch { alert('Erreur réseau.'); }
+    setSiteLoading(false);
+  };
+
+  const handleDeleteSite = async (id: number) => {
+    if (!confirm('Supprimer ce site ?')) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/sites/${id}`, { method: 'DELETE', headers: authHeaders() });
+      if (!r.ok) { const d = await r.json(); alert(d.message); return; }
+      if (selectedSiteId === id) setSelectedSiteId(null);
+      await fetchSites();
+    } catch { alert('Erreur réseau.'); }
+  };
+
   const getTransferLocations = (ev: any) => {
     const changes = Array.isArray(ev.changes) ? ev.changes : [];
     const loc  = changes.find((c: any) => c.field === 'location');
@@ -1252,10 +1318,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       equipment.serialNumber.toLowerCase().includes(lowerSearch) ||
       equipment.ipAddress.toLowerCase().includes(lowerSearch);
 
-    const matchesType = filterType === 'all' || equipment.type === filterType;
+    const matchesType   = filterType   === 'all' || equipment.type   === filterType;
     const matchesStatus = filterStatus === 'all' || equipment.status === filterStatus;
+    const matchesSite   = selectedSiteId === null || equipment.siteId === selectedSiteId;
 
-    return matchesSearch && matchesType && matchesStatus;
+    return matchesSearch && matchesType && matchesStatus && matchesSite;
   });
 
   const getTypeIcon = (type: EquipmentType) => {
@@ -1356,6 +1423,46 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
           </div>
         </div>
+
+        {/* ── Sélecteur de sites ── */}
+        {(sites.length > 0 || isAdmin) && (
+          <div className="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100">
+              <Globe className="w-4 h-4 text-blue-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sites</span>
+              {isAdmin && (
+                <button onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
+                  className="ml-auto text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> Gérer les sites
+                </button>
+              )}
+            </div>
+            <div className="flex items-stretch gap-0 overflow-x-auto">
+              {/* Tous les sites */}
+              <button
+                onClick={() => setSelectedSiteId(null)}
+                className={`flex-shrink-0 flex flex-col items-center justify-center px-5 py-3 text-sm font-medium border-b-2 transition-colors ${selectedSiteId === null ? 'border-blue-600 text-blue-700 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+              >
+                <span className="font-semibold">Tous</span>
+                <span className="text-xs opacity-70">{equipments.length} équip.</span>
+              </button>
+              {sites.map(site => {
+                const count = equipments.filter(e => e.siteId === site.id).length;
+                return (
+                  <button key={site.id}
+                    onClick={() => setSelectedSiteId(site.id)}
+                    className={`flex-shrink-0 flex flex-col items-start justify-center px-5 py-3 text-sm border-b-2 border-l border-gray-100 transition-colors ${selectedSiteId === site.id ? 'border-b-blue-600 text-blue-700 bg-blue-50' : 'border-b-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+                  >
+                    <span className="font-semibold">{site.name}</span>
+                    <span className="text-xs opacity-70 flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1529,6 +1636,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         {equipmentTypes.find((t) => t.value === equipment.type)?.label}
                       </td>
                       <td className="px-6 py-4">
+                        {equipment.siteId && (
+                          <div className="text-xs text-blue-600 flex items-center gap-1 mb-0.5">
+                            <Building2 className="w-3 h-3" />
+                            {sites.find(s => s.id === equipment.siteId)?.name}
+                          </div>
+                        )}
                         <div className="text-sm text-gray-900 flex items-center">
                           <MapPin className="w-3 h-3 mr-1 text-gray-400" />
                           {equipment.location}
@@ -1702,6 +1815,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="192.168.1.100"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Site</label>
+                    <select
+                      value={formData.siteId ?? ''}
+                      onChange={e => setFormData({ ...formData, siteId: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">— Aucun site —</option>
+                      {sites.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} — {s.city}{s.country ? `, ${s.country}` : ''}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
@@ -2401,6 +2528,109 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modale Gestion des Sites ════════════════════════════════════ */}
+      {showSiteModal && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowSiteModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <Globe className="w-5 h-5 text-blue-600" />
+                </div>
+                <h2 className="text-lg font-bold text-gray-900">Gestion des sites</h2>
+              </div>
+              <button onClick={() => setShowSiteModal(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+            </div>
+
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+              {/* Liste des sites */}
+              <div className="flex-1 overflow-y-auto p-4 border-r border-gray-100">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">{sites.length} site(s)</p>
+                {sites.length === 0 && (
+                  <div className="text-center py-8 text-gray-400">
+                    <Globe className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Aucun site créé.</p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {sites.map(site => (
+                    <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-blue-400 bg-blue-50' : 'border-gray-100 hover:bg-gray-50'}`}
+                      onClick={() => { setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description }); }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-gray-900 text-sm">{site.name}</p>
+                          <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''}
+                          </p>
+                          {site.address && <p className="text-xs text-gray-400 mt-0.5">{site.address}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs text-blue-600 font-medium">{site.equipmentCount} équip.</span>
+                          <button onClick={e => { e.stopPropagation(); handleDeleteSite(site.id); }}
+                            className="text-red-400 hover:text-red-600" title="Supprimer">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Formulaire */}
+              <div className="w-full md:w-72 p-4 shrink-0">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                  {editingSiteId ? 'Modifier le site' : 'Nouveau site'}
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Nom du site *</label>
+                    <input type="text" value={siteForm.name} onChange={e => setSiteForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="Ex: Siège Paris" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Ville</label>
+                      <input type="text" value={siteForm.city} onChange={e => setSiteForm(f => ({ ...f, city: e.target.value }))}
+                        placeholder="Paris" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Pays</label>
+                      <input type="text" value={siteForm.country} onChange={e => setSiteForm(f => ({ ...f, country: e.target.value }))}
+                        placeholder="France" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Adresse</label>
+                    <input type="text" value={siteForm.address} onChange={e => setSiteForm(f => ({ ...f, address: e.target.value }))}
+                      placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+                    <textarea rows={2} value={siteForm.description} onChange={e => setSiteForm(f => ({ ...f, description: e.target.value }))}
+                      placeholder="Informations complémentaires…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    {editingSiteId && (
+                      <button onClick={() => { setEditingSiteId(null); setSiteForm(defaultSiteForm); }}
+                        className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+                        Annuler
+                      </button>
+                    )}
+                    <button onClick={handleSaveSite} disabled={siteLoading || !siteForm.name.trim()}
+                      className="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                      {siteLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      {editingSiteId ? 'Enregistrer' : 'Créer le site'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
