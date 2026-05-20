@@ -1381,15 +1381,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-xl shadow-lg mb-6 p-6" style={{background:'linear-gradient(135deg, #0f1b35 0%, #1a3a6b 45%, #1e5799 100%)'}}>
+        <div className="relative rounded-xl shadow-lg mb-6 p-6" style={{background:'linear-gradient(135deg, #1c1917 0%, #292524 50%, #44403c 100%)'}}>
           <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-            <div className="absolute inset-0 opacity-25" style={{backgroundImage:'radial-gradient(ellipse at 80% 30%, #60a5fa 0%, transparent 55%)'}} />
-            <div className="absolute inset-0 opacity-15" style={{backgroundImage:'radial-gradient(ellipse at 5% 90%, #0ea5e9 0%, transparent 45%)'}} />
+            <div className="absolute inset-0 opacity-20" style={{backgroundImage:'radial-gradient(ellipse at 80% 25%, #d97706 0%, transparent 50%)'}} />
+            <div className="absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(ellipse at 5% 85%, #a8a29e 0%, transparent 50%)'}} />
           </div>
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
-              <p className="text-blue-100 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
+              <p className="text-stone-300 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
             </div>
             <div className="flex items-center gap-3">
               {/* User pill */}
