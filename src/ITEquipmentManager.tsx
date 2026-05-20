@@ -1618,97 +1618,117 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-5 mb-6 border border-gray-100">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+        <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100 overflow-hidden">
+          {/* Ligne 1 : recherche + actions */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Rechercher..."
+                placeholder="Rechercher un équipement, marque, modèle…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white focus:border-transparent transition-all"
               />
             </div>
 
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value as 'all' | EquipmentType)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            {/* Actualiser */}
+            <button
+              onClick={handleRefresh}
+              title="Actualiser"
+              className="p-2.5 rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
             >
-              <option value="all">Tous les types</option>
-              {equipmentTypes.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
+              <RefreshCcw className="w-4 h-4" />
+            </button>
 
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as 'all' | EquipmentStatus)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">Tous les statuts</option>
-              <option value="actif">Actif</option>
-              <option value="inactif">Inactif</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="defaillant">Défaillant</option>
-            </select>
-
-            <div className="flex flex-wrap items-center gap-2 justify-between md:justify-end">
+            {/* Exporter */}
+            <div className="relative" ref={exportMenuRef}>
               <button
-                onClick={handleRefresh}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                onClick={() => setShowExportMenu((v) => !v)}
+                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
               >
-                <RefreshCcw className="w-4 h-4" />
-                Actualiser
+                <Download className="w-4 h-4" />
+                Exporter
+                <ChevronDown className={`w-3 h-3 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
-              <div className="relative" ref={exportMenuRef}>
-                <button
-                  onClick={() => setShowExportMenu((v) => !v)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <Download className="w-4 h-4" />
-                  Exporter
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                {showExportMenu && (
-                  <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white shadow-lg">
-                    <button
-                      onClick={handleExportCsv}
-                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg"
-                    >
-                      <Download className="w-4 h-4 text-gray-500" />
-                      CSV
-                    </button>
-                    <button
-                      onClick={handleExportExcel}
-                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Download className="w-4 h-4 text-green-600" />
-                      Excel (.xlsx)
-                    </button>
-                    <button
-                      onClick={handleExportPdf}
-                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-b-lg"
-                    >
-                      <Download className="w-4 h-4 text-red-500" />
-                      PDF
-                    </button>
-                  </div>
-                )}
-              </div>
-              {canWrite && (
-                <button
-                  onClick={openNewEquipmentForm}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-                >
-                  <Plus className="w-4 h-4" />
-                  Nouvel équipement
-                </button>
+              {showExportMenu && (
+                <div className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-gray-200 bg-white shadow-lg py-1 overflow-hidden">
+                  <button onClick={handleExportCsv}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    <span className="w-5 h-5 rounded bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500">CSV</span>
+                    Fichier CSV
+                  </button>
+                  <button onClick={handleExportExcel}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    <span className="w-5 h-5 rounded bg-green-100 flex items-center justify-center text-xs font-bold text-green-600">XLS</span>
+                    Excel (.xlsx)
+                  </button>
+                  <button onClick={handleExportPdf}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    <span className="w-5 h-5 rounded bg-red-100 flex items-center justify-center text-xs font-bold text-red-500">PDF</span>
+                    PDF
+                  </button>
+                </div>
               )}
             </div>
+
+            {/* Nouvel équipement */}
+            {canWrite && (
+              <button
+                onClick={openNewEquipmentForm}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Nouvel équipement
+              </button>
+            )}
+          </div>
+
+          {/* Ligne 2 : filtres + compteur */}
+          <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-gray-50">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</span>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value as 'all' | EquipmentType)}
+                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">Tous</option>
+                {equipmentTypes.map((type) => (
+                  <option key={type.value} value={type.value}>{type.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Statut</span>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as 'all' | EquipmentStatus)}
+                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">Tous</option>
+                <option value="actif">Actif</option>
+                <option value="inactif">Inactif</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="defaillant">Défaillant</option>
+                <option value="réformé">Réformé</option>
+              </select>
+            </div>
+
+            {/* Réinitialiser les filtres si actifs */}
+            {(filterType !== 'all' || filterStatus !== 'all' || searchTerm) && (
+              <button
+                onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
+                className="text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2"
+              >
+                Réinitialiser
+              </button>
+            )}
+
+            <span className="ml-auto text-xs text-gray-400 font-medium">
+              {filteredEquipments.length} résultat{filteredEquipments.length !== 1 ? 's' : ''}
+            </span>
           </div>
         </div>
 
