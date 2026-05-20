@@ -1413,7 +1413,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                   </svg>
-                  Modules
+                  Navigation
                   {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
                     <span className="bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
                       {maintenanceRecords.filter(m => m.status !== 'résolu').length}
@@ -1618,7 +1618,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100">
           {/* Ligne 1 : recherche + actions */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
             <div className="relative flex-1">
@@ -1652,7 +1652,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <ChevronDown className={`w-3 h-3 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
               {showExportMenu && (
-                <div className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-gray-200 bg-white shadow-lg py-1 overflow-hidden">
+                <div className="absolute right-0 z-50 mt-1 w-44 rounded-xl border border-gray-200 bg-white shadow-lg py-1 overflow-hidden">
                   <button onClick={handleExportCsv}
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
                     <span className="w-5 h-5 rounded bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500">CSV</span>
