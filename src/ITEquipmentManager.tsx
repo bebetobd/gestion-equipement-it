@@ -4,7 +4,7 @@ import {
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
   XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
-  Wrench, CircleCheck, Archive, Globe, Building2
+  Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList, Filter
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -422,6 +422,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reformTarget, setReformTarget] = useState<Equipment | null>(null);
   const [reformForm, setReformForm] = useState<ReformForm>({ reason: '', replacedById: null, notes: '' });
   const [reformLoading, setReformLoading] = useState(false);
+
+  // Activity log
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  const [activityEntries, setActivityEntries] = useState<any[]>([]);
+  const [activityLogLoading, setActivityLogLoading] = useState(false);
+  const [activityFilter, setActivityFilter] = useState({ username: '', dateFrom: '', dateTo: '', action: '' });
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
@@ -1148,6 +1154,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setTransferModuleLoading(false);
   };
 
+  const fetchActivityLog = async (filter = activityFilter) => {
+    setActivityLogLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '300' });
+      if (filter.username) params.append('username', filter.username);
+      if (filter.dateFrom) params.append('dateFrom', filter.dateFrom);
+      if (filter.dateTo)   params.append('dateTo', filter.dateTo);
+      if (filter.action)   params.append('action', filter.action);
+      const r = await fetch(`${API_BASE_URL}/api/admin/activity-log?${params}`, { headers: authHeaders() });
+      if (r.ok) setActivityEntries(await r.json());
+    } catch {}
+    setActivityLogLoading(false);
+  };
+
   const openReformModal = (equipment: Equipment) => {
     setReformTarget(equipment);
     setReformForm({ reason: '', replacedById: null, notes: '' });
@@ -1385,6 +1405,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   >
                     <Calendar className="w-4 h-4" />
                     Rapports
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowActivityLog(true); fetchActivityLog(); }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-teal-700 hover:bg-teal-100"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    Journal d'activité
                   </button>
                   <button
                     type="button"
@@ -3755,6 +3783,193 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Journal d'activité ═══════════════════════════════════════════════ */}
+      {showActivityLog && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-teal-100 flex items-center justify-center">
+                <ClipboardList className="w-5 h-5 text-teal-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Journal d'activité</h2>
+                <p className="text-sm text-gray-500">{activityEntries.length} entrée(s) affichée(s)</p>
+              </div>
+            </div>
+            <button onClick={() => setShowActivityLog(false)} className="p-2 rounded-lg hover:bg-gray-100">
+              <XCircle className="w-6 h-6 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Filters */}
+          <div className="px-6 py-4 bg-white border-b border-gray-100 shrink-0">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Utilisateur</label>
+                <select
+                  value={activityFilter.username}
+                  onChange={e => setActivityFilter(f => ({ ...f, username: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400"
+                >
+                  <option value="">— Tous les utilisateurs —</option>
+                  {userAccounts.map((u: UserAccount) => <option key={u.id} value={u.username}>{u.name} ({u.username})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Type d'action</label>
+                <select
+                  value={activityFilter.action}
+                  onChange={e => setActivityFilter(f => ({ ...f, action: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400"
+                >
+                  <option value="">— Toutes les actions —</option>
+                  {['Connexion','Déconnexion','Ajout équipement','Modification équipement','Suppression équipement',
+                    'Transfert équipement','Réforme équipement','Création utilisateur','Modification utilisateur',
+                    'Suppression utilisateur','Création site','Modification site','Suppression site',
+                    'Ticket maintenance','MAJ maintenance','Ajout document','Suppression document','Export CSV'].map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
+                <input type="date" value={activityFilter.dateFrom}
+                  onChange={e => setActivityFilter(f => ({ ...f, dateFrom: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
+                <input type="date" value={activityFilter.dateTo}
+                  onChange={e => setActivityFilter(f => ({ ...f, dateTo: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400" />
+              </div>
+              <button
+                onClick={() => fetchActivityLog(activityFilter)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700"
+              >
+                <Filter className="w-4 h-4" /> Filtrer
+              </button>
+              <button
+                onClick={() => {
+                  const reset = { username: '', dateFrom: '', dateTo: '', action: '' };
+                  setActivityFilter(reset);
+                  fetchActivityLog(reset);
+                }}
+                className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50"
+              >
+                Réinitialiser
+              </button>
+              {activityEntries.length > 0 && (
+                <button
+                  onClick={() => {
+                    const rows = activityEntries.map(e => ({
+                      'Date / Heure': new Date(e.createdAt).toLocaleString('fr-FR'),
+                      'Utilisateur': e.userName,
+                      'Login': e.username,
+                      'Action': e.action,
+                      'Détails': e.details,
+                      'IP': e.ip,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Journal');
+                    XLSX.writeFile(wb, `journal-activite-${new Date().toISOString().slice(0,10)}.xlsx`);
+                  }}
+                  className="ml-auto inline-flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm hover:bg-green-50"
+                >
+                  <Download className="w-4 h-4" /> Exporter Excel
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Stats bar */}
+          {activityEntries.length > 0 && (() => {
+            const connexions   = activityEntries.filter(e => e.action === 'Connexion').length;
+            const modifications = activityEntries.filter(e => e.action.includes('équipement') || e.action.includes('utilisateur') || e.action.includes('site')).length;
+            const uniqueUsers  = new Set(activityEntries.map(e => e.username)).size;
+            const lastEntry    = activityEntries[0];
+            return (
+              <div className="px-6 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border-b border-gray-100 shrink-0">
+                {[
+                  { label: 'Total actions', value: activityEntries.length, color: 'text-teal-700', bg: 'bg-teal-50' },
+                  { label: 'Utilisateurs actifs', value: uniqueUsers, color: 'text-blue-700', bg: 'bg-blue-50' },
+                  { label: 'Connexions', value: connexions, color: 'text-green-700', bg: 'bg-green-50' },
+                  { label: 'Opérations', value: modifications, color: 'text-purple-700', bg: 'bg-purple-50' },
+                ].map(({ label, value, color, bg }) => (
+                  <div key={label} className={`${bg} rounded-lg px-4 py-2 text-center`}>
+                    <p className={`text-xl font-bold ${color}`}>{value}</p>
+                    <p className="text-xs text-gray-500">{label}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto px-6 py-4">
+            {activityLogLoading ? (
+              <div className="flex items-center justify-center h-40 text-gray-400">
+                <span className="w-6 h-6 border-2 border-teal-500 border-t-transparent rounded-full animate-spin mr-3" />
+                Chargement…
+              </div>
+            ) : activityEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-gray-400">
+                <ClipboardList className="w-10 h-10 mb-2 opacity-30" />
+                <p>Aucune activité trouvée pour ces critères.</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      {['Date / Heure', 'Utilisateur', 'Action', 'Détails', 'IP'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {activityEntries.map(entry => {
+                      const isAuth = entry.action === 'Connexion' || entry.action === 'Déconnexion';
+                      const isDanger = entry.action.includes('Suppression');
+                      const isWrite = entry.action.includes('Ajout') || entry.action.includes('Création') || entry.action.includes('Réforme') || entry.action.includes('Transfert');
+                      const badgeClass = isDanger
+                        ? 'bg-red-100 text-red-700'
+                        : isWrite
+                          ? 'bg-purple-100 text-purple-700'
+                          : isAuth
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-600';
+                      return (
+                        <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">
+                            {new Date(entry.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-gray-900">{entry.userName}</p>
+                            <p className="text-xs text-gray-400">{entry.username}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${badgeClass}`}>
+                              {entry.action}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs max-w-xs">
+                            <span className="line-clamp-2">{entry.details || '—'}</span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">{entry.ip || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

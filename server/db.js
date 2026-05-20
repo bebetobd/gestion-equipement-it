@@ -203,6 +203,22 @@ async function initDB() {
     CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_records(status)
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_activity_log (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER,
+      username   VARCHAR(100) NOT NULL DEFAULT '',
+      user_name  VARCHAR(200) NOT NULL DEFAULT '',
+      action     VARCHAR(200) NOT NULL DEFAULT '',
+      details    TEXT         NOT NULL DEFAULT '',
+      ip         VARCHAR(50)  NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_username   ON user_activity_log(username)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_created_at ON user_activity_log(created_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_action     ON user_activity_log(action)`);
+
   initialized = true;
 }
 
@@ -503,4 +519,34 @@ export async function getTransferEvents({ department, from, to, limit = 500 } = 
     params
   );
   return rows.map(rowToEvent);
+}
+
+export async function insertActivityLog({ userId, username, userName, action, details, ip }) {
+  await initDB();
+  await pool.query(
+    `INSERT INTO user_activity_log (user_id, username, user_name, action, details, ip)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [userId ?? null, username || '', userName || '', action || '', details || '', ip || '']
+  );
+}
+
+export async function queryActivityLog({ username, dateFrom, dateTo, action, limit = 200 } = {}) {
+  await initDB();
+  const conditions = [];
+  const params = [];
+  let i = 1;
+  if (username) { conditions.push(`username = $${i++}`); params.push(username); }
+  if (action)   { conditions.push(`action ILIKE $${i++}`); params.push(`%${action}%`); }
+  if (dateFrom) { conditions.push(`created_at >= $${i++}`); params.push(dateFrom); }
+  if (dateTo)   { conditions.push(`created_at < $${i++}`); params.push(dateTo + 'T23:59:59.999Z'); }
+  params.push(Math.min(Number(limit) || 200, 500));
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const { rows } = await pool.query(
+    `SELECT * FROM user_activity_log ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+    params
+  );
+  return rows.map(r => ({
+    id: r.id, userId: r.user_id, username: r.username, userName: r.user_name,
+    action: r.action, details: r.details, ip: r.ip, createdAt: r.created_at
+  }));
 }

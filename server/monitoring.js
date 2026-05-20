@@ -2,6 +2,8 @@
  * Session and activity monitoring
  */
 
+import { insertActivityLog } from './db.js';
+
 export const activeSessions = new Map();  // userId → session info
 export const tokenToUserId = new Map();   // token → userId
 
@@ -44,12 +46,15 @@ export function logActivity(userId, username, name, action, details, ip) {
   };
   
   activityLog.unshift(entry);
-  
+
   // Keep only last 500 entries
   if (activityLog.length > 500) {
     activityLog.pop();
   }
-  
+
+  // Persist to DB (non-blocking)
+  insertActivityLog({ userId, username, userName: name, action, details, ip }).catch(() => {});
+
   console.log(`[ACTIVITY] ${action} - User: ${username} - IP: ${ip}`);
 }
 

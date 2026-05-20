@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -135,6 +135,18 @@ app.get('/api/admin/activities', authenticate, requireAdmin, (req, res) => {
   const userId = req.query.userId ? Number(req.query.userId) : null;
   res.json(getActivityLog(userId, limit));
 });
+
+app.get('/api/admin/activity-log', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { username, dateFrom, dateTo, action, limit } = req.query;
+  const entries = await queryActivityLog({
+    username: username || null,
+    dateFrom: dateFrom || null,
+    dateTo: dateTo || null,
+    action: action || null,
+    limit: limit ? Number(limit) : 200
+  });
+  res.json(entries);
+}));
 
 
 // ─── User routes (admin only) ─────────────────────────────────────────────────
