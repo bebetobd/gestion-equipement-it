@@ -843,6 +843,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return () => clearTimeout(timer);
   }, [transferModuleFilter, showTransferModule]);
 
+  // Auto-fetch report by date when filters change (debounced 500ms)
+  useEffect(() => {
+    if (!showReportsModal || reportsTab !== 'date') return;
+    const timer = setTimeout(() => fetchReportByDate(), 500);
+    return () => clearTimeout(timer);
+  }, [reportDateFrom, reportDateTo, reportDeptFilter, reportTypeFilter, showReportsModal, reportsTab]);
+
+  // Auto-fetch report by user when filters change (debounced 500ms)
+  useEffect(() => {
+    if (!showReportsModal || reportsTab !== 'user') return;
+    const timer = setTimeout(() => fetchReportByUser(), 500);
+    return () => clearTimeout(timer);
+  }, [reportUserFrom, reportUserTo, reportUserDeptFilter, showReportsModal, reportsTab]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -3200,10 +3214,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <option value="imprimante">Imprimante</option>
                       </select>
                     </div>
-                    <button onClick={fetchReportByDate}
-                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
-                      <Search className="w-4 h-4" /> Rechercher
-                    </button>
                     {reportDateEvents.length > 0 && (
                       <>
                         <button onClick={() => exportReportExcel('Rapport par date', reportDateEvents)}
@@ -3221,7 +3231,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {reportDateLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
 
                   {!reportDateLoading && reportDateEvents.length === 0 && (
-                    <div className="text-center py-12 text-gray-400">Sélectionnez une période et cliquez sur Rechercher.</div>
+                    <div className="text-center py-12 text-gray-400">Aucun événement trouvé pour ces critères.</div>
                   )}
 
                   {reportDateEvents.length > 0 && (
@@ -3361,11 +3371,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         ))}
                       </select>
                     </div>
-                    <button onClick={() => fetchReportByUser()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
-                      <Search className="w-4 h-4" /> Générer
-                    </button>
-                    <button onClick={() => { setReportUserFrom(''); setReportUserTo(''); setReportUserDeptFilter(''); fetchReportByUser({ from:'', to:'', department:'' }); }}
+                    <button onClick={() => { setReportUserFrom(''); setReportUserTo(''); setReportUserDeptFilter(''); }}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                       <RefreshCcw className="w-3.5 h-3.5" /> Réinitialiser
                     </button>
@@ -3397,7 +3403,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {!reportUserLoading && reportUserStats.length === 0 && (
                     <div className="text-center py-12 text-gray-400">
                       <User className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p>Cliquez sur "Générer" pour afficher les rapports utilisateurs.</p>
+                      <p>Aucune donnée disponible pour ces critères.</p>
                     </div>
                   )}
 
