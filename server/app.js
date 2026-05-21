@@ -68,8 +68,9 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
     const jwtSecret = process.env.JWT_SECRET || 'gestion-it-secret-2024';
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '8h';
 
+    const allowedSiteIds = user.allowed_site_ids ?? [];
     const token = jwt.sign(
-      { id: user.id, username: user.username, name: user.name, role: user.role, permissions },
+      { id: user.id, username: user.username, name: user.name, role: user.role, permissions, allowedSiteIds },
       jwtSecret,
       { expiresIn: jwtExpiresIn }
     );
@@ -104,7 +105,8 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
         username: user.username,
         name: user.name,
         role: user.role,
-        permissions
+        permissions,
+        allowedSiteIds
       }
     });
   } catch (err) {
@@ -156,9 +158,9 @@ app.get('/api/admin/activity-log', authenticate, requireAdmin, asyncHandler(asyn
 app.get('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT id, username, name, role, permissions FROM users ORDER BY id'
+      'SELECT id, username, name, role, permissions, allowed_site_ids FROM users ORDER BY id'
     );
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, allowedSiteIds: r.allowed_site_ids ?? [] })));
   } catch (err) {
     handleError(err, res, 'Erreur lors de la récupération des utilisateurs.');
   }
@@ -175,15 +177,16 @@ app.post('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res)
   }
 
   try {
-    const { username, name, role, password, permissions } = req.body;
+    const { username, name, role, password, permissions, allowedSiteIds } = req.body;
     const hashed = await bcrypt.hash(password, 10);
     const safePerms = Array.isArray(permissions) ? permissions : ['lecture'];
+    const safeSites = Array.isArray(allowedSiteIds) ? allowedSiteIds.map(Number).filter(Boolean) : [];
 
     const { rows } = await query(
-      `INSERT INTO users (username, name, role, password, permissions)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, username, name, role, permissions`,
-      [username.trim(), name.trim(), role, hashed, safePerms]
+      `INSERT INTO users (username, name, role, password, permissions, allowed_site_ids)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, username, name, role, permissions, allowed_site_ids`,
+      [username.trim(), name.trim(), role, hashed, safePerms, safeSites]
     );
 
     logActivity(
@@ -195,7 +198,7 @@ app.post('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res)
       getClientIp(req)
     );
 
-    res.status(201).json(rows[0]);
+    res.status(201).json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [] });
   } catch (err) {
     handleError(err, res, 'Erreur lors de la création.');
   }
@@ -271,13 +274,19 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       updateFields.push(`permissions = $${paramCount++}`);
       params.push(permissions);
     }
+    const { allowedSiteIds } = req.body;
+    if (allowedSiteIds !== undefined) {
+      const safeSites = Array.isArray(allowedSiteIds) ? allowedSiteIds.map(Number).filter(Boolean) : [];
+      updateFields.push(`allowed_site_ids = $${paramCount++}`);
+      params.push(safeSites);
+    }
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
 
     params.push(id);
-    const updateSQL = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, role, permissions`;
+    const updateSQL = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, role, permissions, allowed_site_ids`;
 
     const { rows } = await query(updateSQL, params);
 
@@ -294,7 +303,7 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       getClientIp(req)
     );
 
-    res.json(rows[0]);
+    res.json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [] });
   } catch (err) {
     handleError(err, res, 'Erreur lors de la modification.');
   }
@@ -343,7 +352,16 @@ app.delete('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req
 
 app.get('/api/equipments', authenticate, requirePermission('lecture'), asyncHandler(async (req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM equipments ORDER BY id');
+    const allowedSiteIds = req.user.allowedSiteIds ?? [];
+    let rows;
+    if (req.user.role !== 'admin' && allowedSiteIds.length > 0) {
+      ({ rows } = await query(
+        'SELECT * FROM equipments WHERE site_id = ANY($1::integer[]) ORDER BY id',
+        [allowedSiteIds]
+      ));
+    } else {
+      ({ rows } = await query('SELECT * FROM equipments ORDER BY id'));
+    }
     res.json(rows.map(rowToEquipment));
   } catch (err) {
     handleError(err, res, 'Erreur lors de la récupération des équipements.');

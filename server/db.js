@@ -219,6 +219,9 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_created_at ON user_activity_log(created_at)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ual_action     ON user_activity_log(action)`);
 
+  // Migration: add allowed_site_ids to users
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_site_ids INTEGER[] NOT NULL DEFAULT '{}'`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_sessions (
       user_id   INTEGER PRIMARY KEY,

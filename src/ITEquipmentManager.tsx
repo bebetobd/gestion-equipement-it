@@ -16,6 +16,7 @@ interface AuthUser {
   name: string;
   role: string;
   permissions: string[];
+  allowedSiteIds?: number[];
 }
 
 type Permission = 'lecture' | 'ecriture' | 'modification';
@@ -249,6 +250,7 @@ interface UserAccount {
   name: string;
   role: 'admin' | 'technicien' | 'user';
   permissions: string[];
+  allowedSiteIds: number[];
 }
 
 interface UserFormData {
@@ -257,6 +259,7 @@ interface UserFormData {
   role: 'admin' | 'technicien' | 'user';
   password: string;
   permissions: Permission[];
+  allowedSiteIds: number[];
 }
 
 interface SessionInfo {
@@ -350,6 +353,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const canRead   = isAdmin || (currentUser.permissions ?? []).includes('lecture');
   const canWrite  = isAdmin || (currentUser.permissions ?? []).includes('ecriture');
   const canModify = isAdmin || (currentUser.permissions ?? []).includes('modification');
+  const userAllowedSiteIds = currentUser.allowedSiteIds ?? [];
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',
@@ -371,7 +375,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [showUserModal, setShowUserModal] = useState(false);
   const [showUserFormModal, setShowUserFormModal] = useState(false);
   const [userEditingId, setUserEditingId] = useState<number | null>(null);
-  const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'] });
+  const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -717,14 +721,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openUserCreate = () => {
     setUserEditingId(null);
-    setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'] });
+    setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
     setUserFormError(null);
     setShowUserFormModal(true);
   };
 
   const openUserEdit = (user: UserAccount) => {
     setUserEditingId(user.id);
-    setUserFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? []) as Permission[] });
+    setUserFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [] });
     setUserFormError(null);
     setShowUserFormModal(true);
   };
@@ -745,7 +749,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       name: userFormData.name.trim(),
       role: userFormData.role,
       password: userFormData.password.trim() || undefined,
-      permissions: userFormData.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : userFormData.permissions
+      permissions: userFormData.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : userFormData.permissions,
+      allowedSiteIds: userFormData.role === 'admin' ? [] : userFormData.allowedSiteIds
     };
 
     try {
@@ -772,7 +777,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       }
 
       setShowUserFormModal(false);
-      setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'] });
+      setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
       await fetchUsers();
     } catch {
       setUserFormError('Impossible de sauvegarder l\'utilisateur.');
@@ -823,6 +828,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const timer = setTimeout(() => fetchActivityLog(activityFilter), 400);
     return () => clearTimeout(timer);
   }, [activityFilter, showActivityLog]);
+
+  // Auto-fetch transfers when filters change (debounced 400ms)
+  useEffect(() => {
+    if (!showTransferModule) return;
+    const timer = setTimeout(() => fetchAllTransfers(transferModuleFilter), 400);
+    return () => clearTimeout(timer);
+  }, [transferModuleFilter, showTransferModule]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1528,7 +1540,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
               {showSiteDropdown && (
                 <div className="absolute left-0 top-full mt-1 w-full min-w-[260px] bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
-                  {sites.map(site => {
+                  {(isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id))).map(site => {
                     const count = equipments.filter(e => e.siteId === site.id).length;
                     const selected = selectedSiteId === site.id;
                     return (
@@ -2597,11 +2609,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <input type="date" value={transferModuleFilter.to}
               onChange={e => setTransferModuleFilter(f => ({ ...f, to: e.target.value }))}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400" />
-            <button onClick={() => fetchAllTransfers(transferModuleFilter)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2">
-              <Search className="w-4 h-4" /> Filtrer
-            </button>
-            <button onClick={() => { setTransferModuleFilter({ department: '', from: '', to: '' }); fetchAllTransfers({ department: '', from: '', to: '' }); }}
+            <button onClick={() => { setTransferModuleFilter({ department: '', from: '', to: '' }); }}
               className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
               <RefreshCcw className="w-4 h-4" /> Réinitialiser
             </button>
@@ -2895,21 +2903,32 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             <div className="space-y-3">
               {/* ── Site destination ── */}
-              {sites.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    <Globe className="inline w-3.5 h-3.5 mr-1 text-blue-500" />Transfert de site (optionnel)
-                  </label>
+              <div className="rounded-xl border-2 border-purple-100 bg-purple-50 p-3">
+                <label className="block text-sm font-semibold text-purple-800 mb-2 flex items-center gap-1.5">
+                  <Globe className="w-4 h-4" />Site de destination
+                </label>
+                {sites.length === 0 ? (
+                  <p className="text-xs text-purple-500 italic">Aucun site configuré — configurez des sites dans le menu Administration.</p>
+                ) : (
                   <select value={transferForm.toSiteId ?? ''}
                     onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm">
-                    <option value="">— Même site / Aucun site —</option>
+                    className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm bg-white">
+                    <option value="">— Même site / Sans site —</option>
                     {sites.map(s => (
-                      <option key={s.id} value={s.id}>{s.name} — {s.city}, {s.country}</option>
+                      <option key={s.id} value={s.id}>{s.name}{s.city ? ` — ${s.city}` : ''}{s.country ? `, ${s.country}` : ''}</option>
                     ))}
                   </select>
-                </div>
-              )}
+                )}
+                {transferForm.toSiteId && (() => {
+                  const dest = sites.find(s => s.id === transferForm.toSiteId);
+                  const src = transferTarget ? sites.find(s => s.id === transferTarget.siteId) : null;
+                  return dest ? (
+                    <p className="text-xs text-purple-600 mt-1.5 font-medium">
+                      {src ? `${src.name}` : 'Sans site'} → {dest.name}
+                    </p>
+                  ) : null;
+                })()}
+              </div>
               {/* ── Bureau / localisation ── */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3695,6 +3714,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nom complet</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rôle</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Permissions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sites</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
@@ -3724,6 +3744,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                 return (
                                   <span key={p.value} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${cls[p.color]}`}>{p.label}</span>
                                 );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {user.role === 'admin' ? (
+                            <span className="text-xs text-gray-400 italic">Tous</span>
+                          ) : (user.allowedSiteIds ?? []).length === 0 ? (
+                            <span className="text-xs text-gray-400 italic">Tous</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {(user.allowedSiteIds ?? []).map(sid => {
+                                const s = sites.find(x => x.id === sid);
+                                return s ? <span key={sid} className="rounded-full px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-700">{s.name}</span> : null;
                               })}
                             </div>
                           )}
@@ -3868,6 +3902,47 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
                 )}
               </div>
+
+              {/* Sites autorisés */}
+              {userFormData.role !== 'admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Sites autorisés
+                    <span className="ml-2 text-xs text-gray-400 font-normal">(aucun coché = accès à tous)</span>
+                  </label>
+                  {sites.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">Aucun site configuré.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                      {sites.map(site => {
+                        const checked = userFormData.allowedSiteIds.includes(site.id);
+                        return (
+                          <label key={site.id} className={`flex items-center gap-3 rounded-lg border-2 p-2.5 cursor-pointer transition-colors ${checked ? 'border-sky-400 bg-sky-50' : 'border-gray-200 hover:border-sky-300'}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...userFormData.allowedSiteIds, site.id]
+                                  : userFormData.allowedSiteIds.filter(sid => sid !== site.id);
+                                setUserFormData({ ...userFormData, allowedSiteIds: next });
+                              }}
+                              className="h-4 w-4 rounded accent-sky-600"
+                            />
+                            <div>
+                              <div className="text-sm font-medium text-gray-800">{site.name}</div>
+                              {(site.city || site.country) && <div className="text-xs text-gray-400">{[site.city, site.country].filter(Boolean).join(', ')}</div>}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {userFormData.allowedSiteIds.length === 0 && sites.length > 0 && (
+                    <p className="text-xs text-gray-400 mt-1">Accès à tous les sites.</p>
+                  )}
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-2">
                 <button
