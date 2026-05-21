@@ -456,15 +456,15 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
       `INSERT INTO equipments
          (name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details, site_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          technician_name, visit_date, intervention_details, site_id, quantity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
-        e.interventionDetails || '', e.siteId || null
+        e.interventionDetails || '', e.siteId || null, Math.max(1, parseInt(e.quantity) || 1)
       ]
     );
 
@@ -511,15 +511,15 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
          name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
          location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
          last_maintenance=$12, visited=$13, technician_name=$14,
-         visit_date=$15, intervention_details=$16, site_id=$17
-       WHERE id=$18
+         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18
+       WHERE id=$19
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
-        e.interventionDetails || '', e.siteId || null, id
+        e.interventionDetails || '', e.siteId || null, Math.max(1, parseInt(e.quantity) || 1), id
       ]
     );
 
@@ -599,7 +599,7 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
 
-  const { toLocation, toDepartment, toSiteId, reason, technicianName, notes } = req.body;
+  const { toLocation, toDepartment, toSiteId, reason, technicianName, notes, transferQty } = req.body;
   if (!toLocation || !toDepartment) {
     return res.status(400).json({ message: 'Nouvelle localisation et département requis.' });
   }
@@ -609,15 +609,10 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
 
   const old = rowToEquipment(current[0]);
   const newSiteId = toSiteId !== undefined ? (toSiteId || null) : old.siteId;
-
-  const { rows } = await query(
-    'UPDATE equipments SET location=$1, department=$2, site_id=$3 WHERE id=$4 RETURNING *',
-    [toLocation, toDepartment, newSiteId, id]
-  );
-  const updated = rowToEquipment(rows[0]);
+  const qty = Math.min(Math.max(1, parseInt(transferQty) || old.quantity), old.quantity);
   const ip = getClientIp(req);
 
-  // Resolve site names for the event log
+  // Resolve site names
   let fromSiteName = '', toSiteName = '';
   if (old.siteId) {
     const { rows: sr } = await query('SELECT name FROM sites WHERE id=$1', [old.siteId]);
@@ -631,8 +626,41 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
   const siteChanged = newSiteId !== old.siteId;
   const locationChanged = toLocation !== old.location;
   const deptChanged = toDepartment !== old.department;
+  const isPartial = qty < old.quantity;
+
+  let updated;
+  if (isPartial) {
+    // Reduce source quantity
+    const { rows: srcRows } = await query(
+      'UPDATE equipments SET quantity=$1 WHERE id=$2 RETURNING *',
+      [old.quantity - qty, id]
+    );
+    updated = rowToEquipment(srcRows[0]);
+    // Create new record at destination
+    await query(
+      `INSERT INTO equipments
+         (name, type, brand, model, serial_number, ip_address, location, department,
+          status, purchase_date, warranty, last_maintenance, visited,
+          technician_name, visit_date, intervention_details, site_id, quantity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+      [
+        old.name, old.type, old.brand || '', old.model || '', old.serialNumber || '',
+        old.ipAddress || '', toLocation, toDepartment, old.status,
+        old.purchaseDate || '', old.warranty || '', old.lastMaintenance || '',
+        old.visited, old.technicianName || '', old.visitDate || '',
+        old.interventionDetails || '', newSiteId, qty
+      ]
+    );
+  } else {
+    const { rows } = await query(
+      'UPDATE equipments SET location=$1, department=$2, site_id=$3 WHERE id=$4 RETURNING *',
+      [toLocation, toDepartment, newSiteId, id]
+    );
+    updated = rowToEquipment(rows[0]);
+  }
 
   let detailParts = [];
+  if (isPartial) detailParts.push(`Quantité: ${qty} sur ${old.quantity}`);
   if (locationChanged || deptChanged)
     detailParts.push(`Bureau: "${old.location}" (${old.department}) → "${toLocation}" (${toDepartment})`);
   if (siteChanged)
@@ -652,7 +680,7 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
     userId: req.user.id, username: req.user.username, userName: req.user.name, ip
   });
   logActivity(req.user.id, req.user.username, req.user.name,
-    'Transfert équipement', `"${old.name}" transféré vers "${toLocation}"${siteChanged ? ` (${toSiteName})` : ''}`, ip);
+    'Transfert équipement', `"${old.name}"${isPartial ? ` (×${qty})` : ''} transféré vers "${toLocation}"${siteChanged ? ` (${toSiteName})` : ''}`, ip);
 
   res.json(updated);
 }));
@@ -816,12 +844,14 @@ app.post('/api/equipments/:id/reform', authenticate, requirePermission('modifica
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
 
-  const { reason, replacedById, notes } = req.body;
+  const { reason, replacedById, notes, reformQty } = req.body;
   if (!reason?.trim()) return res.status(400).json({ message: 'La raison de la réforme est requise.' });
 
   const { rows: current } = await query('SELECT * FROM equipments WHERE id=$1', [id]);
   if (!current[0]) return res.status(404).json({ message: 'Équipement introuvable.' });
   const old = rowToEquipment(current[0]);
+  const qty = Math.min(Math.max(1, parseInt(reformQty) || old.quantity), old.quantity);
+  const isPartial = qty < old.quantity;
 
   let replacedByName = '';
   if (replacedById) {
@@ -829,24 +859,34 @@ app.post('/api/equipments/:id/reform', authenticate, requirePermission('modifica
     if (newEq[0]) replacedByName = newEq[0].name;
   }
 
-  const { rows } = await query(
-    'UPDATE equipments SET status=$1, replaced_by_id=$2 WHERE id=$3 RETURNING *',
-    ['réformé', replacedById ? Number(replacedById) : null, id]
-  );
+  let result;
+  if (isPartial) {
+    const { rows } = await query(
+      'UPDATE equipments SET quantity=$1 WHERE id=$2 RETURNING *',
+      [old.quantity - qty, id]
+    );
+    result = rowToEquipment(rows[0]);
+  } else {
+    const { rows } = await query(
+      'UPDATE equipments SET status=$1, replaced_by_id=$2 WHERE id=$3 RETURNING *',
+      ['réformé', replacedById ? Number(replacedById) : null, id]
+    );
+    result = rowToEquipment(rows[0]);
+  }
 
   const ip = getClientIp(req);
   await logEquipmentEvent({
     equipmentId: id, equipmentName: old.name, equipmentType: old.type,
     department: old.department, action: 'Réforme',
-    details: `Équipement réformé (mis au rebut). Raison : ${reason}${replacedByName ? `. Remplacé par : ${replacedByName} (#${replacedById})` : ''}${notes ? `. Notes : ${notes}` : ''}.`,
+    details: `${isPartial ? `${qty} sur ${old.quantity} unité(s) réformée(s)` : 'Équipement réformé (mis au rebut)'}. Raison : ${reason}${replacedByName ? `. Remplacé par : ${replacedByName} (#${replacedById})` : ''}${notes ? `. Notes : ${notes}` : ''}.`,
     changes: [],
     technician: req.user.name,
     userId: req.user.id, username: req.user.username, userName: req.user.name, ip,
   });
   logActivity(req.user.id, req.user.username, req.user.name,
-    'Réforme équipement', `"${old.name}" réformé`, ip);
+    'Réforme équipement', `"${old.name}"${isPartial ? ` (×${qty} réformé(s))` : ' réformé'}`, ip);
 
-  res.json(rowToEquipment(rows[0]));
+  res.json(result);
 }));
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

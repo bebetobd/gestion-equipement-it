@@ -60,6 +60,9 @@ async function initDB() {
   // Migration: add replaced_by_id if missing
   await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS replaced_by_id INTEGER DEFAULT NULL`);
 
+  // Migration: add quantity
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1`);
+
   // Seed users from JSON if table is empty
   const { rows: uCount } = await pool.query('SELECT COUNT(*) FROM users');
   if (parseInt(uCount[0].count, 10) === 0) {
@@ -470,6 +473,7 @@ export function rowToEquipment(row) {
     interventionDetails: row.intervention_details,
     replacedById: row.replaced_by_id ?? null,
     siteId: row.site_id ?? null,
+    quantity: row.quantity ?? 1,
   };
 }
 

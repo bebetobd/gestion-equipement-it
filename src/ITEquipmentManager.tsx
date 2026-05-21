@@ -55,6 +55,7 @@ interface Equipment {
   interventionDetails: string;
   replacedById?: number | null;
   siteId?: number | null;
+  quantity: number;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -77,6 +78,7 @@ interface TransferForm {
   reason: string;
   technicianName: string;
   notes: string;
+  transferQty: number;
 }
 
 type MaintenanceStatus = 'ouvert' | 'en_cours' | 'résolu';
@@ -124,6 +126,7 @@ interface ReformForm {
   reason: string;
   replacedById: number | null;
   notes: string;
+  reformQty: number;
 }
 
 interface MaintenanceForm {
@@ -155,6 +158,7 @@ const defaultFormData: EquipmentFormData = {
   visitDate: '',
   interventionDetails: '',
   siteId: null,
+  quantity: 1,
 };
 
 const equipmentTypes = [
@@ -202,7 +206,8 @@ const sampleEquipments: Equipment[] = [
     visited: true,
     technicianName: 'Jean Dupont',
     visitDate: '2024-09-15T14:30',
-    interventionDetails: 'Mise à jour système et nettoyage complet'
+    interventionDetails: 'Mise à jour système et nettoyage complet',
+    quantity: 1
   },
   {
     id: 2,
@@ -221,7 +226,8 @@ const sampleEquipments: Equipment[] = [
     visited: false,
     technicianName: '',
     visitDate: '',
-    interventionDetails: ''
+    interventionDetails: '',
+    quantity: 1
   },
   {
     id: 3,
@@ -240,7 +246,8 @@ const sampleEquipments: Equipment[] = [
     visited: true,
     technicianName: 'Marie Martin',
     visitDate: '2024-09-18T09:15',
-    interventionDetails: 'Remplacement toner et maintenance préventive'
+    interventionDetails: 'Remplacement toner et maintenance préventive',
+    quantity: 1
   }
 ];
 
@@ -387,7 +394,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Transfer
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferTarget, setTransferTarget] = useState<Equipment | null>(null);
-  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '' });
+  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
   const [transferLoading, setTransferLoading] = useState(false);
 
   // Documents
@@ -428,7 +435,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Reform
   const [showReformModal, setShowReformModal] = useState(false);
   const [reformTarget, setReformTarget] = useState<Equipment | null>(null);
-  const [reformForm, setReformForm] = useState<ReformForm>({ reason: '', replacedById: null, notes: '' });
+  const [reformForm, setReformForm] = useState<ReformForm>({ reason: '', replacedById: null, notes: '', reformQty: 1 });
   const [reformLoading, setReformLoading] = useState(false);
 
   // Activity log
@@ -1059,7 +1066,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openTransferModal = (equipment: Equipment) => {
     setTransferTarget(equipment);
-    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, toSiteId: equipment.siteId ?? null, reason: 'Réorganisation', technicianName: '', notes: '' });
+    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, toSiteId: equipment.siteId ?? null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: equipment.quantity ?? 1 });
     setShowTransferModal(true);
   };
 
@@ -1194,7 +1201,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openReformModal = (equipment: Equipment) => {
     setReformTarget(equipment);
-    setReformForm({ reason: '', replacedById: null, notes: '' });
+    setReformForm({ reason: '', replacedById: null, notes: '', reformQty: equipment.quantity ?? 1 });
     setShowReformModal(true);
   };
 
@@ -1777,7 +1784,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <div className="flex items-center gap-3">
                           {getTypeIcon(equipment.type)}
                           <div>
-                            <div className="text-sm font-medium text-gray-900">{equipment.name}</div>
+                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                              {equipment.name}
+                              {(equipment.quantity ?? 1) > 1 && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 text-xs font-bold rounded bg-indigo-100 text-indigo-700">×{equipment.quantity}</span>
+                              )}
+                            </div>
                             <div className="text-sm text-gray-500">{equipment.brand} {equipment.model}</div>
                             <div className="text-sm text-gray-400">IP: {equipment.ipAddress || 'N/A'}</div>
                           </div>
@@ -1980,6 +1992,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <option key={s.id} value={s.id}>{s.name} — {s.city}{s.country ? `, ${s.country}` : ''}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Quantité</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={formData.quantity}
+                      onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
                   </div>
 
                   <div>
@@ -2191,6 +2214,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <div className="space-y-2 text-sm text-gray-700">
                     {[
                       ['Type', equipmentTypes.find((t) => t.value === selectedEquipment.type)?.label],
+                      ['Quantité', String(selectedEquipment.quantity ?? 1)],
                       ['Localisation', selectedEquipment.location],
                       ['Département', selectedEquipment.department],
                       ['Statut', selectedEquipment.status],
@@ -2622,7 +2646,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button
                 onClick={() => {
                   setTransferTarget(null);
-                  setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '' });
+                  setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
                   setShowTransferModal(true);
                 }}
                 className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2"
@@ -2820,8 +2844,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             <div className="space-y-4">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                Cet équipement sera marqué comme <strong>réformé (mis au rebut)</strong> et ne pourra plus être transféré ni mis en maintenance.
+                {(reformTarget.quantity ?? 1) > 1 && reformForm.reformQty < (reformTarget.quantity ?? 1)
+                  ? <><strong>{reformForm.reformQty}</strong> unité(s) seront réformées. Il restera <strong>{(reformTarget.quantity ?? 1) - reformForm.reformQty}</strong> unité(s) en stock.</>
+                  : <>Cet équipement sera marqué comme <strong>réformé (mis au rebut)</strong> et ne pourra plus être transféré ni mis en maintenance.</>
+                }
               </div>
+
+              {(reformTarget.quantity ?? 1) > 1 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantité à réformer <span className="text-gray-400 font-normal">(stock : {reformTarget.quantity})</span>
+                  </label>
+                  <input type="number" min={1} max={reformTarget.quantity}
+                    value={reformForm.reformQty}
+                    onChange={e => setReformForm(f => ({ ...f, reformQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), reformTarget.quantity ?? 1) }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400" />
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Raison de la réforme *</label>
@@ -2971,6 +3010,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
                   placeholder="Nom du technicien" />
               </div>
+              {transferTarget && (transferTarget.quantity ?? 1) > 1 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantité à transférer <span className="text-gray-400 font-normal">(stock : {transferTarget.quantity})</span>
+                  </label>
+                  <input type="number" min={1} max={transferTarget.quantity}
+                    value={transferForm.transferQty}
+                    onChange={e => setTransferForm({ ...transferForm, transferQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), transferTarget.quantity) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm" />
+                  {transferForm.transferQty < (transferTarget.quantity ?? 1) && (
+                    <p className="text-xs text-purple-600 mt-1">Transfert partiel — {transferTarget.quantity - transferForm.transferQty} unité(s) resteront sur le site actuel.</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optionnel)</label>
                 <textarea value={transferForm.notes}
