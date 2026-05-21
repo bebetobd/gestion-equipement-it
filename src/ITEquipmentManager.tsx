@@ -2427,7 +2427,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       )}
                     </div>
                     <div className="flex gap-2">
-                      {canWrite && (
+                      {selectedMaintenance.status === 'résolu' && (
+                        <span className="text-xs px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 flex items-center gap-1 font-medium">
+                          <CheckCircle className="w-3.5 h-3.5" /> Résolu — lecture seule
+                        </span>
+                      )}
+                      {canWrite && selectedMaintenance.status !== 'résolu' && (
                         <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                           className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1">
                           <Edit className="w-3.5 h-3.5" /> Modifier

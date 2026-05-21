@@ -751,6 +751,13 @@ app.put('/api/maintenance/:id', authenticate, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid ID' });
 
+  // Block modification of resolved tickets
+  const { rows: current } = await query('SELECT status FROM maintenance_records WHERE id=$1', [id]);
+  if (!current[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  if (current[0].status === 'résolu') {
+    return res.status(403).json({ message: 'Un ticket résolu ne peut plus être modifié.' });
+  }
+
   const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc } = req.body;
 
   const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority };
