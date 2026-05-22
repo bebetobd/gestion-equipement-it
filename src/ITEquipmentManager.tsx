@@ -860,6 +860,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     fetchSites();
   }, []);
 
+  // Auto-select site when user has exactly one allowed site
+  useEffect(() => {
+    if (userAllowedSiteIds.length === 1 && sites.length > 0) {
+      setSelectedSiteId(userAllowedSiteIds[0]);
+    }
+  }, [sites, userAllowedSiteIds.length]);
+
   // Load monitoring data when modal opens
   useEffect(() => {
     if (!showMonitoringModal || !isAdmin) return;
@@ -1572,7 +1579,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         {/* ── Sélecteur de sites ── */}
         {(sites.length > 0 || isAdmin) && (
           <div className="flex items-center gap-3 mb-6">
-            {/* Site dropdown */}
+            {/* Site unique → badge fixe sans dropdown */}
+            {!isAdmin && userAllowedSiteIds.length === 1 ? (() => {
+              const s = sites.find(s => s.id === userAllowedSiteIds[0]);
+              return s ? (
+                <div className="flex items-center gap-3 bg-white border border-blue-200 rounded-xl shadow-sm px-4 py-3 flex-1 max-w-sm">
+                  <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-gray-800 block truncate">{s.name}</span>
+                    <span className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {equipments.filter(e => e.siteId === s.id).length} équip.</span>
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium shrink-0">Votre site</span>
+                </div>
+              ) : null;
+            })() : (
+            /* Plusieurs sites ou admin → dropdown */
             <div className="relative flex-1 max-w-sm" ref={siteDropdownRef}>
               <button
                 type="button"
@@ -1623,6 +1644,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               )}
             </div>
+            )}
 
             {/* Admin: gérer les sites */}
             {isAdmin && (
