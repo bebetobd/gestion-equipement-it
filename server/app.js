@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -820,10 +820,26 @@ app.put('/api/maintenance/:id', authenticate, asyncHandler(async (req, res) => {
 app.delete('/api/maintenance/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid ID' });
+  const { rows: cur } = await query('SELECT status FROM maintenance_records WHERE id=$1', [id]);
+  if (!cur[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  if (cur[0].status === 'résolu') return res.status(403).json({ message: 'Un ticket résolu ne peut pas être supprimé.' });
   const deleted = await deleteMaintenance(id);
   if (!deleted) return res.status(404).json({ message: 'Ticket introuvable.' });
   logActivity(req.user.id, req.user.username, req.user.name, 'Suppression ticket', `Ticket #${id} supprimé`, getClientIp(req));
   res.status(204).send();
+}));
+
+app.patch('/api/maintenance/:id/note', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid ID' });
+  const { text } = req.body;
+  if (!text?.trim()) return res.status(400).json({ message: 'Texte requis.' });
+  const date = new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+  const noteEntry = `[${date}] ${req.user.name} :\n${text.trim()}`;
+  const updated = await appendMaintenanceNote(id, noteEntry);
+  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Info maintenance', `Note ajoutée au ticket #${id}`, getClientIp(req));
+  res.json(updated);
 }));
 
 // ─── Transfers list ───────────────────────────────────────────────────────────

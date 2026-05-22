@@ -101,6 +101,7 @@ interface MaintenanceRecord {
   closedAt: string | null;
   status: MaintenanceStatus;
   priority: MaintenancePriority;
+  notes: string;
 }
 
 interface Site {
@@ -416,6 +417,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
   const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [noteLoading, setNoteLoading] = useState(false);
 
   // Sites
   const [sites, setSites] = useState<Site[]>([]);
@@ -2424,7 +2428,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 ) : (
                   <div className="divide-y divide-gray-100">
                     {maintenanceRecords.map(ticket => (
-                      <div key={ticket.id} onClick={() => { setSelectedMaintenance(ticket); setShowMaintenanceForm(false); }}
+                      <div key={ticket.id} onClick={() => { setSelectedMaintenance(ticket); setShowMaintenanceForm(false); setShowNoteForm(false); setNoteText(''); }}
                         className={`p-4 cursor-pointer hover:bg-gray-50 transition ${selectedMaintenance?.id === ticket.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`}>
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -2476,7 +2480,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           <Edit className="w-3.5 h-3.5" /> Modifier
                         </button>
                       )}
-                      {canModify && (
+                      <button onClick={() => { setShowNoteForm(v => !v); setNoteText(''); }}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 flex items-center gap-1">
+                        <Edit className="w-3.5 h-3.5" /> Nouvelle information
+                      </button>
+                      {canModify && selectedMaintenance.status !== 'résolu' && (
                         <button onClick={() => handleDeleteMaintenance(selectedMaintenance.id)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 flex items-center gap-1">
                           <Trash2 className="w-3.5 h-3.5" /> Supprimer
@@ -2503,6 +2511,63 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       {selectedMaintenance.technician && <p className="text-xs text-gray-500 mt-1">👷 Technicien : {selectedMaintenance.technician}</p>}
                       {selectedMaintenance.closedAt && <p className="text-xs text-gray-400 mt-2">Résolu le {fmtDate(selectedMaintenance.closedAt)}</p>}
                     </Section>
+
+                    {/* Notes / informations complémentaires */}
+                    {(selectedMaintenance.notes || showNoteForm) && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Edit className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-semibold text-gray-700">Informations complémentaires</span>
+                        </div>
+                        {selectedMaintenance.notes && (
+                          <div className="space-y-3 mb-3">
+                            {selectedMaintenance.notes.split('\n\n---\n\n').map((entry, i) => (
+                              <div key={i} className="bg-white rounded-lg border border-blue-100 p-3 text-sm text-gray-700 whitespace-pre-wrap">{entry}</div>
+                            ))}
+                          </div>
+                        )}
+                        {showNoteForm && (
+                          <div className="space-y-2">
+                            <textarea
+                              value={noteText}
+                              onChange={e => setNoteText(e.target.value)}
+                              rows={3}
+                              placeholder="Saisir une nouvelle information…"
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-none"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                disabled={noteLoading || !noteText.trim()}
+                                onClick={async () => {
+                                  if (!noteText.trim()) return;
+                                  setNoteLoading(true);
+                                  try {
+                                    const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}/note`, {
+                                      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ text: noteText })
+                                    });
+                                    if (r.ok) {
+                                      const updated = await r.json();
+                                      setMaintenanceRecords(p => p.map(m => m.id === updated.id ? updated : m));
+                                      setSelectedMaintenance(updated);
+                                      setNoteText('');
+                                      setShowNoteForm(false);
+                                    }
+                                  } catch {}
+                                  setNoteLoading(false);
+                                }}
+                                className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {noteLoading ? 'Enregistrement…' : 'Enregistrer'}
+                              </button>
+                              <button onClick={() => { setShowNoteForm(false); setNoteText(''); }}
+                                className="px-4 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+                                Annuler
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Quick status change */}

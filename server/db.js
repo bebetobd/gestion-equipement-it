@@ -225,6 +225,9 @@ async function initDB() {
   // Migration: add allowed_site_ids to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_site_ids INTEGER[] NOT NULL DEFAULT '{}'`);
 
+  // Migration: add notes to maintenance_records
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_sessions (
       user_id   INTEGER PRIMARY KEY,
@@ -377,7 +380,7 @@ export async function updateMaintenance(id, data) {
   const fields = [];
   const params = [];
   let i = 1;
-  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at' };
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes' };
   for (const [key, col] of Object.entries(map)) {
     if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
   }
@@ -394,6 +397,15 @@ export async function deleteMaintenance(id) {
   await initDB();
   const { rows } = await pool.query('DELETE FROM maintenance_records WHERE id=$1 RETURNING id', [id]);
   return rows[0] || null;
+}
+
+export async function appendMaintenanceNote(id, noteEntry) {
+  await initDB();
+  const { rows: cur } = await pool.query('SELECT notes FROM maintenance_records WHERE id=$1', [id]);
+  if (!cur[0]) return null;
+  const merged = cur[0].notes ? `${noteEntry}\n\n---\n\n${cur[0].notes}` : noteEntry;
+  const { rows } = await pool.query('UPDATE maintenance_records SET notes=$1 WHERE id=$2 RETURNING *', [merged, id]);
+  return rows[0] ? rowToMaintenance(rows[0]) : null;
 }
 
 function rowToMaintenance(row) {
@@ -414,6 +426,7 @@ function rowToMaintenance(row) {
     closedAt: row.closed_at,
     status: row.status,
     priority: row.priority,
+    notes: row.notes || '',
   };
 }
 
