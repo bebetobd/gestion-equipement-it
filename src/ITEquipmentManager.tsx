@@ -464,7 +464,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
-  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user'>('equipment');
+  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user' | 'site'>('equipment');
   const [reportEquipmentId, setReportEquipmentId] = useState<number | ''>('');
   const [reportHistory, setReportHistory] = useState<EquipmentEvent[]>([]);
   const [reportHistoryLoading, setReportHistoryLoading] = useState(false);
@@ -484,6 +484,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reportUserExpanded, setReportUserExpanded] = useState<string | null>(null);
   const [reportUserDetail, setReportUserDetail] = useState<EquipmentEvent[]>([]);
   const [reportUserDetailLoading, setReportUserDetailLoading] = useState(false);
+  const [reportSiteStats, setReportSiteStats] = useState<any[]>([]);
+  const [reportSiteLoading, setReportSiteLoading] = useState(false);
+  const [reportSiteFrom, setReportSiteFrom] = useState('');
+  const [reportSiteTo, setReportSiteTo] = useState('');
+  const [reportSiteTypeFilter, setReportSiteTypeFilter] = useState('');
+  const [reportSiteExpanded, setReportSiteExpanded] = useState<number | null>(null);
+  const [reportSiteDetail, setReportSiteDetail] = useState<EquipmentEvent[]>([]);
+  const [reportSiteDetailLoading, setReportSiteDetailLoading] = useState(false);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -570,6 +578,38 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (res.ok) setReportUserDetail(await res.json());
     } catch {}
     setReportUserDetailLoading(false);
+  };
+
+  const fetchReportBySite = async (opts?: { from?: string; to?: string; type?: string }) => {
+    setReportSiteLoading(true);
+    try {
+      const params = new URLSearchParams();
+      const from = opts?.from ?? reportSiteFrom;
+      const to   = opts?.to   ?? reportSiteTo;
+      const type = opts?.type ?? reportSiteTypeFilter;
+      if (from) params.set('from', from);
+      if (to)   params.set('to', to);
+      if (type) params.set('type', type);
+      const res = await fetch(`${API_BASE_URL}/api/reports/by-site?${params}`, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) setReportSiteStats(await res.json());
+    } catch {}
+    setReportSiteLoading(false);
+  };
+
+  const fetchSiteDetail = async (siteId: number) => {
+    if (reportSiteExpanded === siteId) { setReportSiteExpanded(null); return; }
+    setReportSiteExpanded(siteId);
+    setReportSiteDetailLoading(true);
+    try {
+      const params = new URLSearchParams({ siteId: String(siteId) });
+      if (reportSiteFrom) params.set('from', reportSiteFrom);
+      if (reportSiteTo)   params.set('to', reportSiteTo);
+      if (reportSiteTypeFilter) params.set('type', reportSiteTypeFilter);
+      const res = await fetch(`${API_BASE_URL}/api/reports/site-detail?${params}`, { headers: authHeaders() });
+      if (res.ok) setReportSiteDetail(await res.json());
+    } catch {}
+    setReportSiteDetailLoading(false);
   };
 
   const getEventActionStyle = (action: string) => {
@@ -900,6 +940,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const timer = setTimeout(() => fetchReportByUser(), 500);
     return () => clearTimeout(timer);
   }, [reportUserFrom, reportUserTo, reportUserDeptFilter, showReportsModal, reportsTab]);
+
+  // Auto-fetch report by site when filters change (debounced 500ms)
+  useEffect(() => {
+    if (!showReportsModal || reportsTab !== 'site') return;
+    const timer = setTimeout(() => fetchReportBySite(), 500);
+    return () => clearTimeout(timer);
+  }, [reportSiteFrom, reportSiteTo, reportSiteTypeFilter, showReportsModal, reportsTab]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3195,8 +3242,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             {/* Tabs */}
             <div className="flex border-b border-gray-100 shrink-0 px-6">
-              {([['equipment','Parcours équipement'],['date','Par date'],['department','Par service'],['user','Par utilisateur']] as const).map(([tab, label]) => (
-                <button key={tab} onClick={() => { setReportsTab(tab); if (tab === 'user' && reportUserStats.length === 0) fetchReportByUser(); }}
+              {([
+                ['equipment','Parcours équipement'],
+                ['date','Par date'],
+                ['department','Par service'],
+                ['user','Par utilisateur'],
+                ...(isAdmin ? [['site','Par site']] : [])
+              ] as const).map(([tab, label]) => (
+                <button key={tab} onClick={() => {
+                  setReportsTab(tab as typeof reportsTab);
+                  if (tab === 'user' && reportUserStats.length === 0) fetchReportByUser();
+                  if (tab === 'site' && reportSiteStats.length === 0) fetchReportBySite();
+                }}
                   className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {label}
                 </button>
@@ -3633,6 +3690,143 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         })}
                       </div>
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Tab 5: Par site (admin) ── */}
+              {reportsTab === 'site' && isAdmin && (
+                <div className="space-y-4">
+                  {/* Filtres */}
+                  <div className="flex flex-wrap items-end gap-3 bg-gray-50 rounded-xl p-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
+                      <input type="date" value={reportSiteFrom} onChange={e => setReportSiteFrom(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
+                      <input type="date" value={reportSiteTo} onChange={e => setReportSiteTo(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                      <select value={reportSiteTypeFilter} onChange={e => setReportSiteTypeFilter(e.target.value)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="">Tous</option>
+                        <option value="ordinateur">Ordinateur</option>
+                        <option value="reseau">Réseau</option>
+                        <option value="serveur">Serveur</option>
+                        <option value="imprimante">Imprimante</option>
+                      </select>
+                    </div>
+                    <button onClick={() => { setReportSiteFrom(''); setReportSiteTo(''); setReportSiteTypeFilter(''); }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      <RefreshCcw className="w-3.5 h-3.5" /> Réinitialiser
+                    </button>
+                    {reportSiteStats.length > 0 && (
+                      <button onClick={() => {
+                        const rows = reportSiteStats.map(s => ({
+                          'Site': s.site_name, 'Ville': s.city || '—', 'Pays': s.country || '—',
+                          'Équipements': s.equipment_count, 'Total événements': s.total_events,
+                          'Créations': s.creations, 'Modifications': s.modifications,
+                          'Transferts': s.transferts, 'Interventions': s.interventions,
+                          'Réformes': s.reformes, 'Suppressions': s.suppressions,
+                          'Dernière activité': s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
+                        }));
+                        const ws = XLSX.utils.json_to_sheet(rows);
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, 'Par site');
+                        XLSX.writeFile(wb, `rapport-sites-${Date.now()}.xlsx`);
+                      }} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                        <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                      </button>
+                    )}
+                  </div>
+
+                  {reportSiteLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+
+                  {!reportSiteLoading && reportSiteStats.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">
+                      <Globe className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>Aucun site avec activité trouvé.</p>
+                    </div>
+                  )}
+
+                  {reportSiteStats.length > 0 && (
+                    <div className="space-y-2">
+                      {reportSiteStats.map(site => {
+                        const isExpanded = reportSiteExpanded === site.site_id;
+                        const maxEv = Math.max(...reportSiteStats.map((s: any) => s.total_events), 1);
+                        const barW = Math.round((site.total_events / maxEv) * 100);
+                        return (
+                          <div key={site.site_id} className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+                            <button type="button" onClick={() => fetchSiteDetail(site.site_id)}
+                              className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-gray-50 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
+                                  <span className="font-semibold text-gray-900">{site.site_name}</span>
+                                  {(site.city || site.country) && (
+                                    <span className="text-xs text-gray-400">{[site.city, site.country].filter(Boolean).join(', ')}</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                                    <div className="bg-indigo-500 h-1.5 rounded-full" style={{width:`${barW}%`}} />
+                                  </div>
+                                  <span className="text-xs text-gray-500 shrink-0">{site.total_events} événement(s)</span>
+                                </div>
+                              </div>
+                              <div className="flex gap-3 text-center shrink-0">
+                                {[
+                                  ['Équip.', site.equipment_count, 'text-blue-600'],
+                                  ['Créations', site.creations, 'text-green-600'],
+                                  ['Modifs', site.modifications, 'text-yellow-600'],
+                                  ['Transferts', site.transferts, 'text-purple-600'],
+                                ].map(([lbl, val, cls]) => (
+                                  <div key={String(lbl)} className="hidden sm:block">
+                                    <div className={`text-sm font-bold ${cls}`}>{val}</div>
+                                    <div className="text-xs text-gray-400">{lbl}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {isExpanded && (
+                              <div className="border-t border-gray-100 px-5 py-4 bg-gray-50">
+                                {reportSiteDetailLoading ? (
+                                  <p className="text-sm text-gray-400 text-center py-4">Chargement…</p>
+                                ) : reportSiteDetail.length === 0 ? (
+                                  <p className="text-sm text-gray-400 text-center py-4">Aucun événement pour ce site.</p>
+                                ) : (
+                                  <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                                    {reportSiteDetail.map(ev => {
+                                      const st = getEventActionStyle(ev.action);
+                                      return (
+                                        <div key={ev.id} className="flex items-start gap-3 text-xs bg-white rounded-lg border border-gray-100 px-3 py-2">
+                                          <span className={`rounded-full px-2 py-0.5 font-semibold shrink-0 ${st.badge}`}>{ev.action}</span>
+                                          <div className="flex-1 min-w-0">
+                                            <span className="font-medium text-gray-800">{ev.equipmentName}</span>
+                                            {ev.department && <span className="text-gray-400"> · {ev.department}</span>}
+                                            {ev.details && <p className="text-gray-500 mt-0.5 truncate">{ev.details}</p>}
+                                          </div>
+                                          <div className="text-gray-400 shrink-0 text-right whitespace-nowrap">
+                                            <div>{new Date(ev.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short' })}</div>
+                                            <div>{ev.userName}</div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               )}

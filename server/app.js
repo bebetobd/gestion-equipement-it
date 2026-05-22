@@ -987,6 +987,74 @@ app.get('/api/reports/user-detail', authenticate, asyncHandler(async (req, res) 
   }));
 }));
 
+// ─── Reports by site (admin only) ────────────────────────────────────────────
+
+app.get('/api/reports/by-site', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { from, to, type } = req.query;
+  const conditions = ['e.site_id IS NOT NULL'];
+  const params = [];
+  let i = 1;
+  if (from) { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
+  if (to)   { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (type) { conditions.push(`ev.equipment_type = $${i++}`); params.push(type); }
+
+  const { rows } = await query(`
+    SELECT
+      s.id                                                    AS site_id,
+      s.name                                                  AS site_name,
+      s.city, s.country,
+      COUNT(DISTINCT e.id)::int                               AS equipment_count,
+      COUNT(ev.id)::int                                       AS total_events,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Création')::int     AS creations,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Modification')::int AS modifications,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Transfert')::int    AS transferts,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Intervention')::int AS interventions,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Réforme')::int      AS reformes,
+      COUNT(ev.id) FILTER (WHERE ev.action = 'Suppression')::int  AS suppressions,
+      MAX(ev.created_at)                                      AS last_activity
+    FROM sites s
+    LEFT JOIN equipments e  ON e.site_id = s.id
+    LEFT JOIN equipment_events ev ON ev.equipment_id = e.id
+      ${conditions.length ? 'AND ' + conditions.join(' AND ') : ''}
+    GROUP BY s.id, s.name, s.city, s.country
+    ORDER BY total_events DESC
+  `, params);
+  res.json(rows);
+}));
+
+app.get('/api/reports/site-detail', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { siteId, from, to, type } = req.query;
+  if (!siteId) return res.status(400).json({ message: 'siteId requis' });
+
+  const conditions = ['e.site_id = $1'];
+  const params = [Number(siteId)];
+  let i = 2;
+  if (from) { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
+  if (to)   { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (type) { conditions.push(`ev.equipment_type = $${i++}`); params.push(type); }
+  params.push(400);
+
+  const { rows } = await query(`
+    SELECT ev.*
+    FROM equipment_events ev
+    JOIN equipments e ON e.id = ev.equipment_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ev.created_at DESC
+    LIMIT $${i}
+  `, params);
+
+  res.json(rows.map(row => {
+    let changes = [];
+    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    return {
+      id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
+      equipmentType: row.equipment_type, department: row.department, action: row.action,
+      details: row.details, changes, technician: row.technician, userId: row.user_id,
+      username: row.username, userName: row.user_name, ip: row.ip, createdAt: row.created_at,
+    };
+  }));
+}));
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
