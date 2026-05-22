@@ -385,6 +385,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [userEditingId, setUserEditingId] = useState<number | null>(null);
   const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
   const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [showAccessModal, setShowAccessModal] = useState(false);
+  const [accessTarget, setAccessTarget] = useState<UserAccount | null>(null);
+  const [accessForm, setAccessForm] = useState<{ role: UserAccount['role']; permissions: Permission[]; allowedSiteIds: number[] }>({ role: 'technicien', permissions: ['lecture'], allowedSiteIds: [] });
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showModulesMenu, setShowModulesMenu] = useState(false);
@@ -728,6 +733,34 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     } catch {
       setError('Impossible de charger les utilisateurs.');
     }
+  };
+
+  const openAccessModal = (user: UserAccount) => {
+    setAccessTarget(user);
+    setAccessForm({ role: user.role, permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [] });
+    setAccessError(null);
+    setShowAccessModal(true);
+  };
+
+  const handleSaveAccess = async () => {
+    if (!accessTarget) return;
+    setAccessLoading(true);
+    setAccessError(null);
+    try {
+      const payload = {
+        username: accessTarget.username,
+        name: accessTarget.name,
+        role: accessForm.role,
+        permissions: accessForm.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : accessForm.permissions,
+        allowedSiteIds: accessForm.role === 'admin' ? [] : accessForm.allowedSiteIds,
+      };
+      const r = await fetch(`${API_USERS}/${accessTarget.id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
+      if (r.status === 401) { handleUnauthorized(); return; }
+      if (!r.ok) { const d = await r.json().catch(() => null); setAccessError(d?.message || 'Erreur lors de la sauvegarde.'); return; }
+      setShowAccessModal(false);
+      await fetchUsers();
+    } catch { setAccessError('Impossible de sauvegarder.'); }
+    setAccessLoading(false);
   };
 
   const openUserCreate = () => {
@@ -3893,7 +3926,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <button onClick={() => openUserEdit(user)} className="text-blue-600 hover:text-blue-900" title="Modifier">
+                            <button onClick={() => openAccessModal(user)} title="Gérer rôle, permissions et sites"
+                              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium">
+                              Accès
+                            </button>
+                            <button onClick={() => openUserEdit(user)} className="text-blue-600 hover:text-blue-900" title="Modifier identité">
                               <Edit className="w-4 h-4" />
                             </button>
                             {user.id !== currentUser.id && (
@@ -4089,6 +4126,126 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {userEditingId ? 'Modifier' : 'Ajouter'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modale Gestion des accès ════════════════════════════════════════ */}
+      {showAccessModal && accessTarget && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowAccessModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Gestion des accès</h2>
+                <p className="text-sm text-gray-500">{accessTarget.name} <span className="font-mono text-gray-400">@{accessTarget.username}</span></p>
+              </div>
+              <button onClick={() => setShowAccessModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+            </div>
+
+            <div className="px-6 py-5 space-y-6">
+              {accessError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{accessError}</div>}
+
+              {/* Rôle */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-3">Rôle</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: 'admin', label: 'Administrateur', desc: 'Accès complet', color: 'red' },
+                    { value: 'technicien', label: 'Technicien', desc: 'Selon permissions', color: 'blue' },
+                    { value: 'user', label: 'Utilisateur', desc: 'Selon permissions', color: 'gray' },
+                  ] as const).map(r => (
+                    <label key={r.value} className={`flex flex-col gap-1 rounded-xl border-2 p-3 cursor-pointer transition-colors ${accessForm.role === r.value ? r.value === 'admin' ? 'border-red-400 bg-red-50' : r.value === 'technicien' ? 'border-blue-400 bg-blue-50' : 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <input type="radio" name="role" value={r.value} checked={accessForm.role === r.value}
+                        onChange={() => setAccessForm(f => ({ ...f, role: r.value }))} className="sr-only" />
+                      <span className="text-sm font-semibold text-gray-800">{r.label}</span>
+                      <span className="text-xs text-gray-500">{r.desc}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Permissions */}
+              {accessForm.role !== 'admin' ? (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">Permissions</label>
+                  <div className="space-y-2">
+                    {PERMISSION_CONFIG.map(perm => {
+                      const checked = accessForm.permissions.includes(perm.value);
+                      const colorMap: Record<string, string> = {
+                        blue:   checked ? 'border-blue-400 bg-blue-50'   : 'border-gray-200 hover:border-blue-300',
+                        green:  checked ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-green-300',
+                        orange: checked ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300',
+                      };
+                      return (
+                        <label key={perm.value} className={`flex items-center gap-3 rounded-xl border-2 p-3 cursor-pointer transition-colors ${colorMap[perm.color]}`}>
+                          <input type="checkbox" checked={checked}
+                            onChange={e => {
+                              const next = e.target.checked ? [...accessForm.permissions, perm.value] : accessForm.permissions.filter(p => p !== perm.value);
+                              setAccessForm(f => ({ ...f, permissions: next }));
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 accent-blue-600" />
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold text-gray-800">{perm.label}</div>
+                            <div className="text-xs text-gray-500">{perm.desc}</div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                    {accessForm.permissions.length === 0 && <p className="text-xs text-amber-600">⚠ Aucune permission — l'utilisateur ne pourra rien faire.</p>}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+                  Les administrateurs ont automatiquement toutes les permissions.
+                </div>
+              )}
+
+              {/* Sites */}
+              {accessForm.role !== 'admin' && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-semibold text-gray-700">Sites autorisés</label>
+                    <span className="text-xs text-gray-400">Aucun coché = accès à tous</span>
+                  </div>
+                  {sites.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">Aucun site configuré.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto border border-gray-200 rounded-xl p-2">
+                      {sites.map(site => {
+                        const checked = accessForm.allowedSiteIds.includes(site.id);
+                        return (
+                          <label key={site.id} className={`flex items-center gap-3 rounded-lg border-2 p-2.5 cursor-pointer transition-colors ${checked ? 'border-sky-400 bg-sky-50' : 'border-gray-200 hover:border-sky-300'}`}>
+                            <input type="checkbox" checked={checked}
+                              onChange={e => {
+                                const next = e.target.checked ? [...accessForm.allowedSiteIds, site.id] : accessForm.allowedSiteIds.filter(id => id !== site.id);
+                                setAccessForm(f => ({ ...f, allowedSiteIds: next }));
+                              }}
+                              className="h-4 w-4 rounded border-gray-300 accent-sky-600" />
+                            <div>
+                              <div className="text-sm font-semibold text-gray-800">{site.name}</div>
+                              {(site.city || site.country) && <div className="text-xs text-gray-400">{[site.city, site.country].filter(Boolean).join(', ')}</div>}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {accessForm.allowedSiteIds.length === 0 && sites.length > 0 && (
+                    <p className="text-xs text-gray-400 mt-1">Accès à tous les sites.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t flex justify-end gap-3 bg-gray-50 rounded-b-2xl">
+              <button onClick={() => setShowAccessModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 text-sm">Annuler</button>
+              <button onClick={handleSaveAccess} disabled={accessLoading}
+                className="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                {accessLoading ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
             </div>
           </div>
         </div>
