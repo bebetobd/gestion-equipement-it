@@ -1241,6 +1241,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openNewEquipmentForm = () => {
     resetForm();
+    if (selectedSiteId) setFormData(prev => ({ ...prev, siteId: selectedSiteId }));
     setShowForm(true);
   };
 
@@ -1288,6 +1289,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
     if (missingField) {
       setToast({ message: 'Veuillez remplir tous les champs obligatoires.', type: 'error' });
+      return;
+    }
+
+    if (!formData.siteId) {
+      setToast({ message: 'Veuillez sélectionner un site.', type: 'error' });
       return;
     }
 
@@ -1441,6 +1447,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     if (!transferTarget) return;
     if (!transferForm.toLocation.trim() || !transferForm.toDepartment.trim()) {
       setToast({ message: 'Localisation et département requis.', type: 'error' });
+      return;
+    }
+    if (!transferForm.toSiteId) {
+      setToast({ message: 'Veuillez sélectionner un site de destination.', type: 'error' });
       return;
     }
     setTransferLoading(true);
@@ -2382,13 +2392,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Site</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Site *</label>
                     <select
                       value={formData.siteId ?? ''}
                       onChange={e => setFormData({ ...formData, siteId: e.target.value ? Number(e.target.value) : null })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     >
-                      <option value="">— Aucun site —</option>
+                      <option value="">— Sélectionner un site —</option>
                       {sites.map(s => (
                         <option key={s.id} value={s.id}>{s.name} — {s.city}{s.country ? `, ${s.country}` : ''}</option>
                       ))}
@@ -3360,7 +3370,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {/* ── Site destination ── */}
               <div className="rounded-xl border-2 border-purple-100 bg-purple-50 p-3">
                 <label className="block text-sm font-semibold text-purple-800 mb-2 flex items-center gap-1.5">
-                  <Globe className="w-4 h-4" />Site de destination
+                  <Globe className="w-4 h-4" />Site de destination *
                 </label>
                 {sites.length === 0 ? (
                   <p className="text-xs text-purple-500 italic">Aucun site configuré — configurez des sites dans le menu Administration.</p>
@@ -3368,7 +3378,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <select value={transferForm.toSiteId ?? ''}
                     onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm bg-white">
-                    <option value="">— Même site / Sans site —</option>
+                    <option value="">— Sélectionner un site —</option>
                     {sites.map(s => (
                       <option key={s.id} value={s.id}>{s.name}{s.city ? ` — ${s.city}` : ''}{s.country ? `, ${s.country}` : ''}</option>
                     ))}
