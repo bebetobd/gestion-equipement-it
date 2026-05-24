@@ -1289,11 +1289,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       return;
     }
 
-    if (formData.visited && !formData.technicianName.trim()) {
-      setToast({ message: 'Le nom du technicien est obligatoire si l\'équipement a été visité.', type: 'error' });
-      return;
-    }
-
     await handleSaveEquipment(formData);
 
     // Upload documents for new equipment
@@ -2474,57 +2469,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
                 </div>
 
-                <div className="border-t pt-4">
-                  <h3 className="text-lg font-medium text-gray-900 mb-3">Passage technicien</h3>
-
-                  <div className="flex items-center mb-4">
-                    <input
-                      type="checkbox"
-                      id="visited"
-                      checked={formData.visited}
-                      onChange={(e) => setFormData({ ...formData, visited: e.target.checked })}
-                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-400 border-gray-200 rounded"
-                    />
-                    <label htmlFor="visited" className="ml-2 block text-sm text-gray-900">
-                      Un technicien a visité cet équipement
-                    </label>
-                  </div>
-
-                  {formData.visited && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Nom du technicien *</label>
-                        <input
-                          type="text"
-                          value={formData.technicianName}
-                          onChange={(e) => setFormData({ ...formData, technicianName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Date et heure de visite</label>
-                        <input
-                          type="datetime-local"
-                          value={formData.visitDate}
-                          onChange={(e) => setFormData({ ...formData, visitDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Détails de l'intervention</label>
-                        <textarea
-                          value={formData.interventionDetails}
-                          onChange={(e) => setFormData({ ...formData, interventionDetails: e.target.value })}
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                          placeholder="Décrivez les actions effectuées..."
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 {/* Documents à l'achat (nouveau équipement seulement) */}
                 {editingId === null && (
