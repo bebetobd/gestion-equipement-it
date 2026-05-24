@@ -1283,7 +1283,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const handleSubmit = async () => {
-    const requiredFields = ['name', 'brand', 'model', 'serialNumber', 'location', 'department'];
+    const requiredFields = ['name', 'brand', 'location', 'department'];
     const missingField = requiredFields.find((field) => !formData[field as keyof EquipmentFormData]?.toString().trim());
 
     if (missingField) {
@@ -2351,7 +2351,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Modèle *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Modèle</label>
                     <input
                       type="text"
                       value={formData.model}
@@ -2361,7 +2361,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Numéro de série *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Numéro de série</label>
                     <input
                       type="text"
                       value={formData.serialNumber}
