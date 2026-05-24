@@ -1782,7 +1782,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-2xl shadow-md mb-6 p-6 bg-indigo-700 overflow-hidden">
+        <div className="relative rounded-2xl shadow-md mb-6 p-6 bg-indigo-700">
           <div className="absolute inset-0 pointer-events-none opacity-20"
             style={{backgroundImage:'radial-gradient(circle at 80% 50%, #a5b4fc 0%, transparent 60%)'}} />
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
