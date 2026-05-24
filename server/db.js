@@ -281,6 +281,33 @@ async function initDB() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS site_visits (
+      id               SERIAL PRIMARY KEY,
+      site_id          INTEGER NOT NULL,
+      site_name        VARCHAR(200) NOT NULL DEFAULT '',
+      scheduled_date   DATE NOT NULL,
+      scheduled_time   VARCHAR(10) NOT NULL DEFAULT '',
+      technician       VARCHAR(200) NOT NULL DEFAULT '',
+      purpose          TEXT NOT NULL DEFAULT '',
+      status           VARCHAR(20) NOT NULL DEFAULT 'planifié',
+      notes            TEXT NOT NULL DEFAULT '',
+      created_by       VARCHAR(200) NOT NULL DEFAULT '',
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      with_maintenance BOOLEAN NOT NULL DEFAULT FALSE,
+      equipment_ids    INTEGER[] NOT NULL DEFAULT '{}',
+      maintenance_desc TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_site_visits_site_id ON site_visits(site_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_site_visits_date    ON site_visits(scheduled_date)`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS validation_comment TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS validated_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS validated_by VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS rescheduled_date DATE`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS visit_id INTEGER REFERENCES site_visits(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS site_name VARCHAR(200) NOT NULL DEFAULT ''`);
+
   initialized = true;
 }
 
@@ -405,13 +432,13 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
 
 export async function createMaintenance(data) {
   await initDB();
-  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority } = data;
+  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName } = data;
   const { rows } = await pool.query(
     `INSERT INTO maintenance_records
-       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
-    [equipmentId, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale']
+    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '']
   );
   return rowToMaintenance(rows[0]);
 }
@@ -421,7 +448,7 @@ export async function updateMaintenance(id, data) {
   const fields = [];
   const params = [];
   let i = 1;
-  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes' };
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name' };
   for (const [key, col] of Object.entries(map)) {
     if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
   }
@@ -468,6 +495,8 @@ function rowToMaintenance(row) {
     status: row.status,
     priority: row.priority,
     notes: row.notes || '',
+    visitId: row.visit_id ?? null,
+    siteName: row.site_name || '',
   };
 }
 
@@ -783,4 +812,70 @@ export async function queryActivityLog({ userId, username, dateFrom, dateTo, act
     action: r.action, details: r.details, ip: r.ip,
     timestamp: r.created_at, createdAt: r.created_at
   }));
+}
+
+// ─── Site Visits ──────────────────────────────────────────────────────────────
+
+export async function getVisits({ siteId, status, from, to } = {}) {
+  await initDB();
+  let q = 'SELECT * FROM site_visits WHERE 1=1';
+  const params = [];
+  if (siteId) { params.push(siteId); q += ` AND site_id = $${params.length}`; }
+  if (status) { params.push(status); q += ` AND status = $${params.length}`; }
+  if (from)   { params.push(from);   q += ` AND scheduled_date >= $${params.length}`; }
+  if (to)     { params.push(to);     q += ` AND scheduled_date <= $${params.length}`; }
+  q += ' ORDER BY scheduled_date ASC, scheduled_time ASC';
+  const { rows } = await pool.query(q, params);
+  return rows.map(r => ({
+    id: r.id, siteId: r.site_id, siteName: r.site_name,
+    scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
+    scheduledTime: r.scheduled_time, technician: r.technician,
+    purpose: r.purpose, status: r.status, notes: r.notes,
+    createdBy: r.created_by, createdAt: r.created_at,
+    withMaintenance: r.with_maintenance,
+    equipmentIds: r.equipment_ids ?? [],
+    maintenanceDesc: r.maintenance_desc,
+    validationComment: r.validation_comment ?? '',
+    validatedAt: r.validated_at ?? null,
+    validatedBy: r.validated_by ?? '',
+    rescheduledDate: r.rescheduled_date?.toISOString?.()?.slice(0,10) ?? r.rescheduled_date ?? null
+  }));
+}
+
+export async function createVisit({ siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, createdBy, withMaintenance, equipmentIds, maintenanceDesc }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `INSERT INTO site_visits (site_id, site_name, scheduled_date, scheduled_time, technician, purpose, status, notes, created_by, with_maintenance, equipment_ids, maintenance_desc)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [siteId, siteName, scheduledDate, scheduledTime||'', technician, purpose, status||'planifié', notes||'', createdBy||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'']
+  );
+  const r = rows[0];
+  return { id: r.id, siteId: r.site_id, siteName: r.site_name,
+    scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
+    scheduledTime: r.scheduled_time, technician: r.technician,
+    purpose: r.purpose, status: r.status, notes: r.notes,
+    createdBy: r.created_by, createdAt: r.created_at,
+    withMaintenance: r.with_maintenance, equipmentIds: r.equipment_ids ?? [], maintenanceDesc: r.maintenance_desc };
+}
+
+export async function updateVisit(id, { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `UPDATE site_visits SET site_id=$1,site_name=$2,scheduled_date=$3,scheduled_time=$4,technician=$5,purpose=$6,status=$7,notes=$8,with_maintenance=$9,equipment_ids=$10,maintenance_desc=$11,validation_comment=$12,validated_at=$13,validated_by=$14,rescheduled_date=$15 WHERE id=$16 RETURNING *`,
+    [siteId, siteName, scheduledDate, scheduledTime||'', technician, purpose, status, notes||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'', validationComment||'', validatedAt||null, validatedBy||'', rescheduledDate||null, id]
+  );
+  const r = rows[0];
+  return { id: r.id, siteId: r.site_id, siteName: r.site_name,
+    scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
+    scheduledTime: r.scheduled_time, technician: r.technician,
+    purpose: r.purpose, status: r.status, notes: r.notes,
+    createdBy: r.created_by, createdAt: r.created_at,
+    withMaintenance: r.with_maintenance, equipmentIds: r.equipment_ids ?? [], maintenanceDesc: r.maintenance_desc,
+    validationComment: r.validation_comment ?? '', validatedAt: r.validated_at ?? null,
+    validatedBy: r.validated_by ?? '', rescheduledDate: r.rescheduled_date?.toISOString?.()?.slice(0,10) ?? r.rescheduled_date ?? null };
+}
+
+export async function deleteVisit(id) {
+  await initDB();
+  return pool.query('DELETE FROM site_visits WHERE id=$1', [id]);
 }

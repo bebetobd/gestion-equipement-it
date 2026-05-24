@@ -35,6 +35,28 @@ interface ITEquipmentManagerProps {
 
 type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'accessoires' | 'autre';
 type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant' | 'réformé';
+type VisitStatus = 'planifié' | 'en_cours' | 'terminé' | 'annulé' | 'reporté';
+
+interface SiteVisit {
+  id: number;
+  siteId: number;
+  siteName: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  technician: string;
+  purpose: string;
+  status: VisitStatus;
+  notes: string;
+  createdBy: string;
+  createdAt: string;
+  withMaintenance: boolean;
+  equipmentIds: number[];
+  maintenanceDesc: string;
+  validationComment: string;
+  validatedAt: string | null;
+  validatedBy: string;
+  rescheduledDate: string | null;
+}
 
 interface Equipment {
   id: number;
@@ -82,7 +104,7 @@ interface TransferForm {
   transferQty: number;
 }
 
-type MaintenanceStatus = 'ouvert' | 'en_cours' | 'résolu';
+type MaintenanceStatus = 'en_attente' | 'ouvert' | 'en_cours' | 'résolu';
 type MaintenancePriority = 'faible' | 'normale' | 'haute' | 'critique';
 
 interface MaintenanceRecord {
@@ -103,6 +125,8 @@ interface MaintenanceRecord {
   status: MaintenanceStatus;
   priority: MaintenancePriority;
   notes: string;
+  visitId: number | null;
+  siteName: string;
 }
 
 interface Site {
@@ -479,6 +503,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [activityLogLoading, setActivityLogLoading] = useState(false);
   const [activityFilter, setActivityFilter] = useState({ username: '', dateFrom: '', dateTo: '', action: '' });
 
+  // Site visits
+  const [showVisitModule, setShowVisitModule] = useState(false);
+  const [visits, setVisits] = useState<SiteVisit[]>([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
+  const [visitFilter, setVisitFilter] = useState({ siteId: '', status: '', from: '', to: '' });
+  const [showVisitForm, setShowVisitForm] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
+  const defaultVisitForm = { siteId: null as number | null, scheduledDate: '', scheduledTime: '', technician: '', purpose: '', status: 'planifié' as VisitStatus, notes: '', withMaintenance: false, equipmentIds: [] as number[], maintenanceDesc: '' };
+  const [visitForm, setVisitForm] = useState(defaultVisitForm);
+  const [visitSaving, setVisitSaving] = useState(false);
+  const [visitActionDialog, setVisitActionDialog] = useState<{ visit: SiteVisit; action: 'terminé' | 'annulé' | 'reporté'; comment: string; newDate: string; maintenanceAction: 'sur_place' | 'programmer' | 'laisser' } | null>(null);
+  const [showVisitReports, setShowVisitReports] = useState(false);
+  const [eqSearchQuery, setEqSearchQuery] = useState('');
+  const [showEqDropdown, setShowEqDropdown] = useState(false);
+  const [siteSearchQuery, setSiteSearchQuery] = useState('');
+  const [showVisitSiteDropdown, setShowVisitSiteDropdown] = useState(false);
+
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
   const [monitoringTab, setMonitoringTab] = useState<'sessions' | 'activities'>('sessions');
@@ -486,6 +527,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
   const [activityUserFilter, setActivityUserFilter] = useState<number | null>(null);
   const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringLastRefresh, setMonitoringLastRefresh] = useState<Date | null>(null);
   const activityUserFilterRef = useRef<number | null>(null);
 
   // ── Chat state ─────────────────────────────────────────────────────────────
@@ -550,7 +592,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         setShowModulesMenu(false);
       }
       if (siteDropdownRef.current && !siteDropdownRef.current.contains(e.target as Node)) {
-        setShowSiteDropdown(false);
+        setShowVisitSiteDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -969,6 +1011,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setMonitoringLoading(true);
     await Promise.all([fetchSessions(), fetchActivities(activityUserFilterRef.current)]);
     setMonitoringLoading(false);
+    setMonitoringLastRefresh(new Date());
   };
 
   const handleUnauthorized = () => {
@@ -1198,6 +1241,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const id = setInterval(fetchChatUnread, 15000);
     return () => clearInterval(id);
   }, []);
+
+  // Heartbeat: signal presence every 60 seconds
+  useEffect(() => {
+    const sendHeartbeat = () => {
+      fetch(`${API_BASE_URL}/api/heartbeat`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    };
+    sendHeartbeat();
+    const id = setInterval(sendHeartbeat, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Monitoring: auto-refresh every 30s when module is open
+  useEffect(() => {
+    if (!showMonitoringModal) return;
+    const id = setInterval(() => refreshMonitoring(), 30000);
+    return () => clearInterval(id);
+  }, [showMonitoringModal]);
 
   // Chat: scroll to bottom when messages change
   useEffect(() => {
@@ -1582,6 +1642,134 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setActivityLogLoading(false);
   };
 
+  const fetchVisits = async (filter = visitFilter) => {
+    setVisitsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.siteId)  params.append('siteId', filter.siteId);
+      if (filter.status)  params.append('status', filter.status);
+      if (filter.from)    params.append('from', filter.from);
+      if (filter.to)      params.append('to', filter.to);
+      const r = await fetch(`${API_BASE_URL}/api/visits?${params}`, { headers: authHeaders() });
+      if (r.ok) setVisits(await r.json());
+    } catch {}
+    setVisitsLoading(false);
+  };
+
+  const saveVisit = async () => {
+    if (!visitForm.siteId) { setToast({ message: 'Veuillez sélectionner un site.', type: 'error' }); return; }
+    if (!visitForm.scheduledDate) { setToast({ message: 'Veuillez choisir une date.', type: 'error' }); return; }
+    if (!visitForm.technician.trim()) { setToast({ message: 'Veuillez indiquer le technicien.', type: 'error' }); return; }
+    if (!visitForm.purpose.trim()) { setToast({ message: "Veuillez indiquer l'objet de la visite.", type: 'error' }); return; }
+    setVisitSaving(true);
+    try {
+      const site = sites.find(s => s.id === visitForm.siteId);
+      const siteName = site?.name ?? '';
+      const body = { ...visitForm, siteName };
+      const url = editingVisitId ? `${API_BASE_URL}/api/visits/${editingVisitId}` : `${API_BASE_URL}/api/visits`;
+      const method = editingVisitId ? 'PATCH' : 'POST';
+      const r = await fetch(url, { method, headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.ok) {
+        const savedVisit = await r.json();
+        // Auto-create maintenance tickets en_attente for new visits with maintenance
+        if (!editingVisitId && visitForm.withMaintenance) {
+          const desc = visitForm.maintenanceDesc.trim() ||
+            `Maintenance à prévoir – Visite du ${new Date(visitForm.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR')} — Site : ${siteName}`;
+          const eqIds = visitForm.equipmentIds.length > 0 ? visitForm.equipmentIds : [null as null];
+          for (const eqId of eqIds) {
+            const mBody: Record<string, unknown> = {
+              failureDesc: desc, technician: visitForm.technician,
+              priority: 'normale', status: 'en_attente',
+              visitId: savedVisit.id, siteName
+            };
+            if (eqId !== null) mBody.equipmentId = eqId;
+            await fetch(`${API_BASE_URL}/api/maintenance`, {
+              method: 'POST',
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify(mBody)
+            });
+          }
+          fetchMaintenance(maintenanceFilter);
+        }
+        setToast({ message: editingVisitId ? 'Visite mise à jour.' : (visitForm.withMaintenance ? 'Visite programmée · Ticket(s) maintenance créé(s) en attente.' : 'Visite programmée.'), type: 'success' });
+        setShowVisitForm(false);
+        setEditingVisitId(null);
+        setVisitForm(defaultVisitForm);
+        fetchVisits();
+      } else {
+        const d = await r.json();
+        setToast({ message: d.message || 'Erreur lors de la sauvegarde.', type: 'error' });
+      }
+    } catch { setToast({ message: 'Erreur réseau.', type: 'error' }); }
+    setVisitSaving(false);
+  };
+
+  const deleteVisitRecord = async (id: number) => {
+    setConfirmModal({ message: 'Supprimer cette visite programmée ?', onConfirm: async () => {
+      setConfirmModal(null);
+      const r = await fetch(`${API_BASE_URL}/api/visits/${id}`, { method: 'DELETE', headers: authHeaders() });
+      if (r.ok) { setToast({ message: 'Visite supprimée.', type: 'success' }); fetchVisits(); }
+    }});
+  };
+
+  const handleVisitAction = async () => {
+    if (!visitActionDialog) return;
+    const { visit: v, action, comment, newDate, maintenanceAction } = visitActionDialog;
+    setVisitActionDialog(null);
+    const now = new Date().toISOString();
+
+    // 1. Update visit status
+    const payload: Record<string, unknown> = {
+      ...v,
+      status: action,
+      validationComment: comment,
+      validatedAt: now,
+      validatedBy: currentUser.name,
+      rescheduledDate: action === 'reporté' ? newDate || null : v.rescheduledDate
+    };
+    const res = await fetch(`${API_BASE_URL}/api/visits/${v.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { setToast({ message: 'Erreur lors de la mise à jour.', type: 'error' }); return; }
+
+    // 2. Handle linked maintenance tickets
+    if (v.withMaintenance && maintenanceAction !== 'laisser') {
+      const linkedTickets = maintenanceRecords.filter(m => m.visitId === v.id && m.status !== 'résolu');
+      if (linkedTickets.length > 0) {
+        const newStatus = maintenanceAction === 'sur_place' ? 'résolu' : 'ouvert';
+        const extra = maintenanceAction === 'sur_place'
+          ? { closedAt: now, solution: comment || 'Traité sur place lors de la visite' }
+          : {};
+        for (const ticket of linkedTickets) {
+          await fetch(`${API_BASE_URL}/api/maintenance/${ticket.id}`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus, ...extra })
+          });
+        }
+        fetchMaintenance(maintenanceFilter);
+      } else if (action === 'terminé' && maintenanceAction === 'sur_place') {
+        // No linked tickets found — create a resolved one directly
+        const desc = v.maintenanceDesc.trim() || `Maintenance effectuée lors de la visite du ${new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR')} — Site : ${v.siteName}`;
+        await fetch(`${API_BASE_URL}/api/maintenance`, {
+          method: 'POST',
+          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ failureDesc: desc, technician: v.technician, priority: 'normale', status: 'résolu', visitId: v.id, siteName: v.siteName })
+        });
+        fetchMaintenance(maintenanceFilter);
+      }
+    }
+
+    fetchVisits();
+    const maintMsg = v.withMaintenance && maintenanceAction !== 'laisser'
+      ? (maintenanceAction === 'sur_place' ? ' · Maintenance marquée comme résolue.' : ' · Maintenance ouverte pour planification.')
+      : '';
+    const baseMsg: Record<string, string> = { 'terminé': 'Visite terminée', 'annulé': 'Visite annulée', 'reporté': 'Visite reportée' };
+    setToast({ message: (baseMsg[action] ?? 'Visite mise à jour') + maintMsg + '.', type: 'success' });
+  };
+
   const openReformModal = (equipment: Equipment) => {
     setReformTarget(equipment);
     setReformForm({ reason: '', replacedById: null, notes: '', reformQty: equipment.quantity ?? 1 });
@@ -1679,7 +1867,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     }
   };
 
+  const closeAllModules = () => {
+    setShowTransferModule(false);
+    setShowMaintenanceModule(false);
+    setShowMaintenanceForm(false);
+    setSelectedMaintenance(null);
+    setShowReportsModal(false);
+    setShowMonitoringModal(false);
+    setShowActivityLog(false);
+    setShowVisitModule(false);
+  };
+
   const openMaintenanceModule = () => {
+    closeAllModules();
     setShowMaintenanceModule(true);
     setSelectedMaintenance(null);
     fetchMaintenance(maintenanceFilter);
@@ -1736,9 +1936,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const maintenanceStatusStyle: Record<string, string> = {
-    ouvert:   'bg-red-100 text-red-700',
-    en_cours: 'bg-yellow-100 text-yellow-700',
-    résolu:   'bg-green-100 text-green-700',
+    en_attente: 'bg-blue-100 text-blue-700',
+    ouvert:     'bg-red-100 text-red-700',
+    en_cours:   'bg-yellow-100 text-yellow-700',
+    résolu:     'bg-green-100 text-green-700',
+  };
+  const maintenanceStatusLabel: Record<string, string> = {
+    en_attente: 'En attente',
+    ouvert:     'Ouvert',
+    en_cours:   'En cours',
+    résolu:     'Résolu',
   };
   const maintenancePriorityStyle: Record<string, string> = {
     faible:   'bg-gray-100 text-gray-600',
@@ -1787,134 +1994,153 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const notVisitedCount = filteredEquipments.filter((equipment) => !equipment.visited).length;
 
   return (
-    <div className="min-h-screen bg-slate-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-2xl shadow-md mb-6 p-6 bg-indigo-700">
-          <div className="absolute inset-0 pointer-events-none opacity-20"
-            style={{backgroundImage:'radial-gradient(circle at 80% 50%, #a5b4fc 0%, transparent 60%)'}} />
-          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
-              <p className="text-indigo-200 mt-1 text-sm">Suivi du parc IT · accès sécurisé par rôle et par site.</p>
+    <>
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <aside className="fixed top-0 left-0 h-screen w-56 bg-white border-r border-gray-100 flex flex-col z-30 shadow-sm">
+        {/* Brand */}
+        <div className="px-4 py-4 border-b border-gray-100 bg-indigo-700">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <Monitor className="w-4 h-4 text-white" />
             </div>
-            <div className="flex items-center gap-3">
-              {/* User pill */}
-              <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm text-white backdrop-blur-sm">
-                <User className="w-4 h-4 text-indigo-200" />
-                <span className="font-medium">{currentUser.name}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${roleInfo.classes}`}>{roleInfo.label}</span>
-              </div>
-
-              {/* Chat button */}
-              <button
-                type="button"
-                onClick={() => { setShowChatModal(true); openChatConversation(chatConversation); }}
-                className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-white/25 bg-white/15 text-white hover:bg-white/25 transition-colors backdrop-blur-sm"
-                title="Messagerie"
-              >
-                <MessageCircle className="w-5 h-5" />
-                {(chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0)) > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none font-bold">
-                    {Math.min(9, chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0))}
-                  </span>
-                )}
-              </button>
-
-              {/* Modules dropdown */}
-              <div className="relative" ref={modulesMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowModulesMenu(v => !v)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/15 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-white/25 transition-colors backdrop-blur-sm"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                  {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
-                    <span className="bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
-                      {maintenanceRecords.filter(m => m.status !== 'résolu').length}
-                    </span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 transition-transform ${showModulesMenu ? 'rotate-180' : ''}`} />
-                </button>
-
-                {showModulesMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-gray-200 bg-white shadow-lg z-30 py-1 overflow-hidden">
-                    {canWrite && (
-                      <>
-                        <div className="px-3 pt-2 pb-1">
-                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Opérations</p>
-                        </div>
-                        {canModify && (
-                          <button type="button"
-                            onClick={() => { setShowModulesMenu(false); setShowTransferModule(true); fetchAllTransfers(); }}
-                            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                            <ArrowRightLeft className="w-4 h-4 text-purple-500" />
-                            Transferts
-                          </button>
-                        )}
-                        <button type="button"
-                          onClick={() => { setShowModulesMenu(false); openMaintenanceModule(); }}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                          <Wrench className="w-4 h-4 text-orange-500" />
-                          Maintenance
-                          {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
-                            <span className="ml-auto bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
-                              {maintenanceRecords.filter(m => m.status !== 'résolu').length}
-                            </span>
-                          )}
-                        </button>
-                      </>
-                    )}
-
-                    <div className="border-t border-gray-100 my-1" />
-                    <button type="button"
-                      onClick={() => { setShowModulesMenu(false); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                      <Calendar className="w-4 h-4 text-indigo-500" />
-                      Rapports
-                    </button>
-
-                    {isAdmin && (
-                      <>
-                        <button type="button"
-                          onClick={() => { setShowModulesMenu(false); setShowActivityLog(true); fetchActivityLog(); }}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                          <ClipboardList className="w-4 h-4 text-teal-500" />
-                          Journal d'activité
-                        </button>
-                        <div className="border-t border-gray-100 my-1" />
-                        <div className="px-3 pt-2 pb-1">
-                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
-                        </div>
-                        <button type="button"
-                          onClick={() => { setShowModulesMenu(false); setShowMonitoringModal(true); }}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                          <Activity className="w-4 h-4 text-green-500" />
-                          Monitoring
-                        </button>
-                        <button type="button"
-                          onClick={() => { setShowModulesMenu(false); fetchUsers(); setShowUserModal(true); }}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                          <Users className="w-4 h-4 text-blue-500" />
-                          Gérer les utilisateurs
-                        </button>
-                      </>
-                    )}
-
-                    <div className="border-t border-gray-100 my-1" />
-                    <button type="button"
-                      onClick={() => { setShowModulesMenu(false); onLogout(); }}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
-                      <LogOut className="w-4 h-4" />
-                      Déconnexion
-                    </button>
-                  </div>
-                )}
-              </div>
+            <div>
+              <p className="text-sm font-bold text-white leading-tight">Gestion IT</p>
+              <p className="text-xs text-indigo-300">Parc informatique</p>
             </div>
           </div>
         </div>
+
+        {/* User */}
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
+              {currentUser.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{currentUser.name}</p>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleInfo.classes}`}>{roleInfo.label}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-3">
+          <div className="px-3 pb-1">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Principal</p>
+          </div>
+          <button type="button"
+            onClick={() => closeAllModules()}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-medium text-indigo-700 bg-indigo-50">
+            <Monitor className="w-4 h-4 text-indigo-500 shrink-0" />
+            Équipements
+          </button>
+          <button type="button"
+            onClick={() => { setShowChatModal(true); openChatConversation(chatConversation); }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <MessageCircle className="w-4 h-4 text-indigo-400 shrink-0" />
+            Messagerie
+            {(chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0)) > 0 && (
+              <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none font-bold">
+                {Math.min(9, chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0))}
+              </span>
+            )}
+          </button>
+
+          {canWrite && (
+            <>
+              <div className="px-3 pt-3 pb-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Opérations</p>
+              </div>
+              {canModify && (
+                <button type="button"
+                  onClick={() => { closeAllModules(); setShowTransferModule(true); fetchAllTransfers(); }}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                  <ArrowRightLeft className="w-4 h-4 text-purple-500 shrink-0" />
+                  Transferts
+                </button>
+              )}
+              <button type="button"
+                onClick={() => openMaintenanceModule()}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Wrench className="w-4 h-4 text-orange-500 shrink-0" />
+                Maintenance
+                {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
+                  <span className="ml-auto bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+                    {maintenanceRecords.filter(m => m.status !== 'résolu').length}
+                  </span>
+                )}
+              </button>
+              <button type="button"
+                onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Clock className="w-4 h-4 text-blue-500 shrink-0" />
+                Visites de site
+                {visits.filter(v => v.status === 'planifié').length > 0 && (
+                  <span className="ml-auto bg-blue-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+                    {visits.filter(v => v.status === 'planifié').length}
+                  </span>
+                )}
+              </button>
+            </>
+          )}
+
+          <div className="px-3 pt-3 pb-1">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Analyses</p>
+          </div>
+          <button type="button"
+            onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
+            Rapports
+          </button>
+
+          {isAdmin && (
+            <>
+              <div className="px-3 pt-3 pb-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
+              </div>
+              <button type="button"
+                onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <ClipboardList className="w-4 h-4 text-teal-500 shrink-0" />
+                Journal
+              </button>
+              <button type="button"
+                onClick={() => { closeAllModules(); setShowMonitoringModal(true); }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Activity className="w-4 h-4 text-green-500 shrink-0" />
+                Monitoring
+              </button>
+              <button type="button"
+                onClick={() => { fetchUsers(); setShowUserModal(true); }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Users className="w-4 h-4 text-blue-500 shrink-0" />
+                Utilisateurs
+              </button>
+              <button type="button"
+                onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
+                Sites
+              </button>
+            </>
+          )}
+        </nav>
+
+        {/* Logout */}
+        <div className="p-3 border-t border-gray-100">
+          <button type="button"
+            onClick={onLogout}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors rounded-lg">
+            <LogOut className="w-4 h-4 shrink-0" />
+            Déconnexion
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main content ──────────────────────────────────────────────────── */}
+      <div className="min-h-screen bg-slate-100 ml-56 p-6">
+        <div className="max-w-7xl mx-auto">
 
         {/* ── Sélecteur de sites ── */}
         {(sites.length > 0 || isAdmin) && (
@@ -1964,7 +2190,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     const selected = selectedSiteId === site.id;
                     return (
                       <button key={site.id} type="button"
-                        onClick={() => { setSelectedSiteId(site.id); setShowSiteDropdown(false); }}
+                        onClick={() => { setSelectedSiteId(site.id); setShowVisitSiteDropdown(false); }}
                         className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
                       >
                         <div className={`w-2 h-2 rounded-full shrink-0 ${selected ? 'bg-indigo-500' : 'bg-gray-200'}`} />
@@ -1986,15 +2212,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
             )}
 
-            {/* Admin: gérer les sites */}
-            {isAdmin && (
-              <button
-                onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
-                className="inline-flex items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" /> Gérer les sites
-              </button>
-            )}
           </div>
         )}
 
@@ -2727,17 +2944,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Maintenance module ───────────────────────────────────────────── */}
       {showMaintenanceModule && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }}>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl mx-4 flex flex-col" style={{ maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+          <div className="flex flex-col flex-1 overflow-hidden">
 
             {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
-                <Wrench className="w-5 h-5 text-orange-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Module Maintenance</h2>
-                <p className="text-xs text-gray-400">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</p>
+            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
+                  <Wrench className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Module Maintenance</h2>
+                  <p className="text-sm text-gray-500">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
@@ -2745,14 +2964,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
                 <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-gray-100">
-                  <XCircle className="w-5 h-5 text-gray-400" />
+                  <XCircle className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
             </div>
 
             {/* Stats bar */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-3 bg-gray-50 border-b shrink-0">
+            <div className="grid grid-cols-4 gap-4 px-6 py-3 bg-gray-50 border-b shrink-0">
               {[
+                { label: 'En attente', status: 'en_attente', color: 'text-blue-600', bg: 'bg-blue-100' },
                 { label: 'Ouverts', status: 'ouvert', color: 'text-red-600', bg: 'bg-red-100' },
                 { label: 'En cours', status: 'en_cours', color: 'text-yellow-600', bg: 'bg-yellow-100' },
                 { label: 'Résolus', status: 'résolu', color: 'text-green-600', bg: 'bg-green-100' },
@@ -2786,7 +3006,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${maintenanceStatusStyle[ticket.status]}`}>
-                              {ticket.status === 'ouvert' ? 'Ouvert' : ticket.status === 'en_cours' ? 'En cours' : 'Résolu'}
+                              {maintenanceStatusLabel[ticket.status] ?? ticket.status}
                             </span>
                             <span className={`text-xs px-2 py-0.5 rounded-full ${maintenancePriorityStyle[ticket.priority]}`}>
                               {ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1)}
@@ -2796,6 +3016,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </div>
                         <p className="text-sm font-medium text-gray-800 line-clamp-2">{ticket.failureDesc}</p>
                         {ticket.equipmentName && <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Monitor className="w-3 h-3" />{ticket.equipmentName}</p>}
+                        {ticket.visitId && <p className="text-xs text-blue-600 mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />Lié à une visite{ticket.siteName ? ` — ${ticket.siteName}` : ''}</p>}
                         <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
                       </div>
                     ))}
@@ -2810,7 +3031,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${maintenanceStatusStyle[selectedMaintenance.status]}`}>
-                          {selectedMaintenance.status === 'ouvert' ? 'Ouvert' : selectedMaintenance.status === 'en_cours' ? 'En cours' : 'Résolu'}
+                          {maintenanceStatusLabel[selectedMaintenance.status] ?? selectedMaintenance.status}
                         </span>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${maintenancePriorityStyle[selectedMaintenance.priority]}`}>
                           {selectedMaintenance.priority}
@@ -2819,6 +3040,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </div>
                       {selectedMaintenance.equipmentName && (
                         <p className="text-sm text-gray-500 flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />{selectedMaintenance.equipmentName} · {selectedMaintenance.department}</p>
+                      )}
+                      {selectedMaintenance.visitId && (
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          Ticket lié à une visite planifiée{selectedMaintenance.siteName ? ` — ${selectedMaintenance.siteName}` : ''}
+                        </p>
                       )}
                     </div>
                     <div className="flex gap-2">
@@ -2996,6 +3223,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
                         <select value={maintenanceForm.status} onChange={e => setMaintForm(f => ({ ...f, status: e.target.value as MaintenanceStatus }))}
                           className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                          <option value="en_attente">En attente</option>
                           <option value="ouvert">Ouvert</option>
                           <option value="en_cours">En cours</option>
                           <option value="résolu">Résolu</option>
@@ -3020,7 +3248,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Module Transferts ════════════════════════════════════════════ */}
       {showTransferModule && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-gray-50">
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-40 flex flex-col bg-gray-50">
           {/* Header */}
           <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -3498,20 +3726,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Reports modal ────────────────────────────────────────────────── */}
       {showReportsModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowReportsModal(false)}>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+          <div className="flex flex-col flex-1 overflow-hidden">
 
             {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <Calendar className="w-5 h-5 text-indigo-600" />
+            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Module Rapports</h2>
+                  <p className="text-sm text-gray-500">Statistiques et historique du parc</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Module Rapports</h2>
-                <p className="text-xs text-gray-400">Statistiques et historique du parc</p>
-              </div>
-              <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
+              <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <XCircle className="w-6 h-6 text-gray-500" />
               </button>
             </div>
 
@@ -4142,29 +4372,33 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Monitoring modal ─────────────────────────────────────────────── */}
       {showMonitoringModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setShowMonitoringModal(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+          <div className="flex flex-col flex-1 overflow-hidden">
             {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
-                <Activity className="w-5 h-5 text-green-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Monitoring en temps réel</h2>
-                <p className="text-xs text-gray-400">Sessions actives et journal d'activité</p>
+            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Monitoring en temps réel</h2>
+                  <p className="text-sm text-gray-500">
+                    {activeSessions.filter(s => isOnline(s.lastSeen)).length} en ligne · {activeSessions.filter(s => !isOnline(s.lastSeen)).length} inactif(s) · rafraîchissement auto toutes les 30s
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5 text-xs text-gray-500">
                   {monitoringLoading
                     ? <div className="w-3 h-3 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                     : <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
-                  <span>{monitoringLoading ? 'Actualisation…' : 'En direct'}</span>
+                  <span>
+                    {monitoringLoading
+                      ? 'Actualisation…'
+                      : monitoringLastRefresh
+                        ? `Actualisé à ${monitoringLastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                        : 'En direct'}
+                  </span>
                 </div>
                 <button
                   onClick={refreshMonitoring}
@@ -4174,7 +4408,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   Actualiser
                 </button>
                 <button onClick={() => setShowMonitoringModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Fermer">
-                  <XCircle className="w-5 h-5 text-gray-400" />
+                  <XCircle className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
             </div>
@@ -4188,9 +4422,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <span className="flex items-center gap-2">
                   <Wifi className="w-4 h-4" />
                   Sessions actives
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${activeSessions.length > 0 ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
-                    {activeSessions.length}
-                  </span>
+                  {(() => {
+                    const onlineCount = activeSessions.filter(s => isOnline(s.lastSeen)).length;
+                    return (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${onlineCount > 0 ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
+                        {onlineCount} / {activeSessions.length}
+                      </span>
+                    );
+                  })()}
                 </span>
               </button>
               <button
@@ -4219,7 +4458,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
-                      {activeSessions.map((session) => {
+                      {[...activeSessions].sort((a, b) => (isOnline(b.lastSeen) ? 1 : 0) - (isOnline(a.lastSeen) ? 1 : 0)).map((session) => {
                         const online = isOnline(session.lastSeen);
                         const info = roleDisplay[session.role] ?? { label: session.role, classes: 'bg-gray-100 text-gray-700' };
                         return (
@@ -4794,11 +5033,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Journal d'activité ═══════════════════════════════════════════════ */}
       {showActivityLog && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shrink-0">
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-teal-100 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center">
                 <ClipboardList className="w-5 h-5 text-teal-600" />
               </div>
               <div>
@@ -5007,6 +5246,691 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ══ Module Visites de site ══════════════════════════════════════════════ */}
+      {showVisitModule && (
+        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+          {/* Header */}
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Visites de site</h2>
+                <p className="text-sm text-gray-500">{visits.length} visite(s) enregistrée(s)</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {canWrite && (
+                <button
+                  onClick={() => { setEditingVisitId(null); setVisitForm(defaultVisitForm); setShowVisitForm(true); }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                  <Plus className="w-4 h-4" /> Nouvelle visite
+                </button>
+              )}
+              <button onClick={() => setShowVisitModule(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <XCircle className="w-6 h-6 text-gray-500" />
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
+            <button onClick={() => setShowVisitReports(false)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${!showVisitReports ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              Liste des visites
+            </button>
+            <button onClick={() => setShowVisitReports(true)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${showVisitReports ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              Rapport
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-5 gap-3 shrink-0">
+            {[
+              { label: 'Total', value: visits.length, color: 'blue' },
+              { label: 'Planifiées', value: visits.filter(v => v.status === 'planifié').length, color: 'indigo' },
+              { label: 'En cours', value: visits.filter(v => v.status === 'en_cours').length, color: 'yellow' },
+              { label: 'Terminées', value: visits.filter(v => v.status === 'terminé').length, color: 'green' },
+              { label: 'Annulées/Reportées', value: visits.filter(v => v.status === 'annulé' || v.status === 'reporté').length, color: 'red' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+                <div className={`text-2xl font-bold text-${color}-600`}>{value}</div>
+                <div className="text-xs text-gray-500 mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
+            <select value={visitFilter.siteId}
+              onChange={e => { const f = { ...visitFilter, siteId: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              <option value="">Tous les sites</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={visitFilter.status}
+              onChange={e => { const f = { ...visitFilter, status: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              <option value="">Tous les statuts</option>
+              <option value="planifié">Planifié</option>
+              <option value="en_cours">En cours</option>
+              <option value="terminé">Terminé</option>
+              <option value="reporté">Reporté</option>
+              <option value="annulé">Annulé</option>
+            </select>
+            <input type="date" value={visitFilter.from}
+              onChange={e => { const f = { ...visitFilter, from: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+            <input type="date" value={visitFilter.to}
+              onChange={e => { const f = { ...visitFilter, to: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+            <button onClick={() => { const f = { siteId: '', status: '', from: '', to: '' }; setVisitFilter(f); fetchVisits(f); }}
+              className="px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 flex items-center gap-2">
+              <RefreshCcw className="w-4 h-4" /> Réinitialiser
+            </button>
+          </div>
+
+          {/* Report view */}
+          {showVisitReports && (
+            <div className="flex-1 overflow-auto px-6 pb-6">
+              {(() => {
+                const byStatus = ['planifié','en_cours','terminé','reporté','annulé'].map(s => ({
+                  status: s,
+                  count: visits.filter(v => v.status === s).length
+                }));
+                const bySite = sites.map(s => {
+                  const siteVisits = visits.filter(v => v.siteId === s.id);
+                  const last = siteVisits.filter(v => v.status === 'terminé').sort((a,b) => b.scheduledDate.localeCompare(a.scheduledDate))[0];
+                  return { site: s.name, total: siteVisits.length, terminé: siteVisits.filter(v=>v.status==='terminé').length, lastDate: last?.scheduledDate ?? '—' };
+                }).filter(r => r.total > 0).sort((a,b) => b.total - a.total);
+                const byTech: Record<string, number> = {};
+                visits.forEach(v => { byTech[v.technician] = (byTech[v.technician] ?? 0) + 1; });
+                const techRows = Object.entries(byTech).sort((a,b) => b[1]-a[1]);
+                const statusLabels: Record<string,{label:string,cls:string}> = {
+                  'planifié':{label:'Planifié',cls:'bg-indigo-100 text-indigo-700'},
+                  'en_cours':{label:'En cours',cls:'bg-yellow-100 text-yellow-700'},
+                  'terminé':{label:'Terminé',cls:'bg-green-100 text-green-700'},
+                  'reporté':{label:'Reporté',cls:'bg-orange-100 text-orange-700'},
+                  'annulé':{label:'Annulé',cls:'bg-red-100 text-red-700'},
+                };
+                return (
+                  <div className="space-y-6 mt-2">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                      <h3 className="font-semibold text-gray-800 mb-3">Répartition par statut</h3>
+                      <div className="flex flex-wrap gap-3">
+                        {byStatus.map(({ status, count }) => (
+                          <div key={status} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${statusLabels[status]?.cls ?? 'bg-gray-100 text-gray-700'}`}>
+                            <span className="text-sm font-medium">{statusLabels[status]?.label ?? status}</span>
+                            <span className="text-lg font-bold">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                      <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Visites par site</h3></div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-3 text-left font-medium text-gray-600">Site</th>
+                            <th className="px-4 py-3 text-center font-medium text-gray-600">Total</th>
+                            <th className="px-4 py-3 text-center font-medium text-gray-600">Terminées</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-600">Dernière visite terminée</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bySite.map(r => (
+                            <tr key={r.site} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium text-gray-800">{r.site}</td>
+                              <td className="px-4 py-3 text-center text-gray-700">{r.total}</td>
+                              <td className="px-4 py-3 text-center text-green-600 font-medium">{r.terminé}</td>
+                              <td className="px-4 py-3 text-gray-500">{r.lastDate !== '—' ? new Date(r.lastDate+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</td>
+                            </tr>
+                          ))}
+                          {bySite.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Aucune donnée</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                      <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Visites par technicien</h3></div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-3 text-left font-medium text-gray-600">Technicien</th>
+                            <th className="px-4 py-3 text-center font-medium text-gray-600">Nombre de visites</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {techRows.map(([tech, count]) => (
+                            <tr key={tech} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium text-gray-800">{tech}</td>
+                              <td className="px-4 py-3 text-center text-gray-700">{count}</td>
+                            </tr>
+                          ))}
+                          {techRows.length === 0 && <tr><td colSpan={2} className="px-4 py-8 text-center text-gray-400">Aucune donnée</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    {visits.filter(v => v.validationComment).length > 0 && (
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Commentaires de validation</h3></div>
+                        <div className="divide-y divide-gray-50">
+                          {visits.filter(v => v.validationComment).map(v => (
+                            <div key={v.id} className="px-5 py-3">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusLabels[v.status]?.cls ?? 'bg-gray-100 text-gray-700'}`}>{statusLabels[v.status]?.label ?? v.status}</span>
+                                <span className="text-xs text-gray-500">{v.siteName} · {new Date(v.scheduledDate+'T00:00:00').toLocaleDateString('fr-FR')}</span>
+                                <span className="text-xs text-gray-400 ml-auto">{v.validatedBy}</span>
+                              </div>
+                              <p className="text-sm text-gray-700">{v.validationComment}</p>
+                              {v.rescheduledDate && <p className="text-xs text-orange-600 mt-1">Reporté au : {new Date(v.rescheduledDate+'T00:00:00').toLocaleDateString('fr-FR')}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Table */}
+          {!showVisitReports && <div className="flex-1 overflow-auto px-6 pb-6">
+            {visitsLoading ? (
+              <div className="flex items-center justify-center h-40 text-gray-400">Chargement…</div>
+            ) : visits.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-gray-400">
+                <Clock className="w-10 h-10 mb-2 opacity-30" />
+                <p>Aucune visite programmée.</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      {['Date', 'Heure', 'Site', 'Technicien', 'Objet', 'Maint.', 'Statut', 'Actions'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {visits.map(v => {
+                      const statusCfg: Record<string, { label: string; cls: string }> = {
+                        'planifié':  { label: 'Planifié',  cls: 'bg-blue-100 text-blue-700' },
+                        'en_cours':  { label: 'En cours',  cls: 'bg-yellow-100 text-yellow-700' },
+                        'terminé':   { label: 'Terminé',   cls: 'bg-green-100 text-green-700' },
+                        'annulé':    { label: 'Annulé',    cls: 'bg-gray-100 text-gray-500' },
+                      };
+                      const sc = statusCfg[v.status] ?? { label: v.status, cls: 'bg-gray-100 text-gray-600' };
+                      return (
+                        <tr key={v.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                            {v.scheduledDate ? new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.scheduledTime || '—'}</td>
+                          <td className="px-4 py-3 text-gray-800 font-medium">{v.siteName}</td>
+                          <td className="px-4 py-3 text-gray-700">{v.technician}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={v.purpose}>{v.purpose}</td>
+                          <td className="px-4 py-3">
+                            {v.withMaintenance ? (() => {
+                              const linked = maintenanceRecords.filter(m => m.visitId === v.id);
+                              const pending = linked.filter(m => m.status === 'en_attente').length;
+                              const open = linked.filter(m => m.status === 'ouvert' || m.status === 'en_cours').length;
+                              const resolved = linked.filter(m => m.status === 'résolu').length;
+                              if (pending > 0) return <span className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full"><Wrench className="w-3 h-3" />{pending} en attente</span>;
+                              if (open > 0) return <span className="inline-flex items-center gap-1 text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full"><Wrench className="w-3 h-3" />{open} ouvert(s)</span>;
+                              if (resolved > 0) return <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full"><Wrench className="w-3 h-3" />{resolved} résolu(s)</span>;
+                              return <span className="inline-flex items-center gap-1 text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full"><Wrench className="w-3 h-3" />Oui</span>;
+                            })() : <span className="text-xs text-gray-400">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${sc.cls}`}>{sc.label}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1">
+                              {v.status === 'planifié' && canWrite && (
+                                <button onClick={() => {
+                                  const r = fetch(`${API_BASE_URL}/api/visits/${v.id}`, { method: 'PATCH', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ...v, status: 'en_cours' }) });
+                                  r.then(() => fetchVisits());
+                                }} className="p-1.5 rounded-lg text-yellow-600 hover:bg-yellow-50" title="Marquer en cours">
+                                  <Clock className="w-4 h-4" />
+                                </button>
+                              )}
+                              {(v.status === 'planifié' || v.status === 'en_cours' || v.status === 'reporté') && canWrite && (
+                                <button onClick={() => setVisitActionDialog({ visit: v, action: 'terminé', comment: '', newDate: '', maintenanceAction: 'laisser' })} className="p-1.5 rounded-lg text-green-600 hover:bg-green-50" title="Terminer la visite">
+                                  <CheckCircle className="w-4 h-4" />
+                                </button>
+                              )}
+                              {(v.status === 'planifié' || v.status === 'en_cours') && canWrite && (
+                                <button onClick={() => setVisitActionDialog({ visit: v, action: 'reporté', comment: '', newDate: '', maintenanceAction: 'laisser' })} className="p-1.5 rounded-lg text-yellow-600 hover:bg-yellow-50" title="Reporter la visite">
+                                  <RefreshCcw className="w-4 h-4" />
+                                </button>
+                              )}
+                              {(v.status === 'planifié' || v.status === 'en_cours' || v.status === 'reporté') && canWrite && (
+                                <button onClick={() => setVisitActionDialog({ visit: v, action: 'annulé', comment: '', newDate: '', maintenanceAction: 'laisser' })} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Annuler la visite">
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canWrite && v.status !== 'terminé' && v.status !== 'annulé' && (
+                                <button onClick={() => {
+                                  setEditingVisitId(v.id);
+                                  setVisitForm({ siteId: v.siteId, scheduledDate: v.scheduledDate, scheduledTime: v.scheduledTime, technician: v.technician, purpose: v.purpose, status: v.status, notes: v.notes, withMaintenance: v.withMaintenance, equipmentIds: v.equipmentIds, maintenanceDesc: v.maintenanceDesc });
+                                  setShowVisitForm(true);
+                                }} className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50" title="Modifier">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canModify && v.status !== 'terminé' && v.status !== 'annulé' && (
+                                <button onClick={() => deleteVisitRecord(v.id)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-red-500" title="Supprimer">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>}
+
+          {/* Visit complete dialog */}
+          {visitActionDialog && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setVisitActionDialog(null)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+                {/* Header */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    visitActionDialog.action === 'terminé' ? 'bg-green-100' :
+                    visitActionDialog.action === 'reporté' ? 'bg-yellow-100' : 'bg-red-100'
+                  }`}>
+                    {visitActionDialog.action === 'terminé' && <CheckCircle className="w-5 h-5 text-green-600" />}
+                    {visitActionDialog.action === 'reporté' && <RefreshCcw className="w-5 h-5 text-yellow-600" />}
+                    {visitActionDialog.action === 'annulé' && <XCircle className="w-5 h-5 text-red-500" />}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">
+                      {visitActionDialog.action === 'terminé' && 'Terminer la visite'}
+                      {visitActionDialog.action === 'reporté' && 'Reporter la visite'}
+                      {visitActionDialog.action === 'annulé' && 'Annuler la visite'}
+                    </h3>
+                    <p className="text-xs text-gray-500">{visitActionDialog.visit.siteName} · {new Date(visitActionDialog.visit.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR')}</p>
+                  </div>
+                </div>
+
+                {/* Rescheduled date (reporté only) */}
+                {visitActionDialog.action === 'reporté' && (
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nouvelle date prévue</label>
+                    <input type="date" value={visitActionDialog.newDate}
+                      onChange={e => setVisitActionDialog(d => d ? { ...d, newDate: e.target.value } : d)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </div>
+                )}
+
+                {/* Comment */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Commentaire {visitActionDialog.action === 'annulé' ? '(motif)' : '(optionnel)'}
+                  </label>
+                  <textarea rows={3} value={visitActionDialog.comment}
+                    onChange={e => setVisitActionDialog(d => d ? { ...d, comment: e.target.value } : d)}
+                    placeholder={visitActionDialog.action === 'annulé' ? 'Motif de l\'annulation…' : visitActionDialog.action === 'reporté' ? 'Raison du report…' : 'Notes sur le déroulement de la visite…'}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" />
+                </div>
+
+                {/* Maintenance handling (when visit has maintenance) */}
+                {visitActionDialog.visit.withMaintenance && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">
+                      {visitActionDialog.action === 'annulé' ? 'Tickets de maintenance liés' : 'Que faire de la maintenance ?'}
+                    </p>
+                    <div className="space-y-2">
+                      {visitActionDialog.action === 'terminé' && (
+                        <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+                          <input type="radio" name="maintAction" value="sur_place"
+                            checked={visitActionDialog.maintenanceAction === 'sur_place'}
+                            onChange={() => setVisitActionDialog(d => d ? { ...d, maintenanceAction: 'sur_place' } : d)}
+                            className="mt-0.5 text-green-600" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">Traité sur place</p>
+                            <p className="text-xs text-gray-500">Les tickets liés passent en « Résolu »</p>
+                          </div>
+                        </label>
+                      )}
+                      <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+                        <input type="radio" name="maintAction" value="programmer"
+                          checked={visitActionDialog.maintenanceAction === 'programmer'}
+                          onChange={() => setVisitActionDialog(d => d ? { ...d, maintenanceAction: 'programmer' } : d)}
+                          className="mt-0.5 text-indigo-600" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">À programmer</p>
+                          <p className="text-xs text-gray-500">Les tickets passent en « Ouvert » pour planification</p>
+                        </div>
+                      </label>
+                      <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+                        <input type="radio" name="maintAction" value="laisser"
+                          checked={visitActionDialog.maintenanceAction === 'laisser'}
+                          onChange={() => setVisitActionDialog(d => d ? { ...d, maintenanceAction: 'laisser' } : d)}
+                          className="mt-0.5 text-gray-400" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">Laisser en attente</p>
+                          <p className="text-xs text-gray-500">Les tickets restent inchangés</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button onClick={() => setVisitActionDialog(null)} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm hover:bg-gray-50">
+                    Retour
+                  </button>
+                  <button onClick={handleVisitAction} className={`flex-1 px-4 py-2.5 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 ${
+                    visitActionDialog.action === 'terminé' ? 'bg-green-600 hover:bg-green-700' :
+                    visitActionDialog.action === 'reporté' ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-red-500 hover:bg-red-600'
+                  }`}>
+                    {visitActionDialog.action === 'terminé' && <><CheckCircle className="w-4 h-4" /> Confirmer</>}
+                    {visitActionDialog.action === 'reporté' && <><RefreshCcw className="w-4 h-4" /> Reporter</>}
+                    {visitActionDialog.action === 'annulé' && <><XCircle className="w-4 h-4" /> Annuler la visite</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Visit form modal */}
+          {showVisitForm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setShowVisitForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+                {/* Form header */}
+                <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                    <Clock className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-bold text-gray-900">{editingVisitId ? 'Modifier la visite' : 'Programmer une visite'}</h3>
+                    <p className="text-xs text-gray-400">Renseignez les informations de la visite</p>
+                  </div>
+                  <button onClick={() => setShowVisitForm(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                    <XCircle className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+
+                {/* Form body */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {/* Site */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Site <span className="text-red-500">*</span></label>
+
+                    {/* Selected site chip */}
+                    {visitForm.siteId && (() => {
+                      const s = sites.find(s => s.id === visitForm.siteId);
+                      return s ? (
+                        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                          <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-indigo-800 truncate">{s.name}</p>
+                            <p className="text-xs text-indigo-500">{s.city}{s.country ? `, ${s.country}` : ''}</p>
+                          </div>
+                          <button type="button" onClick={() => { setVisitForm(f => ({ ...f, siteId: null, equipmentIds: [] })); setSiteSearchQuery(''); }}
+                            className="text-indigo-400 hover:text-indigo-700 shrink-0" title="Changer de site">
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : null;
+                    })()}
+
+                    {/* Search input (shown when no site selected) */}
+                    {!visitForm.siteId && (
+                      <div className="relative">
+                        <div className="flex items-center gap-2 border border-gray-300 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-400 focus-within:border-indigo-400">
+                          <Search className="w-4 h-4 text-gray-400 shrink-0" />
+                          <input
+                            type="text"
+                            value={siteSearchQuery}
+                            onChange={e => { setSiteSearchQuery(e.target.value); setShowVisitSiteDropdown(true); }}
+                            onFocus={() => setShowVisitSiteDropdown(true)}
+                            onBlur={() => setTimeout(() => setShowVisitSiteDropdown(false), 150)}
+                            placeholder="Rechercher un site…"
+                            className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder-gray-400"
+                          />
+                          {siteSearchQuery && (
+                            <button type="button" onClick={() => { setSiteSearchQuery(''); setShowVisitSiteDropdown(false); }}
+                              className="text-gray-400 hover:text-gray-600">
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {showVisitSiteDropdown && (() => {
+                          const q = siteSearchQuery.trim().toLowerCase();
+                          const pool = userAllowedSiteIds.length > 0
+                            ? sites.filter(s => userAllowedSiteIds.includes(s.id))
+                            : sites;
+                          const results = q
+                            ? pool.filter(s => s.name.toLowerCase().includes(q) || s.city?.toLowerCase().includes(q) || s.country?.toLowerCase().includes(q))
+                            : pool;
+                          return (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                              {results.length === 0 ? (
+                                <p className="text-sm text-gray-400 text-center py-4">Aucun site trouvé.</p>
+                              ) : results.map(s => (
+                                <button key={s.id} type="button"
+                                  onMouseDown={() => {
+                                    setVisitForm(f => ({ ...f, siteId: s.id, equipmentIds: [] }));
+                                    setSiteSearchQuery('');
+                                    setShowVisitSiteDropdown(false);
+                                    setEqSearchQuery('');
+                                  }}
+                                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-indigo-50 text-left border-b border-gray-50 last:border-0">
+                                  <Globe className="w-4 h-4 text-indigo-400 shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                                    <p className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''}</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Date + Heure */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date <span className="text-red-500">*</span></label>
+                      <input type="date" value={visitForm.scheduledDate} onChange={e => setVisitForm(f => ({ ...f, scheduledDate: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Heure</label>
+                      <input type="time" value={visitForm.scheduledTime} onChange={e => setVisitForm(f => ({ ...f, scheduledTime: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                    </div>
+                  </div>
+
+                  {/* Technicien */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Technicien <span className="text-red-500">*</span></label>
+                    <input type="text" value={visitForm.technician} onChange={e => setVisitForm(f => ({ ...f, technician: e.target.value }))}
+                      placeholder="Nom du technicien"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </div>
+
+                  {/* Objet */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Objet de la visite <span className="text-red-500">*</span></label>
+                    <input type="text" value={visitForm.purpose} onChange={e => setVisitForm(f => ({ ...f, purpose: e.target.value }))}
+                      placeholder="Ex : Audit réseau, vérification équipements…"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </div>
+
+                  {/* Statut */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+                    <select value={visitForm.status} onChange={e => setVisitForm(f => ({ ...f, status: e.target.value as VisitStatus }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                      <option value="planifié">Planifié</option>
+                      <option value="en_cours">En cours</option>
+                      <option value="terminé">Terminé</option>
+                      <option value="annulé">Annulé</option>
+                    </select>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <textarea value={visitForm.notes} onChange={e => setVisitForm(f => ({ ...f, notes: e.target.value }))}
+                      rows={2} placeholder="Informations complémentaires…"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" />
+                  </div>
+
+                  {/* Maintenance */}
+                  <div className="border border-orange-200 rounded-xl p-4 bg-orange-50">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={visitForm.withMaintenance} onChange={e => setVisitForm(f => ({ ...f, withMaintenance: e.target.checked }))}
+                        className="rounded text-orange-500 w-4 h-4" />
+                      <div className="flex items-center gap-1.5">
+                        <Wrench className="w-4 h-4 text-orange-500" />
+                        <span className="text-sm font-medium text-gray-800">Inclure une intervention de maintenance</span>
+                      </div>
+                    </label>
+                    {visitForm.withMaintenance && (
+                      <div className="mt-3 space-y-3">
+                        {/* Equipment search */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Équipements concernés <span className="text-gray-400 font-normal">(optionnel)</span></label>
+
+                          {/* Selected chips */}
+                          {visitForm.equipmentIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {visitForm.equipmentIds.map(id => {
+                                const eq = filteredEquipments.find(e => e.id === id);
+                                if (!eq) return null;
+                                return (
+                                  <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-50 border border-orange-200 text-orange-700 text-xs rounded-full">
+                                    <Wrench className="w-2.5 h-2.5" />
+                                    {eq.name}
+                                    <button type="button" onClick={() => setVisitForm(f => ({ ...f, equipmentIds: f.equipmentIds.filter(i => i !== id) }))}
+                                      className="ml-0.5 hover:text-orange-900 text-orange-500">
+                                      <XCircle className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Search input */}
+                          <div className="relative">
+                            <div className="flex items-center gap-2 border border-gray-200 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-orange-400 focus-within:border-orange-400">
+                              <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                              <input
+                                type="text"
+                                value={eqSearchQuery}
+                                onChange={e => { setEqSearchQuery(e.target.value); setShowEqDropdown(true); }}
+                                onFocus={() => setShowEqDropdown(true)}
+                                onBlur={() => setTimeout(() => setShowEqDropdown(false), 150)}
+                                placeholder="Rechercher un équipement…"
+                                className="flex-1 text-xs outline-none bg-transparent text-gray-700 placeholder-gray-400"
+                              />
+                              {eqSearchQuery && (
+                                <button type="button" onClick={() => { setEqSearchQuery(''); setShowEqDropdown(false); }}
+                                  className="text-gray-400 hover:text-gray-600">
+                                  <XCircle className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Dropdown results */}
+                            {showEqDropdown && (() => {
+                              const pool = (visitForm.siteId
+                                ? filteredEquipments.filter(e => e.siteId === visitForm.siteId)
+                                : filteredEquipments
+                              ).filter(e => !visitForm.equipmentIds.includes(e.id));
+                              const query = eqSearchQuery.trim().toLowerCase();
+                              const results = query
+                                ? pool.filter(e =>
+                                    e.name.toLowerCase().includes(query) ||
+                                    e.brand?.toLowerCase().includes(query) ||
+                                    e.model?.toLowerCase().includes(query) ||
+                                    e.serialNumber?.toLowerCase().includes(query) ||
+                                    e.location?.toLowerCase().includes(query) ||
+                                    e.type?.toLowerCase().includes(query)
+                                  )
+                                : pool;
+                              if (results.length === 0) return (
+                                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400">{pool.length === 0 ? 'Aucun équipement sur ce site.' : 'Aucun résultat.'}</p>
+                                </div>
+                              );
+                              return (
+                                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                                  {results.slice(0, 10).map(eq => (
+                                    <button key={eq.id} type="button"
+                                      onMouseDown={() => {
+                                        setVisitForm(f => ({ ...f, equipmentIds: [...f.equipmentIds, eq.id] }));
+                                        setEqSearchQuery('');
+                                        setShowEqDropdown(false);
+                                      }}
+                                      className="w-full flex items-start gap-2.5 px-3 py-2.5 hover:bg-orange-50 text-left border-b border-gray-50 last:border-0">
+                                      <div className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
+                                        <Monitor className="w-3.5 h-3.5 text-gray-500" />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-medium text-gray-800 truncate">{eq.name}</p>
+                                        <p className="text-xs text-gray-400 truncate">{[eq.brand, eq.model, eq.location].filter(Boolean).join(' · ')}</p>
+                                      </div>
+                                    </button>
+                                  ))}
+                                  {results.length > 10 && (
+                                    <p className="text-xs text-gray-400 text-center py-2 border-t">{results.length - 10} autre(s) — affinez la recherche</p>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Description de la maintenance</label>
+                          <textarea value={visitForm.maintenanceDesc} onChange={e => setVisitForm(f => ({ ...f, maintenanceDesc: e.target.value }))}
+                            rows={2} placeholder="Travaux de maintenance prévus…"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none bg-white" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Form footer */}
+                <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+                  <button onClick={() => setShowVisitForm(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
+                    Annuler
+                  </button>
+                  <button onClick={saveVisit} disabled={visitSaving}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40">
+                    {visitSaving ? 'Enregistrement…' : editingVisitId ? 'Mettre à jour' : 'Programmer'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -5314,6 +6238,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
     </div>
+    </>
   );
 };
 

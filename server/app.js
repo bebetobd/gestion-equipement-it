@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -736,7 +736,7 @@ app.get('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
-  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced } = req.body;
+  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName } = req.body;
   if (!failureDesc?.trim()) return res.status(400).json({ message: 'Description de la panne requise.' });
 
   const record = await createMaintenance({
@@ -744,7 +744,9 @@ app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
     failureDesc, diagnosis: diagnosis || '', solution: solution || '',
     partsReplaced: partsReplaced || '', technician: technician || '',
     openedBy: req.user.name, priority: priority || 'normale',
-    ...(equipmentId ? {} : {}),
+    status: status || 'ouvert',
+    visitId: visitId || null,
+    siteName: siteName || '',
   });
 
   // Enrich with equipment info if ID provided
@@ -1203,6 +1205,55 @@ app.post('/api/chat/groups', authenticate, requireAdmin, asyncHandler(async (req
 app.get('/api/chat/groups', authenticate, asyncHandler(async (req, res) => {
   const groups = await getUserGroups(req.user.id);
   res.json(groups);
+}));
+
+// ─── Site Visits ──────────────────────────────────────────────────────────────
+
+app.get('/api/visits', authenticate, asyncHandler(async (req, res) => {
+  const { siteId, status, from, to } = req.query;
+  const visits = await getVisits({
+    siteId: siteId ? Number(siteId) : undefined,
+    status: status || undefined,
+    from: from || undefined,
+    to: to || undefined
+  });
+  res.json(visits);
+}));
+
+app.post('/api/visits', authenticate, requirePermission('écriture'), asyncHandler(async (req, res) => {
+  const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc } = req.body;
+  if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
+    return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
+  }
+  const visit = await createVisit({ siteId: Number(siteId), siteName: siteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status: status||'planifié', notes: notes||'', createdBy: req.user.name, withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'' });
+  await logActivity({ userId: req.user.id, username: req.user.username, name: req.user.name, action: 'Visite programmée', details: `Visite sur ${siteName} le ${scheduledDate}`, ip: getClientIp(req) });
+  res.status(201).json(visit);
+}));
+
+app.patch('/api/visits/:id', authenticate, requirePermission('écriture'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate } = req.body;
+  if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
+    return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
+  }
+  const visit = await updateVisit(id, { siteId: Number(siteId), siteName: siteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status, notes: notes||'', withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'', validationComment: validationComment||'', validatedAt: validatedAt||null, validatedBy: validatedBy||req.user.name, rescheduledDate: rescheduledDate||null });
+  if (!visit) return res.status(404).json({ message: 'Visite introuvable.' });
+  res.json(visit);
+}));
+
+app.delete('/api/visits/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  await deleteVisit(Number(req.params.id));
+  res.json({ message: 'Visite supprimée.' });
+}));
+
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
+
+app.post('/api/heartbeat', authenticate, asyncHandler(async (req, res) => {
+  await updateSessionLastSeen(req.user.id);
+  // Also update in-memory cache
+  const session = activeSessions.get(req.user.id);
+  if (session) session.lastSeen = new Date().toISOString();
+  res.json({ ok: true, ts: new Date().toISOString() });
 }));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
