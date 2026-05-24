@@ -228,6 +228,47 @@ async function initDB() {
   // Migration: add notes to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
 
+  // Chat tables
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id               SERIAL PRIMARY KEY,
+      sender_id        INTEGER NOT NULL,
+      sender_name      VARCHAR(255) NOT NULL,
+      sender_username  VARCHAR(255) NOT NULL,
+      recipient_id     INTEGER DEFAULT NULL,
+      group_id         INTEGER DEFAULT NULL,
+      content          TEXT NOT NULL,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS group_id INTEGER DEFAULT NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_created   ON chat_messages(created_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_recipient ON chat_messages(recipient_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_group     ON chat_messages(group_id)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_read_markers (
+      user_id          INTEGER NOT NULL,
+      conversation_key VARCHAR(100) NOT NULL,
+      last_read_id     INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, conversation_key)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_groups (
+      id         SERIAL PRIMARY KEY,
+      name       VARCHAR(255) NOT NULL,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_group_members (
+      group_id INTEGER NOT NULL,
+      user_id  INTEGER NOT NULL,
+      PRIMARY KEY (group_id, user_id)
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_sessions (
       user_id   INTEGER PRIMARY KEY,
@@ -592,6 +633,132 @@ export async function queryActiveSessions() {
     userId: r.user_id, username: r.username, name: r.name,
     role: r.role, ip: r.ip, loginAt: r.login_at, lastSeen: r.last_seen,
   }));
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+export async function getChatMessages({ isGlobal, withUserId, groupId, currentUserId, sinceId, limit = 80 }) {
+  await initDB();
+  let sql, params;
+  if (groupId) {
+    // Verify membership
+    const { rows: check } = await pool.query(
+      'SELECT 1 FROM chat_group_members WHERE group_id=$1 AND user_id=$2', [groupId, currentUserId]
+    );
+    if (!check.length) throw Object.assign(new Error('Accès refusé'), { status: 403 });
+    const conds = ['group_id=$1'];
+    params = [groupId];
+    let i = 2;
+    if (sinceId) { conds.push(`id > $${i++}`); params.push(sinceId); }
+    params.push(limit);
+    sql = `SELECT * FROM chat_messages WHERE ${conds.join(' AND ')} ORDER BY created_at ASC LIMIT $${i}`;
+  } else if (isGlobal) {
+    const conds = ['recipient_id IS NULL', 'group_id IS NULL'];
+    params = [];
+    let i = 1;
+    if (sinceId) { conds.push(`id > $${i++}`); params.push(sinceId); }
+    params.push(limit);
+    sql = `SELECT * FROM chat_messages WHERE ${conds.join(' AND ')} ORDER BY created_at ASC LIMIT $${i}`;
+  } else {
+    const conds = ['((sender_id=$1 AND recipient_id=$2) OR (sender_id=$2 AND recipient_id=$1))', 'group_id IS NULL'];
+    params = [currentUserId, withUserId];
+    let i = 3;
+    if (sinceId) { conds.push(`id > $${i++}`); params.push(sinceId); }
+    params.push(limit);
+    sql = `SELECT * FROM chat_messages WHERE ${conds.join(' AND ')} ORDER BY created_at ASC LIMIT $${i}`;
+  }
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+export async function createChatGroup({ name, createdBy, memberIds }) {
+  await initDB();
+  const { rows } = await pool.query(
+    'INSERT INTO chat_groups (name, created_by) VALUES ($1,$2) RETURNING *',
+    [name, createdBy]
+  );
+  const group = rows[0];
+  const allMembers = [...new Set([createdBy, ...memberIds])];
+  for (const uid of allMembers) {
+    await pool.query(
+      'INSERT INTO chat_group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+      [group.id, uid]
+    );
+  }
+  return { ...group, member_ids: allMembers };
+}
+
+export async function getUserGroups(userId) {
+  await initDB();
+  const { rows } = await pool.query(`
+    SELECT g.*, array_agg(DISTINCT gm2.user_id) AS member_ids
+    FROM chat_groups g
+    JOIN chat_group_members gm  ON gm.group_id  = g.id AND gm.user_id = $1
+    JOIN chat_group_members gm2 ON gm2.group_id = g.id
+    GROUP BY g.id
+    ORDER BY g.created_at DESC
+  `, [userId]);
+  return rows;
+}
+
+export async function sendChatMessage({ senderId, senderName, senderUsername, recipientId, groupId, content }) {
+  await initDB();
+  const { rows } = await pool.query(
+    `INSERT INTO chat_messages (sender_id, sender_name, sender_username, recipient_id, group_id, content)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [senderId, senderName, senderUsername, recipientId || null, groupId || null, content]
+  );
+  return rows[0];
+}
+
+export async function markChatRead({ userId, conversationKey, lastReadId }) {
+  await initDB();
+  await pool.query(
+    `INSERT INTO chat_read_markers (user_id, conversation_key, last_read_id)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (user_id, conversation_key)
+     DO UPDATE SET last_read_id = GREATEST(chat_read_markers.last_read_id, EXCLUDED.last_read_id)`,
+    [userId, conversationKey, lastReadId]
+  );
+}
+
+export async function getChatUnread(userId) {
+  await initDB();
+  const { rows: g } = await pool.query(
+    `SELECT COUNT(*) AS unread FROM chat_messages m
+     LEFT JOIN chat_read_markers r ON r.user_id=$1 AND r.conversation_key='global'
+     WHERE m.recipient_id IS NULL AND m.group_id IS NULL AND m.sender_id!=$1
+       AND m.id > COALESCE(r.last_read_id,0)`,
+    [userId]
+  );
+  const { rows: d } = await pool.query(
+    `SELECT m.sender_id,
+            'dm:' || LEAST(m.sender_id,$1) || ':' || GREATEST(m.sender_id,$1) AS dm_key,
+            COUNT(*) AS unread
+     FROM chat_messages m
+     LEFT JOIN chat_read_markers r
+       ON r.user_id=$1
+      AND r.conversation_key = 'dm:' || LEAST(m.sender_id,$1) || ':' || GREATEST(m.sender_id,$1)
+     WHERE m.recipient_id=$1 AND m.group_id IS NULL AND m.id > COALESCE(r.last_read_id,0)
+     GROUP BY m.sender_id`,
+    [userId]
+  );
+  const { rows: gr } = await pool.query(
+    `SELECT m.group_id, COUNT(*) AS unread
+     FROM chat_messages m
+     JOIN chat_group_members gm ON gm.group_id = m.group_id AND gm.user_id = $1
+     LEFT JOIN chat_read_markers r
+       ON r.user_id=$1 AND r.conversation_key = 'group:' || m.group_id
+     WHERE m.group_id IS NOT NULL AND m.sender_id != $1
+       AND m.id > COALESCE(r.last_read_id,0)
+     GROUP BY m.group_id`,
+    [userId]
+  );
+  return {
+    global: Number(g[0]?.unread || 0),
+    dms: d.reduce((acc, r) => { acc[r.sender_id] = Number(r.unread); return acc; }, {}),
+    groups: gr.reduce((acc, r) => { acc[r.group_id] = Number(r.unread); return acc; }, {}),
+  };
 }
 
 export async function queryActivityLog({ userId, username, dateFrom, dateTo, action, limit = 200 } = {}) {

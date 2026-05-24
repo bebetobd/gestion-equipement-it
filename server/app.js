@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession } from './db.js';
+import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -916,46 +916,100 @@ app.get('/api/reports/equipment/:id', authenticate, asyncHandler(async (req, res
 
 app.get('/api/reports/by-date', authenticate, asyncHandler(async (req, res) => {
   const { from, to, department, type } = req.query;
-  const events = await getEventsByDateRange({
-    from: from || null,
-    to: to ? new Date(new Date(to).getTime() + 86399999).toISOString() : null,
-    department: department || null,
-    type: type || null,
-  });
-  res.json(events);
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+
+  const conditions = ['1=1'];
+  const params = [];
+  let i = 1;
+  if (from)       { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (department) { conditions.push(`ev.department = $${i++}`); params.push(department); }
+  if (type)       { conditions.push(`ev.equipment_type = $${i++}`); params.push(type); }
+  if (!isAdmin && siteIds.length > 0) { conditions.push(`e.site_id = ANY($${i++})`); params.push(siteIds); }
+  params.push(500);
+
+  // LEFT JOIN preserves events even if equipment was later deleted (admin sees all)
+  const { rows } = await query(`
+    SELECT ev.*
+    FROM equipment_events ev
+    LEFT JOIN equipments e ON e.id = ev.equipment_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ev.created_at DESC LIMIT $${i}
+  `, params);
+
+  res.json(rows.map(row => {
+    let changes = [];
+    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    return {
+      id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
+      equipmentType: row.equipment_type, department: row.department, action: row.action,
+      details: row.details, changes, technician: row.technician, userId: row.user_id,
+      username: row.username, userName: row.user_name, ip: row.ip, createdAt: row.created_at,
+    };
+  }));
 }));
 
 app.get('/api/reports/by-department', authenticate, asyncHandler(async (req, res) => {
-  const stats = await getEventsByDepartment();
-  res.json(stats);
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+
+  const conditions = ["ev.department != ''"];
+  const params = [];
+  let i = 1;
+  if (!isAdmin && siteIds.length > 0) { conditions.push(`e.site_id = ANY($${i++})`); params.push(siteIds); }
+
+  const { rows } = await query(`
+    SELECT
+      ev.department,
+      COUNT(*) AS total_events,
+      COUNT(DISTINCT ev.equipment_id) AS equipment_count,
+      COUNT(*) FILTER (WHERE ev.action = 'Création')     AS creations,
+      COUNT(*) FILTER (WHERE ev.action = 'Modification') AS modifications,
+      COUNT(*) FILTER (WHERE ev.action = 'Intervention') AS interventions,
+      COUNT(*) FILTER (WHERE ev.action = 'Suppression')  AS suppressions,
+      MAX(ev.created_at) AS last_activity
+    FROM equipment_events ev
+    LEFT JOIN equipments e ON e.id = ev.equipment_id
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY ev.department
+    ORDER BY total_events DESC
+  `, params);
+  res.json(rows);
 }));
 
 app.get('/api/reports/by-user', authenticate, asyncHandler(async (req, res) => {
   const { from, to, department } = req.query;
-  const conditions = ["user_name != ''"];
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+
+  const conditions = ["ev.user_name != ''"];
   const params = [];
   let i = 1;
-  if (from)       { conditions.push(`created_at >= $${i++}`); params.push(from); }
-  if (to)         { conditions.push(`created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
-  if (department) { conditions.push(`department = $${i++}`); params.push(department); }
+  if (!isAdmin) { conditions.push(`ev.username = $${i++}`); params.push(req.user.username); }
+  if (from)       { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (department) { conditions.push(`ev.department = $${i++}`); params.push(department); }
+  if (!isAdmin && siteIds.length > 0) { conditions.push(`e.site_id = ANY($${i++})`); params.push(siteIds); }
 
   const { rows } = await query(`
     SELECT
-      user_name, username,
+      ev.user_name, ev.username,
       COUNT(*) AS total_actions,
-      COUNT(*) FILTER (WHERE action = 'Création')     AS creations,
-      COUNT(*) FILTER (WHERE action = 'Modification') AS modifications,
-      COUNT(*) FILTER (WHERE action = 'Intervention') AS interventions,
-      COUNT(*) FILTER (WHERE action = 'Transfert')    AS transferts,
-      COUNT(*) FILTER (WHERE action = 'Suppression')  AS suppressions,
-      COUNT(*) FILTER (WHERE action = 'Maintenance')  AS maintenances,
-      COUNT(*) FILTER (WHERE action = 'Réforme')      AS reformes,
-      COUNT(DISTINCT equipment_id)                     AS equipment_count,
-      COUNT(DISTINCT department)                       AS dept_count,
-      MAX(created_at)                                  AS last_action
-    FROM equipment_events
+      COUNT(*) FILTER (WHERE ev.action = 'Création')     AS creations,
+      COUNT(*) FILTER (WHERE ev.action = 'Modification') AS modifications,
+      COUNT(*) FILTER (WHERE ev.action = 'Intervention') AS interventions,
+      COUNT(*) FILTER (WHERE ev.action = 'Transfert')    AS transferts,
+      COUNT(*) FILTER (WHERE ev.action = 'Suppression')  AS suppressions,
+      COUNT(*) FILTER (WHERE ev.action = 'Maintenance')  AS maintenances,
+      COUNT(*) FILTER (WHERE ev.action = 'Réforme')      AS reformes,
+      COUNT(DISTINCT ev.equipment_id)                     AS equipment_count,
+      COUNT(DISTINCT ev.department)                       AS dept_count,
+      MAX(ev.created_at)                                  AS last_action
+    FROM equipment_events ev
+    LEFT JOIN equipments e ON e.id = ev.equipment_id
     WHERE ${conditions.join(' AND ')}
-    GROUP BY user_name, username
+    GROUP BY ev.user_name, ev.username
     ORDER BY total_actions DESC
   `, params);
   res.json(rows);
@@ -964,15 +1018,20 @@ app.get('/api/reports/by-user', authenticate, asyncHandler(async (req, res) => {
 app.get('/api/reports/user-detail', authenticate, asyncHandler(async (req, res) => {
   const { username, from, to, department } = req.query;
   if (!username) return res.status(400).json({ message: 'username requis' });
-  const conditions = ['username = $1'];
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+  if (!isAdmin && username !== req.user.username) return res.status(403).json({ message: 'Accès refusé' });
+
+  const conditions = ['ev.username = $1'];
   const params = [username];
   let i = 2;
-  if (from)       { conditions.push(`created_at >= $${i++}`); params.push(from); }
-  if (to)         { conditions.push(`created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
-  if (department) { conditions.push(`department = $${i++}`); params.push(department); }
+  if (from)       { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
+  if (to)         { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (department) { conditions.push(`ev.department = $${i++}`); params.push(department); }
+  if (!isAdmin && siteIds.length > 0) { conditions.push(`e.site_id = ANY($${i++})`); params.push(siteIds); }
   params.push(300);
   const { rows } = await query(
-    `SELECT * FROM equipment_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT $${i}`,
+    `SELECT ev.* FROM equipment_events ev LEFT JOIN equipments e ON e.id = ev.equipment_id WHERE ${conditions.join(' AND ')} ORDER BY ev.created_at DESC LIMIT $${i}`,
     params
   );
   res.json(rows.map(row => {
@@ -987,16 +1046,24 @@ app.get('/api/reports/user-detail', authenticate, asyncHandler(async (req, res) 
   }));
 }));
 
-// ─── Reports by site (admin only) ────────────────────────────────────────────
+// ─── Reports by site ─────────────────────────────────────────────────────────
 
-app.get('/api/reports/by-site', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+app.get('/api/reports/by-site', authenticate, asyncHandler(async (req, res) => {
   const { from, to, type } = req.query;
-  const conditions = ['e.site_id IS NOT NULL'];
-  const params = [];
-  let i = 1;
-  if (from) { conditions.push(`ev.created_at >= $${i++}`); params.push(from); }
-  if (to)   { conditions.push(`ev.created_at <= $${i++}`); params.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
-  if (type) { conditions.push(`ev.equipment_type = $${i++}`); params.push(type); }
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+
+  const baseParams = isAdmin ? [] : [siteIds];
+  let i = baseParams.length + 1;
+
+  const evConditions = [];
+  const evParams = [...baseParams];
+  if (from) { evConditions.push(`ev.created_at >= $${i++}`); evParams.push(from); }
+  if (to)   { evConditions.push(`ev.created_at <= $${i++}`); evParams.push(new Date(new Date(to).getTime() + 86399999).toISOString()); }
+  if (type) { evConditions.push(`ev.equipment_type = $${i++}`); evParams.push(type); }
+
+  // For non-admin: filter in WHERE to limit which sites appear in the list
+  const siteWhere = isAdmin ? '' : 'WHERE s.id = ANY($1)';
 
   const { rows } = await query(`
     SELECT
@@ -1015,16 +1082,22 @@ app.get('/api/reports/by-site', authenticate, requireAdmin, asyncHandler(async (
     FROM sites s
     LEFT JOIN equipments e  ON e.site_id = s.id
     LEFT JOIN equipment_events ev ON ev.equipment_id = e.id
-      ${conditions.length ? 'AND ' + conditions.join(' AND ') : ''}
+      ${evConditions.length ? 'AND ' + evConditions.join(' AND ') : ''}
+    ${siteWhere}
     GROUP BY s.id, s.name, s.city, s.country
     ORDER BY total_events DESC
-  `, params);
+  `, evParams);
   res.json(rows);
 }));
 
-app.get('/api/reports/site-detail', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+app.get('/api/reports/site-detail', authenticate, asyncHandler(async (req, res) => {
   const { siteId, from, to, type } = req.query;
   if (!siteId) return res.status(400).json({ message: 'siteId requis' });
+  const isAdmin = req.user.role === 'admin';
+  const siteIds = req.user.allowedSiteIds || [];
+  if (!isAdmin && siteIds.length > 0 && !siteIds.includes(Number(siteId))) {
+    return res.status(403).json({ message: 'Accès refusé à ce site' });
+  }
 
   const conditions = ['e.site_id = $1'];
   const params = [Number(siteId)];
@@ -1053,6 +1126,83 @@ app.get('/api/reports/site-detail', authenticate, requireAdmin, asyncHandler(asy
       username: row.username, userName: row.user_name, ip: row.ip, createdAt: row.created_at,
     };
   }));
+}));
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+const mapMsg = m => ({
+  id: m.id, senderId: m.sender_id, senderName: m.sender_name,
+  senderUsername: m.sender_username, recipientId: m.recipient_id,
+  groupId: m.group_id, content: m.content, createdAt: m.created_at,
+});
+
+// List of users available for DM (excluding self)
+app.get('/api/chat/users', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    'SELECT id, username, name FROM users WHERE id != $1 ORDER BY name',
+    [req.user.id]
+  );
+  res.json(rows);
+}));
+
+// Fetch messages for a conversation
+app.get('/api/chat/messages', authenticate, asyncHandler(async (req, res) => {
+  const { channel, withUser, groupId, sinceId } = req.query;
+  const isGlobal = channel === 'global';
+  const msgs = await getChatMessages({
+    isGlobal,
+    withUserId: withUser ? Number(withUser) : null,
+    groupId: groupId ? Number(groupId) : null,
+    currentUserId: req.user.id,
+    sinceId: sinceId ? Number(sinceId) : null,
+  });
+  res.json(msgs.map(mapMsg));
+}));
+
+// Send a message
+app.post('/api/chat/messages', authenticate, asyncHandler(async (req, res) => {
+  const { content, recipientId, groupId } = req.body;
+  if (!content?.trim()) return res.status(400).json({ message: 'Message vide.' });
+  const msg = await sendChatMessage({
+    senderId: req.user.id,
+    senderName: req.user.name,
+    senderUsername: req.user.username,
+    recipientId: recipientId ? Number(recipientId) : null,
+    groupId: groupId ? Number(groupId) : null,
+    content: content.trim(),
+  });
+  res.status(201).json(mapMsg(msg));
+}));
+
+// Mark conversation as read
+app.patch('/api/chat/read', authenticate, asyncHandler(async (req, res) => {
+  const { conversationKey, lastReadId } = req.body;
+  if (!conversationKey || !lastReadId) return res.status(400).json({ message: 'Params manquants.' });
+  await markChatRead({ userId: req.user.id, conversationKey, lastReadId: Number(lastReadId) });
+  res.json({ ok: true });
+}));
+
+// Unread counts
+app.get('/api/chat/unread', authenticate, asyncHandler(async (req, res) => {
+  const counts = await getChatUnread(req.user.id);
+  res.json(counts);
+}));
+
+// Create a group (admin only)
+app.post('/api/chat/groups', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { name, memberIds } = req.body;
+  if (!name?.trim()) return res.status(400).json({ message: 'Nom du groupe requis.' });
+  if (!Array.isArray(memberIds) || memberIds.length === 0) {
+    return res.status(400).json({ message: 'Au moins un membre requis.' });
+  }
+  const group = await createChatGroup({ name: name.trim(), createdBy: req.user.id, memberIds: memberIds.map(Number) });
+  res.status(201).json(group);
+}));
+
+// List user's groups
+app.get('/api/chat/groups', authenticate, asyncHandler(async (req, res) => {
+  const groups = await getUserGroups(req.user.id);
+  res.json(groups);
 }));
 
 // ─── Health check ─────────────────────────────────────────────────────────────

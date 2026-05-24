@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
-  XCircle, Info, Clock, ShieldCheck, Download, ChevronDown,
+  XCircle, Info, Clock, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
-  Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList, Filter
+  Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
+  MessageCircle, Send
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -291,6 +292,30 @@ interface ActivityEntry {
   ip: string;
 }
 
+interface ChatMessage {
+  id: number;
+  senderId: number;
+  senderName: string;
+  senderUsername: string;
+  recipientId: number | null;
+  groupId: number | null;
+  content: string;
+  createdAt: string;
+}
+
+interface ChatUser {
+  id: number;
+  username: string;
+  name: string;
+}
+
+interface ChatGroup {
+  id: number;
+  name: string;
+  created_by: number;
+  member_ids: number[];
+}
+
 interface FieldChange {
   field: string;
   from: string | boolean;
@@ -358,7 +383,6 @@ const Section = ({ icon, title, color, children }: { icon: React.ReactNode; titl
 const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) => {
   const isAdmin = currentUser.role === 'admin';
   const roleInfo = roleDisplay[currentUser.role] ?? { label: currentUser.role, classes: 'bg-gray-100 text-gray-700' };
-  const canRead   = isAdmin || (currentUser.permissions ?? []).includes('lecture');
   const canWrite  = isAdmin || (currentUser.permissions ?? []).includes('ecriture');
   const canModify = isAdmin || (currentUser.permissions ?? []).includes('modification');
   const userAllowedSiteIds = currentUser.allowedSiteIds ?? [];
@@ -462,6 +486,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [monitoringLoading, setMonitoringLoading] = useState(false);
   const activityUserFilterRef = useRef<number | null>(null);
 
+  // ── Chat state ─────────────────────────────────────────────────────────────
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [chatConversation, setChatConversation] = useState<'global' | number>('global');
+  const [chatActiveGroup, setChatActiveGroup] = useState<number | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+  const [chatGroups, setChatGroups] = useState<ChatGroup[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatUnread, setChatUnread] = useState<{ global: number; dms: Record<number, number>; groups: Record<number, number> }>({ global: 0, dms: {}, groups: {} });
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupMembers, setNewGroupMembers] = useState<number[]>([]);
+  const [groupCreating, setGroupCreating] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user' | 'site'>('equipment');
@@ -493,6 +534,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reportSiteDetail, setReportSiteDetail] = useState<EquipmentEvent[]>([]);
   const [reportSiteDetailLoading, setReportSiteDetailLoading] = useState(false);
 
+  // Toast & Confirm dialog
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -509,6 +554,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Auto-dismiss toast after 4 s
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // ─── Reports helpers ──────────────────────────────────────────────────────
 
@@ -536,6 +588,141 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     } catch {}
     setReportDateLoading(false);
   };
+
+  // ─── Chat functions ────────────────────────────────────────────────────────
+
+  const chatConvKey = (conv: 'global' | number, groupId?: number) =>
+    groupId != null ? `group:${groupId}` :
+    conv === 'global' ? 'global' :
+    `dm:${Math.min(currentUser.id, conv as number)}:${Math.max(currentUser.id, conv as number)}`;
+
+  const fetchChatUsers = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/chat/users`, { headers: authHeaders() });
+      if (r.ok) setChatUsers(await r.json());
+    } catch {}
+  };
+
+  const fetchChatGroups = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/chat/groups`, { headers: authHeaders() });
+      if (r.ok) setChatGroups(await r.json());
+    } catch {}
+  };
+
+  const fetchChatMessages = async (conv: 'global' | number, sinceId?: number, groupId?: number) => {
+    if (!sinceId) setChatLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (groupId != null) {
+        params.set('channel', 'group');
+        params.set('groupId', String(groupId));
+      } else if (conv === 'global') {
+        params.set('channel', 'global');
+      } else {
+        params.set('channel', 'dm');
+        params.set('withUser', String(conv));
+      }
+      if (sinceId) params.set('sinceId', String(sinceId));
+      const r = await fetch(`${API_BASE_URL}/api/chat/messages?${params}`, { headers: authHeaders() });
+      if (!r.ok) return;
+      const msgs: ChatMessage[] = await r.json();
+      if (sinceId) {
+        setChatMessages(prev => {
+          const ids = new Set(prev.map(m => m.id));
+          return [...prev, ...msgs.filter(m => !ids.has(m.id))];
+        });
+      } else {
+        setChatMessages(msgs);
+      }
+    } catch {}
+    if (!sinceId) setChatLoading(false);
+  };
+
+  const fetchChatUnread = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/chat/unread`, { headers: authHeaders() });
+      if (r.ok) setChatUnread(await r.json());
+    } catch {}
+  };
+
+  const handleSendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || chatSending) return;
+    setChatSending(true);
+    try {
+      const body: Record<string, unknown> = { content: chatInput.trim() };
+      if (chatActiveGroup != null) {
+        body.groupId = chatActiveGroup;
+      } else if (chatConversation !== 'global') {
+        body.recipientId = chatConversation;
+      }
+      const r = await fetch(`${API_BASE_URL}/api/chat/messages`, {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        const msg: ChatMessage = await r.json();
+        setChatMessages(prev => [...prev, msg]);
+        setChatInput('');
+        markChatAsRead(chatConversation, msg.id, chatActiveGroup ?? undefined);
+      }
+    } catch {}
+    setChatSending(false);
+  };
+
+  const markChatAsRead = async (conv: 'global' | number, lastReadId: number, groupId?: number) => {
+    if (!lastReadId) return;
+    const convKey = chatConvKey(conv, groupId);
+    try {
+      await fetch(`${API_BASE_URL}/api/chat/read`, {
+        method: 'PATCH', headers: authHeaders(),
+        body: JSON.stringify({ conversationKey: convKey, lastReadId }),
+      });
+      setChatUnread(prev => {
+        if (groupId != null) {
+          const groups = { ...prev.groups }; delete groups[groupId]; return { ...prev, groups };
+        }
+        if (conv === 'global') return { ...prev, global: 0 };
+        const dms = { ...prev.dms }; delete dms[conv as number]; return { ...prev, dms };
+      });
+    } catch {}
+  };
+
+  const openChatConversation = (conv: 'global' | number) => {
+    setChatActiveGroup(null);
+    setChatConversation(conv);
+    setChatMessages([]);
+    fetchChatMessages(conv);
+  };
+
+  const openGroupConversation = (groupId: number) => {
+    setChatActiveGroup(groupId);
+    setChatMessages([]);
+    fetchChatMessages('global', undefined, groupId);
+  };
+
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGroupName.trim() || newGroupMembers.length === 0 || groupCreating) return;
+    setGroupCreating(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/chat/groups`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ name: newGroupName.trim(), memberIds: newGroupMembers }),
+      });
+      if (r.ok) {
+        const group: ChatGroup = await r.json();
+        setChatGroups(prev => [group, ...prev]);
+        setShowCreateGroup(false);
+        setNewGroupName('');
+        setNewGroupMembers([]);
+        openGroupConversation(group.id);
+      }
+    } catch {}
+    setGroupCreating(false);
+  };
+
+  // ─── Reports ───────────────────────────────────────────────────────────────
 
   const fetchReportByDepartment = async () => {
     setReportDeptLoading(true);
@@ -668,6 +855,66 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     XLSX.writeFile(wb, `rapport-${Date.now()}.xlsx`);
   };
 
+  const exportDeptPdf = (stats: DeptStat[]) => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14); doc.text('Rapport par service', 14, 14);
+    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} service(s)`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [['Service', 'Équipements', 'Total événements', 'Créations', 'Modifications', 'Interventions', 'Suppressions', 'Dernière activité']],
+      body: stats.map(d => [
+        d.department, d.equipment_count, d.total_events, d.creations,
+        d.modifications, d.interventions, d.suppressions,
+        d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`rapport-services-${Date.now()}.pdf`);
+  };
+
+  const exportUserPdf = (stats: UserStat[]) => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14); doc.text('Rapport par utilisateur', 14, 14);
+    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} utilisateur(s)`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [['Utilisateur', 'Login', 'Total', 'Créations', 'Modifications', 'Transferts', 'Suppressions', 'Maintenances', 'Réformes', 'Équip.', 'Services', 'Dernière action']],
+      body: stats.map(u => [
+        u.user_name, u.username, u.total_actions, u.creations, u.modifications,
+        u.transferts, u.suppressions, u.maintenances, u.reformes,
+        u.equipment_count, u.dept_count,
+        u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
+      ]),
+      styles: { fontSize: 6, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`rapport-utilisateurs-${Date.now()}.pdf`);
+  };
+
+  const exportSitePdf = (stats: any[]) => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14); doc.text('Rapport par site', 14, 14);
+    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} site(s)`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [['Site', 'Ville', 'Pays', 'Équipements', 'Total événements', 'Créations', 'Modifications', 'Transferts', 'Interventions', 'Réformes', 'Suppressions', 'Dernière activité']],
+      body: stats.map(s => [
+        s.site_name, s.city || '—', s.country || '—',
+        s.equipment_count, s.total_events, s.creations, s.modifications,
+        s.transferts, s.interventions, s.reformes, s.suppressions,
+        s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
+      ]),
+      styles: { fontSize: 6, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`rapport-sites-${Date.now()}.pdf`);
+  };
+
+
   // ─── Monitoring helpers ────────────────────────────────────────────────────
 
   const formatDuration = (startIso: string) => {
@@ -723,7 +970,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const handleUnauthorized = () => {
-    alert('Session expirée ou non autorisée. Veuillez vous reconnecter.');
+    setToast({ message: 'Session expirée ou non autorisée. Veuillez vous reconnecter.', type: 'error' });
     onLogout();
   };
 
@@ -868,30 +1115,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     }
   };
 
-  const handleDeleteUser = async (id: number) => {
-    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) {
-      return;
-    }
-    try {
-      const response = await fetch(`${API_USERS}/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders()
-      });
-      if (response.status === 401) {
-        handleUnauthorized();
-        return;
+  const handleDeleteUser = (id: number) => {
+    setConfirmModal({
+      message: 'Êtes-vous sûr de vouloir supprimer cet utilisateur ?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const response = await fetch(`${API_USERS}/${id}`, { method: 'DELETE', headers: authHeaders() });
+          if (response.status === 401) { handleUnauthorized(); return; }
+          if (response.status === 403) { setError('Action réservée aux administrateurs.'); return; }
+          if (!response.ok) throw new Error('Erreur de suppression');
+          await fetchUsers();
+        } catch {
+          setError('Impossible de supprimer l\'utilisateur.');
+        }
       }
-      if (response.status === 403) {
-        setError('Action réservée aux administrateurs.');
-        return;
-      }
-      if (!response.ok) {
-        throw new Error('Erreur de suppression');
-      }
-      await fetchUsers();
-    } catch {
-      setError('Impossible de supprimer l\'utilisateur.');
-    }
+    });
   };
 
   useEffect(() => {
@@ -948,6 +1187,40 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return () => clearTimeout(timer);
   }, [reportSiteFrom, reportSiteTo, reportSiteTypeFilter, showReportsModal, reportsTab]);
 
+  // Chat: load users and groups once on mount
+  useEffect(() => { fetchChatUsers(); fetchChatGroups(); }, []);
+
+  // Chat: poll unread every 15 seconds
+  useEffect(() => {
+    fetchChatUnread();
+    const id = setInterval(fetchChatUnread, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Chat: scroll to bottom when messages change
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Chat: poll new messages every 4 seconds when modal open
+  useEffect(() => {
+    if (!showChatModal) return;
+    const poll = () => {
+      const lastId = chatMessages[chatMessages.length - 1]?.id;
+      if (chatActiveGroup != null) fetchChatMessages('global', lastId, chatActiveGroup);
+      else fetchChatMessages(chatConversation, lastId);
+    };
+    const id = setInterval(poll, 4000);
+    return () => clearInterval(id);
+  }, [showChatModal, chatConversation, chatActiveGroup, chatMessages]);
+
+  // Chat: mark as read when messages loaded
+  useEffect(() => {
+    if (!showChatModal || chatMessages.length === 0) return;
+    const lastId = chatMessages[chatMessages.length - 1]?.id;
+    if (lastId) markChatAsRead(chatConversation, lastId, chatActiveGroup ?? undefined);
+  }, [showChatModal, chatConversation, chatActiveGroup, chatMessages.length]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -1003,7 +1276,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         setEquipments((prev) => [...prev, created]);
       }
     } catch (err) {
-      alert('Impossible de sauvegarder l\'équipement. Vérifiez vos autorisations et que le backend est démarré.');
+      setToast({ message: 'Impossible de sauvegarder l\'équipement. Vérifiez vos autorisations et que le backend est démarré.', type: 'error' });
     }
   };
 
@@ -1012,12 +1285,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const missingField = requiredFields.find((field) => !formData[field as keyof EquipmentFormData]?.toString().trim());
 
     if (missingField) {
-      alert('Veuillez remplir tous les champs obligatoires.');
+      setToast({ message: 'Veuillez remplir tous les champs obligatoires.', type: 'error' });
       return;
     }
 
     if (formData.visited && !formData.technicianName.trim()) {
-      alert('Le nom du technicien est obligatoire si l\'équipement a été visité.');
+      setToast({ message: 'Le nom du technicien est obligatoire si l\'équipement a été visité.', type: 'error' });
       return;
     }
 
@@ -1046,31 +1319,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowForm(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cet équipement ?')) {
-      return;
-    }
-    try {
-      const response = await fetch(`${API_BASE}/${id}`, { method: 'DELETE', headers: authHeaders() });
-      if (response.status === 401) {
-        handleUnauthorized();
-        return;
+  const handleDelete = (id: number) => {
+    setConfirmModal({
+      message: 'Êtes-vous sûr de vouloir supprimer cet équipement ?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const response = await fetch(`${API_BASE}/${id}`, { method: 'DELETE', headers: authHeaders() });
+          if (response.status === 401) { handleUnauthorized(); return; }
+          if (response.status === 403) { setToast({ message: 'Action réservée aux administrateurs.', type: 'error' }); return; }
+          if (!response.ok) throw new Error('Erreur de suppression');
+          setEquipments((prev) => prev.filter((item) => item.id !== id));
+          if (selectedEquipment?.id === id) { setShowDetailsModal(false); setSelectedEquipment(null); }
+        } catch {
+          setToast({ message: 'Impossible de supprimer l\'équipement. Vérifiez vos autorisations et que le backend est démarré.', type: 'error' });
+        }
       }
-      if (response.status === 403) {
-        alert('Action réservée aux administrateurs.');
-        return;
-      }
-      if (!response.ok) {
-        throw new Error('Erreur de suppression');
-      }
-      setEquipments((prev) => prev.filter((item) => item.id !== id));
-      if (selectedEquipment?.id === id) {
-        setShowDetailsModal(false);
-        setSelectedEquipment(null);
-      }
-    } catch (err) {
-      alert('Impossible de supprimer l\'équipement. Vérifiez vos autorisations et que le backend est démarré.');
-    }
+    });
   };
 
   const handleRefresh = async () => {
@@ -1095,7 +1360,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      alert('Impossible d\'exporter les équipements.');
+      setToast({ message: 'Impossible d\'exporter les équipements.', type: 'error' });
     }
     setShowExportMenu(false);
   };
@@ -1178,7 +1443,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const handleTransfer = async () => {
     if (!transferTarget) return;
     if (!transferForm.toLocation.trim() || !transferForm.toDepartment.trim()) {
-      alert('Localisation et département requis.');
+      setToast({ message: 'Localisation et département requis.', type: 'error' });
       return;
     }
     setTransferLoading(true);
@@ -1191,11 +1456,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (response.status === 401) { handleUnauthorized(); return; }
       if (!response.ok) throw new Error('Erreur transfert');
       const updated = await response.json();
-      setEquipments((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      // Refresh full list so partial transfer destination equipment appears
+      await fetchEquipments();
       if (selectedEquipment?.id === updated.id) setSelectedEquipment(updated);
       setShowTransferModal(false);
     } catch {
-      alert('Impossible d\'effectuer le transfert.');
+      setToast({ message: 'Impossible d\'effectuer le transfert.', type: 'error' });
     } finally {
       setTransferLoading(false);
     }
@@ -1234,7 +1500,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const handleSaveSite = async () => {
-    if (!siteForm.name.trim()) { alert('Le nom du site est requis.'); return; }
+    if (!siteForm.name.trim()) { setToast({ message: 'Le nom du site est requis.', type: 'error' }); return; }
     setSiteLoading(true);
     try {
       const url = editingSiteId ? `${API_BASE_URL}/api/sites/${editingSiteId}` : `${API_BASE_URL}/api/sites`;
@@ -1243,22 +1509,27 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(siteForm),
       });
-      if (!r.ok) { const d = await r.json(); alert(d.message || 'Erreur'); return; }
+      if (!r.ok) { const d = await r.json(); setToast({ message: d.message || 'Erreur', type: 'error' }); return; }
       await fetchSites();
       setEditingSiteId(null);
       setSiteForm(defaultSiteForm);
-    } catch { alert('Erreur réseau.'); }
+    } catch { setToast({ message: 'Erreur réseau.', type: 'error' }); }
     setSiteLoading(false);
   };
 
-  const handleDeleteSite = async (id: number) => {
-    if (!confirm('Supprimer ce site ?')) return;
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/sites/${id}`, { method: 'DELETE', headers: authHeaders() });
-      if (!r.ok) { const d = await r.json(); alert(d.message); return; }
-      if (selectedSiteId === id) setSelectedSiteId(null);
-      await fetchSites();
-    } catch { alert('Erreur réseau.'); }
+  const handleDeleteSite = (id: number) => {
+    setConfirmModal({
+      message: 'Supprimer ce site ?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const r = await fetch(`${API_BASE_URL}/api/sites/${id}`, { method: 'DELETE', headers: authHeaders() });
+          if (!r.ok) { const d = await r.json(); setToast({ message: d.message, type: 'error' }); return; }
+          if (selectedSiteId === id) setSelectedSiteId(null);
+          await fetchSites();
+        } catch { setToast({ message: 'Erreur réseau.', type: 'error' }); }
+      }
+    });
   };
 
   const getTransferLocations = (ev: any) => {
@@ -1312,7 +1583,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const handleReform = async () => {
     if (!reformTarget) return;
-    if (!reformForm.reason.trim()) { alert('Veuillez indiquer la raison de la réforme.'); return; }
+    if (!reformForm.reason.trim()) { setToast({ message: 'Veuillez indiquer la raison de la réforme.', type: 'error' }); return; }
     setReformLoading(true);
     try {
       const r = await fetch(`${API_BASE}/${reformTarget.id}/reform`, {
@@ -1325,7 +1596,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       setEquipments(prev => prev.map(e => e.id === updated.id ? updated : e));
       setShowReformModal(false);
     } catch {
-      alert('Impossible de réformer cet équipement.');
+      setToast({ message: 'Impossible de réformer cet équipement.', type: 'error' });
     }
     setReformLoading(false);
   };
@@ -1349,12 +1620,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     });
   };
 
-  const handleDeleteDocument = async (docId: number) => {
-    if (!window.confirm('Supprimer ce document ?')) return;
-    const r = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: 'DELETE', headers: authHeaders() });
-    if (r.ok || r.status === 204) {
-      setEquipmentDocs((prev) => prev.filter((d) => d.id !== docId));
-    }
+  const handleDeleteDocument = (docId: number) => {
+    setConfirmModal({
+      message: 'Supprimer ce document ?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        const r = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: 'DELETE', headers: authHeaders() });
+        if (r.ok || r.status === 204) {
+          setEquipmentDocs((prev) => prev.filter((d) => d.id !== docId));
+        }
+      }
+    });
   };
 
   const downloadDocument = async (docId: number) => {
@@ -1372,7 +1648,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const handleNewEquipDocAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const valid = files.filter((f) => f.size <= 3 * 1024 * 1024);
-    if (valid.length < files.length) alert('Certains fichiers dépassent 3 Mo et ont été ignorés.');
+    if (valid.length < files.length) setToast({ message: 'Certains fichiers dépassent 3 Mo et ont été ignorés.', type: 'info' });
     setNewEquipDocs((prev) => [...prev, ...valid.map((f) => ({ file: f, description: '' }))]);
     e.target.value = '';
   };
@@ -1410,7 +1686,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const handleSaveMaintenance = async () => {
-    if (!maintenanceForm.failureDesc.trim()) { alert('Description de la panne requise.'); return; }
+    if (!maintenanceForm.failureDesc.trim()) { setToast({ message: 'Description de la panne requise.', type: 'error' }); return; }
     try {
       if (maintenanceEditId !== null) {
         const r = await fetch(`${API_BASE_URL}/api/maintenance/${maintenanceEditId}`, {
@@ -1435,16 +1711,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       setShowMaintenanceForm(false);
       setMaintForm(defaultMaintenanceForm);
       setMaintenanceEditId(null);
-    } catch { alert('Erreur lors de la sauvegarde.'); }
+    } catch { setToast({ message: 'Erreur lors de la sauvegarde.', type: 'error' }); }
   };
 
-  const handleDeleteMaintenance = async (id: number) => {
-    if (!window.confirm('Supprimer ce ticket de maintenance ?')) return;
-    const r = await fetch(`${API_BASE_URL}/api/maintenance/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (r.ok || r.status === 204) {
-      setMaintenanceRecords((prev) => prev.filter((m) => m.id !== id));
-      if (selectedMaintenance?.id === id) setSelectedMaintenance(null);
-    }
+  const handleDeleteMaintenance = (id: number) => {
+    setConfirmModal({
+      message: 'Supprimer ce ticket de maintenance ?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        const r = await fetch(`${API_BASE_URL}/api/maintenance/${id}`, { method: 'DELETE', headers: authHeaders() });
+        if (r.ok || r.status === 204) {
+          setMaintenanceRecords((prev) => prev.filter((m) => m.id !== id));
+          if (selectedMaintenance?.id === id) setSelectedMaintenance(null);
+        }
+      }
+    });
   };
 
   const maintenanceStatusStyle: Record<string, string> = {
@@ -1495,46 +1776,49 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return <IconComponent className="w-4 h-4" />;
   };
 
-  const dueSoonCount = equipments.filter((equipment) => {
-    if (!equipment.warranty) {
-      return false;
-    }
-    const warrantyDate = new Date(equipment.warranty);
-    const now = new Date();
-    const soon = new Date();
-    soon.setDate(now.getDate() + 90);
-    return warrantyDate >= now && warrantyDate <= soon;
-  }).length;
-
-  const maintenanceCount = equipments.filter((equipment) => equipment.status === 'maintenance').length;
-  const notVisitedCount = equipments.filter((equipment) => !equipment.visited).length;
+  const maintenanceCount = filteredEquipments.filter((equipment) => equipment.status === 'maintenance').length;
+  const notVisitedCount = filteredEquipments.filter((equipment) => !equipment.visited).length;
 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="relative rounded-xl shadow-sm mb-6 p-6" style={{background:'linear-gradient(to right, #075985, #0ea5e9)'}}>
-          <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-            <div className="absolute inset-0 opacity-0" />
-          </div>
+        <div className="relative rounded-2xl shadow-md mb-6 p-6 bg-indigo-700 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none opacity-20"
+            style={{backgroundImage:'radial-gradient(circle at 80% 50%, #a5b4fc 0%, transparent 60%)'}} />
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
-              <p className="text-sky-100 mt-1 text-sm">Suivi des équipements et accès protégé par rôle.</p>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Gestion des équipements informatiques</h1>
+              <p className="text-indigo-200 mt-1 text-sm">Suivi du parc IT · accès sécurisé par rôle et par site.</p>
             </div>
             <div className="flex items-center gap-3">
               {/* User pill */}
               <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm text-white backdrop-blur-sm">
-                <User className="w-4 h-4 text-blue-100" />
+                <User className="w-4 h-4 text-indigo-200" />
                 <span className="font-medium">{currentUser.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${roleInfo.classes}`}>{roleInfo.label}</span>
               </div>
+
+              {/* Chat button */}
+              <button
+                type="button"
+                onClick={() => { setShowChatModal(true); openChatConversation(chatConversation); }}
+                className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-white/25 bg-white/15 text-white hover:bg-white/25 transition-colors backdrop-blur-sm"
+                title="Messagerie"
+              >
+                <MessageCircle className="w-5 h-5" />
+                {(chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0)) > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none font-bold">
+                    {Math.min(9, chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0))}
+                  </span>
+                )}
+              </button>
 
               {/* Modules dropdown */}
               <div className="relative" ref={modulesMenuRef}>
                 <button
                   type="button"
                   onClick={() => setShowModulesMenu(v => !v)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/25 bg-white/15 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-white/25 transition-colors backdrop-blur-sm"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/15 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-white/25 transition-colors backdrop-blur-sm"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1576,24 +1860,26 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </>
                     )}
 
+                    <div className="border-t border-gray-100 my-1" />
+                    <button type="button"
+                      onClick={() => { setShowModulesMenu(false); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                      <Calendar className="w-4 h-4 text-indigo-500" />
+                      Rapports
+                    </button>
+
                     {isAdmin && (
                       <>
-                        <div className="border-t border-gray-100 my-1" />
-                        <div className="px-3 pt-2 pb-1">
-                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
-                        </div>
-                        <button type="button"
-                          onClick={() => { setShowModulesMenu(false); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                          <Calendar className="w-4 h-4 text-indigo-500" />
-                          Rapports
-                        </button>
                         <button type="button"
                           onClick={() => { setShowModulesMenu(false); setShowActivityLog(true); fetchActivityLog(); }}
                           className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
                           <ClipboardList className="w-4 h-4 text-teal-500" />
                           Journal d'activité
                         </button>
+                        <div className="border-t border-gray-100 my-1" />
+                        <div className="px-3 pt-2 pb-1">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
+                        </div>
                         <button type="button"
                           onClick={() => { setShowModulesMenu(false); setShowMonitoringModal(true); }}
                           className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
@@ -1630,13 +1916,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {!isAdmin && userAllowedSiteIds.length === 1 ? (() => {
               const s = sites.find(s => s.id === userAllowedSiteIds[0]);
               return s ? (
-                <div className="flex items-center gap-3 bg-white border border-blue-200 rounded-xl shadow-sm px-4 py-3 flex-1 max-w-sm">
-                  <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                <div className="flex items-center gap-3 bg-white border border-indigo-200 rounded-xl shadow-sm px-4 py-3 flex-1 max-w-sm">
+                  <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-semibold text-gray-800 block truncate">{s.name}</span>
                     <span className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {equipments.filter(e => e.siteId === s.id).length} équip.</span>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium shrink-0">Votre site</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium shrink-0">Votre site</span>
                 </div>
               ) : null;
             })() : (
@@ -1645,9 +1931,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button
                 type="button"
                 onClick={() => setShowSiteDropdown(v => !v)}
-                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-blue-400 hover:shadow-md transition-all"
+                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-indigo-400 hover:shadow-md transition-all"
               >
-                <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                 <div className="flex-1 min-w-0">
                   {selectedSiteId === null ? (
                     <span className="text-sm text-gray-400">— Sélectionner un site —</span>
@@ -1672,16 +1958,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     return (
                       <button key={site.id} type="button"
                         onClick={() => { setSelectedSiteId(site.id); setShowSiteDropdown(false); }}
-                        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
                       >
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${selected ? 'bg-blue-500' : 'bg-gray-200'}`} />
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${selected ? 'bg-indigo-500' : 'bg-gray-200'}`} />
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${selected ? 'text-blue-700' : 'text-gray-800'}`}>{site.name}</p>
+                          <p className={`text-sm font-medium truncate ${selected ? 'text-indigo-700' : 'text-gray-800'}`}>{site.name}</p>
                           <p className="text-xs text-gray-400 flex items-center gap-1">
                             <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
                           </p>
                         </div>
-                        {selected && <CheckCircle className="w-4 h-4 text-blue-500 shrink-0" />}
+                        {selected && <CheckCircle className="w-4 h-4 text-indigo-500 shrink-0" />}
                       </button>
                     );
                   })}
@@ -1697,7 +1983,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {isAdmin && (
               <button
                 onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
-                className="inline-flex items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors shadow-sm"
+                className="inline-flex items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors shadow-sm"
               >
                 <Plus className="w-4 h-4" /> Gérer les sites
               </button>
@@ -1711,49 +1997,47 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Info className="w-5 h-5 text-blue-600" />
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Total équipements</div>
-                <div className="text-2xl font-bold text-gray-900">{equipments.length}</div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Total équipements</p>
+                <p className="text-3xl font-bold text-gray-900">{filteredEquipments.length}</p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center shrink-0">
+                <Info className="w-6 h-6 text-indigo-500" />
               </div>
             </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-amber-400">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-amber-500" />
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Sous garantie 90j</div>
-                <div className="text-2xl font-bold text-gray-900">{dueSoonCount}</div>
-              </div>
+            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
+              {selectedSiteId ? `Site sélectionné` : 'Tous les sites'}
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-orange-500">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5 text-orange-500" />
-              </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Maintenance</div>
-                <div className="text-2xl font-bold text-gray-900">{maintenanceCount}</div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">En maintenance</p>
+                <p className="text-3xl font-bold text-gray-900">{maintenanceCount}</p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center shrink-0">
+                <Wrench className="w-6 h-6 text-amber-500" />
               </div>
             </div>
+            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
+              {maintenanceCount === 0 ? 'Aucun ticket ouvert' : `${maintenanceCount} équipement${maintenanceCount > 1 ? 's' : ''} en cours`}
+            </div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-rose-500">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
-                <XCircle className="w-5 h-5 text-rose-500" />
-              </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs uppercase tracking-wide text-gray-400 font-medium">Non visités</div>
-                <div className="text-2xl font-bold text-gray-900">{notVisitedCount}</div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Non visités</p>
+                <p className="text-3xl font-bold text-gray-900">{notVisitedCount}</p>
               </div>
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center shrink-0">
+                <XCircle className="w-6 h-6 text-rose-500" />
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
+              {notVisitedCount === 0 ? 'Tous visités' : `${notVisitedCount} sans passage technicien`}
             </div>
           </div>
         </div>
@@ -1768,7 +2052,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 placeholder="Rechercher un équipement, marque, modèle…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white focus:border-transparent transition-all"
+                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white focus:border-transparent transition-all"
               />
             </div>
 
@@ -1776,7 +2060,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <button
               onClick={handleRefresh}
               title="Actualiser"
-              className="p-2.5 rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+              className="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
             >
               <RefreshCcw className="w-4 h-4" />
             </button>
@@ -1785,7 +2069,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <div className="relative" ref={exportMenuRef}>
               <button
                 onClick={() => setShowExportMenu((v) => !v)}
-                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
               >
                 <Download className="w-4 h-4" />
                 Exporter
@@ -1816,7 +2100,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {canWrite && (
               <button
                 onClick={openNewEquipmentForm}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white shadow-sm transition-all hover:opacity-90 active:scale-95"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm transition-all hover:opacity-90 active:scale-95"
                 style={{background:'linear-gradient(135deg, #0f1b35 0%, #1a3a6b 45%, #1e5799 100%)'}}
               >
                 <Plus className="w-4 h-4" />
@@ -1832,7 +2116,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value as 'all' | EquipmentType)}
-                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
               >
                 <option value="all">Tous</option>
                 {equipmentTypes.map((type) => (
@@ -1846,7 +2130,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value as 'all' | EquipmentStatus)}
-                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
               >
                 <option value="all">Tous</option>
                 <option value="actif">Actif</option>
@@ -1861,7 +2145,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {(filterType !== 'all' || filterStatus !== 'all' || searchTerm) && (
               <button
                 onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
-                className="text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2"
+                className="text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
               >
                 Réinitialiser
               </button>
@@ -1877,8 +2161,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center text-gray-400">Chargement des données…</div>
         ) : sites.length > 0 && selectedSiteId === null ? (
           <div className="bg-white rounded-lg shadow-sm p-16 flex flex-col items-center justify-center text-center">
-            <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
-              <Globe className="w-8 h-8 text-blue-400" />
+            <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+              <Globe className="w-8 h-8 text-indigo-400" />
             </div>
             <h3 className="text-lg font-semibold text-gray-700 mb-1">Sélectionnez un site</h3>
             <p className="text-sm text-gray-400 max-w-xs">Choisissez un site dans la barre ci-dessus pour afficher ses équipements.</p>
@@ -1888,18 +2172,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[800px]">
                 <thead>
-                  <tr className="bg-gradient-to-r from-slate-700 to-slate-600">
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Équipement</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Localisation</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Statut</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Passage technicien</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">Actions</th>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Équipement</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Localisation</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Statut</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Passage technicien</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
                   {filteredEquipments.map((equipment) => (
-                    <tr key={equipment.id} className="hover:bg-blue-50/40 transition-colors">
+                    <tr key={equipment.id} className="hover:bg-indigo-50/30 transition-colors border-b border-gray-50 last:border-0">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {getTypeIcon(equipment.type)}
@@ -1920,7 +2204,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </td>
                       <td className="px-6 py-4">
                         {equipment.siteId && (
-                          <div className="text-xs text-blue-600 flex items-center gap-1 mb-0.5">
+                          <div className="text-xs text-indigo-600 flex items-center gap-1 mb-0.5">
                             <Building2 className="w-3 h-3" />
                             {sites.find(s => s.id === equipment.siteId)?.name}
                           </div>
@@ -1957,7 +2241,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           {canModify && (
                             <button
                               onClick={() => handleEdit(equipment)}
-                              className="text-blue-600 hover:text-blue-900"
+                              className="text-indigo-600 hover:text-indigo-900"
                               title="Modifier"
                             >
                               <Edit className="w-4 h-4" />
@@ -2018,14 +2302,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
         {showForm && (
           <div
-            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
             onClick={() => {
               setShowForm(false);
               resetForm();
             }}
           >
             <div
-              className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
               onClick={(event) => event.stopPropagation()}
             >
               <h2 className="text-xl font-bold mb-4">
@@ -2040,7 +2324,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2049,7 +2333,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.type}
                       onChange={(e) => setFormData({ ...formData, type: e.target.value as EquipmentType })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     >
                       {equipmentTypes.map((type) => (
                         <option key={type.value} value={type.value}>
@@ -2065,7 +2349,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.brand}
                       onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2075,7 +2359,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.model}
                       onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2085,7 +2369,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.serialNumber}
                       onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2095,7 +2379,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.ipAddress}
                       onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                       placeholder="192.168.1.100"
                     />
                   </div>
@@ -2105,7 +2389,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.siteId ?? ''}
                       onChange={e => setFormData({ ...formData, siteId: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     >
                       <option value="">— Aucun site —</option>
                       {sites.map(s => (
@@ -2121,7 +2405,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       min={1}
                       value={formData.quantity}
                       onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2131,7 +2415,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.location}
                       onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2141,7 +2425,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.department}
                       onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2150,7 +2434,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as EquipmentStatus })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     >
                       <option value="actif">Actif</option>
                       <option value="inactif">Inactif</option>
@@ -2165,7 +2449,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.purchaseDate}
                       onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2175,7 +2459,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.warranty}
                       onChange={(e) => setFormData({ ...formData, warranty: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
 
@@ -2185,7 +2469,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.lastMaintenance}
                       onChange={(e) => setFormData({ ...formData, lastMaintenance: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                     />
                   </div>
                 </div>
@@ -2199,7 +2483,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       id="visited"
                       checked={formData.visited}
                       onChange={(e) => setFormData({ ...formData, visited: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-400 border-gray-200 rounded"
                     />
                     <label htmlFor="visited" className="ml-2 block text-sm text-gray-900">
                       Un technicien a visité cet équipement
@@ -2214,7 +2498,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           type="text"
                           value={formData.technicianName}
                           onChange={(e) => setFormData({ ...formData, technicianName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                         />
                       </div>
 
@@ -2224,7 +2508,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           type="datetime-local"
                           value={formData.visitDate}
                           onChange={(e) => setFormData({ ...formData, visitDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                         />
                       </div>
 
@@ -2234,7 +2518,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           value={formData.interventionDetails}
                           onChange={(e) => setFormData({ ...formData, interventionDetails: e.target.value })}
                           rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                           placeholder="Décrivez les actions effectuées..."
                         />
                       </div>
@@ -2250,7 +2534,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <span className="text-sm font-medium text-gray-700">Documents d'achat (optionnel)</span>
                       <span className="text-xs text-gray-400">PDF, images — max 3 Mo chacun</span>
                     </div>
-                    <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                    <label className="inline-flex items-center gap-2 cursor-pointer rounded-xl border border-dashed border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
                       <Upload className="w-4 h-4" />
                       Ajouter des fichiers
                       <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleNewEquipDocAdd} />
@@ -2281,7 +2565,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <button
                     type="button"
                     onClick={() => { setShowForm(false); resetForm(); setNewEquipDocs([]); }}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                    className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
                   >
                     Annuler
                   </button>
@@ -2289,7 +2573,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     type="button"
                     onClick={handleSubmit}
                     disabled={uploadingDocs}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-60"
                   >
                     {uploadingDocs ? 'Upload…' : editingId !== null ? 'Modifier' : 'Ajouter'}
                   </button>
@@ -2300,8 +2584,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         )}
 
         {showDetailsModal && selectedEquipment && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
 
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b">
@@ -2320,7 +2604,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     if (tab === 'documents' && equipmentDocs.length === 0) fetchDocuments(selectedEquipment.id);
                     if (tab === 'transfers' && transferHistory.length === 0) fetchTransferHistory(selectedEquipment.id);
                   }}
-                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition ${detailsTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition ${detailsTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                     <Icon className="w-4 h-4" />{label}
                   </button>
                 ))}
@@ -2371,8 +2655,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             </div>
                           )}
                           {replaces && (
-                            <div className="mt-3 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm">
-                              <p className="text-blue-700">Remplace l'ancien équipement : <span className="font-medium">{replaces.name}</span> <span className="text-blue-400">(réformé)</span></p>
+                            <div className="mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-sm">
+                              <p className="text-indigo-700">Remplace l'ancien équipement : <span className="font-medium">{replaces.name}</span> <span className="text-indigo-400">(réformé)</span></p>
                             </div>
                           )}
                         </>
@@ -2380,10 +2664,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     })()}
                     {canModify && selectedEquipment.status !== 'réformé' && (
                       <div className="pt-3 border-t flex gap-2">
-                        <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm text-white hover:bg-purple-700">
+                        <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
                           <ArrowRightLeft className="w-4 h-4" /> Transférer
                         </button>
-                        <button onClick={() => { setSelectedEquipment(null); openReformModal(selectedEquipment); }} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                        <button onClick={() => { setSelectedEquipment(null); openReformModal(selectedEquipment); }} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                           <Archive className="w-4 h-4" /> Réformer
                         </button>
                       </div>
@@ -2424,12 +2708,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <p className="text-sm text-gray-500">{equipmentDocs.length} document(s)</p>
-                      <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">
+                      <label className="inline-flex items-center gap-2 cursor-pointer rounded-xl bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-700">
                         <Upload className="w-4 h-4" /> Ajouter
                         <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={async (e) => {
                           const files = Array.from(e.target.files || []);
                           for (const f of files) {
-                            if (f.size > 3 * 1024 * 1024) { alert(`${f.name} dépasse 3 Mo.`); continue; }
+                            if (f.size > 3 * 1024 * 1024) { setToast({ message: `${f.name} dépasse 3 Mo.`, type: 'error' }); continue; }
                             const doc = await handleDocumentUpload(selectedEquipment.id, f, '');
                             if (doc) setEquipmentDocs((prev) => [...prev, doc]);
                           }
@@ -2447,13 +2731,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <div className="space-y-2">
                         {equipmentDocs.map((doc) => (
                           <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                            <File className="w-5 h-5 text-blue-400 shrink-0" />
+                            <File className="w-5 h-5 text-indigo-400 shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-800 truncate">{doc.filename}</p>
                               <p className="text-xs text-gray-500">{formatFileSize(doc.fileSize)} · {doc.uploadedBy} · {new Date(doc.uploadedAt).toLocaleDateString('fr-FR')}</p>
                               {doc.description && <p className="text-xs text-gray-400 italic">{doc.description}</p>}
                             </div>
-                            <button onClick={() => downloadDocument(doc.id)} className="text-blue-600 hover:text-blue-800 p-1" title="Télécharger">
+                            <button onClick={() => downloadDocument(doc.id)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Télécharger">
                               <Download className="w-4 h-4" />
                             </button>
                             {canModify && (
@@ -2471,7 +2755,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
               {/* Footer */}
               <div className="flex justify-end px-6 py-4 border-t">
-                <button onClick={() => setShowDetailsModal(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">Fermer</button>
+                <button onClick={() => setShowDetailsModal(false)} className="px-4 py-2 border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm">Fermer</button>
               </div>
             </div>
           </div>
@@ -2480,7 +2764,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Maintenance module ───────────────────────────────────────────── */}
       {showMaintenanceModule && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }}>
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl mx-4 flex flex-col" style={{ maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -2492,7 +2776,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
-                  className="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm text-white hover:bg-orange-700">
+                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
                 <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="text-gray-400 hover:text-gray-700 text-xl ml-2">✕</button>
@@ -2583,7 +2867,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </button>
                       )}
                       <button onClick={() => { setShowNoteForm(v => !v); setNoteText(''); }}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 flex items-center gap-1">
+                        className="text-xs px-3 py-1.5 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 flex items-center gap-1">
                         <Edit className="w-3.5 h-3.5" /> Nouvelle information
                       </button>
                       {canModify && selectedMaintenance.status !== 'résolu' && (
@@ -2616,7 +2900,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
                     {/* Notes / informations complémentaires */}
                     {(selectedMaintenance.notes || showNoteForm) && (
-                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Edit className="w-4 h-4 text-blue-500" />
                           <span className="text-sm font-semibold text-gray-700">Informations complémentaires</span>
@@ -2635,7 +2919,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               onChange={e => setNoteText(e.target.value)}
                               rows={3}
                               placeholder="Saisir une nouvelle information…"
-                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-none"
+                              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent resize-none"
                             />
                             <div className="flex gap-2">
                               <button
@@ -2657,12 +2941,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   } catch {}
                                   setNoteLoading(false);
                                 }}
-                                className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                                className="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
                               >
                                 {noteLoading ? 'Enregistrement…' : 'Enregistrer'}
                               </button>
                               <button onClick={() => { setShowNoteForm(false); setNoteText(''); }}
-                                className="px-4 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+                                className="px-4 py-1.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
                                 Annuler
                               </button>
                             </div>
@@ -2677,12 +2961,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div className="mt-4 pt-4 border-t flex gap-2">
                       {selectedMaintenance.status === 'ouvert' && (
                         <button onClick={async () => { const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ status: 'en_cours' }) }); if(r.ok) { const u = await r.json(); setMaintenanceRecords(p=>p.map(m=>m.id===u.id?u:m)); setSelectedMaintenance(u); fetchEquipments(); } }}
-                          className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
+                          className="flex-1 py-2 rounded-xl bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
                           Démarrer la réparation
                         </button>
                       )}
                       <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu' }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
-                        className="flex-1 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700">
+                        className="flex-1 py-2 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700">
                         Marquer comme résolu
                       </button>
                     </div>
@@ -2699,7 +2983,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Équipement concerné</label>
                         <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                           <option value="">— Sélectionner un équipement —</option>
                           {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
                         </select>
@@ -2708,7 +2992,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Priorité</label>
                       <select value={maintenanceForm.priority} onChange={e => setMaintForm(f => ({ ...f, priority: e.target.value as MaintenancePriority }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                         <option value="faible">Faible</option>
                         <option value="normale">Normale</option>
                         <option value="haute">Haute</option>
@@ -2718,33 +3002,33 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Description de la panne *</label>
                       <textarea rows={3} value={maintenanceForm.failureDesc} onChange={e => setMaintForm(f => ({ ...f, failureDesc: e.target.value }))}
-                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Diagnostic</label>
                       <textarea rows={3} value={maintenanceForm.diagnosis} onChange={e => setMaintForm(f => ({ ...f, diagnosis: e.target.value }))}
-                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Solution / Réparation effectuée</label>
                       <textarea rows={3} value={maintenanceForm.solution} onChange={e => setMaintForm(f => ({ ...f, solution: e.target.value }))}
-                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Pièces remplacées</label>
                       <input type="text" value={maintenanceForm.partsReplaced} onChange={e => setMaintForm(f => ({ ...f, partsReplaced: e.target.value }))}
-                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
                       <input type="text" value={maintenanceForm.technician} onChange={e => setMaintForm(f => ({ ...f, technician: e.target.value }))}
-                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     {maintenanceEditId && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
                         <select value={maintenanceForm.status} onChange={e => setMaintForm(f => ({ ...f, status: e.target.value as MaintenanceStatus }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                           <option value="ouvert">Ouvert</option>
                           <option value="en_cours">En cours</option>
                           <option value="résolu">Résolu</option>
@@ -2753,9 +3037,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     )}
                     <div className="flex gap-3 pt-2">
                       <button onClick={() => { setShowMaintenanceForm(false); setMaintenanceEditId(null); }}
-                        className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annuler</button>
+                        className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-700 hover:bg-gray-50">Annuler</button>
                       <button onClick={handleSaveMaintenance}
-                        className="flex-1 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700">
+                        className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">
                         {maintenanceEditId ? 'Enregistrer' : 'Créer le ticket'}
                       </button>
                     </div>
@@ -2806,7 +3090,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <select
               value={transferModuleFilter.department}
               onChange={e => setTransferModuleFilter(f => ({ ...f, department: e.target.value }))}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400"
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
             >
               <option value="">Tous les services</option>
               {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
@@ -2815,12 +3099,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </select>
             <input type="date" value={transferModuleFilter.from}
               onChange={e => setTransferModuleFilter(f => ({ ...f, from: e.target.value }))}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
             <input type="date" value={transferModuleFilter.to}
               onChange={e => setTransferModuleFilter(f => ({ ...f, to: e.target.value }))}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
             <button onClick={() => { setTransferModuleFilter({ department: '', from: '', to: '' }); }}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
+              className="px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 flex items-center gap-2">
               <RefreshCcw className="w-4 h-4" /> Réinitialiser
             </button>
             {canModify && (
@@ -2830,7 +3114,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
                   setShowTransferModal(true);
                 }}
-                className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2"
+                className="ml-auto px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700 flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" /> Nouveau transfert
               </button>
@@ -2883,12 +3167,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             </div>
                           </td>
                           <td className="px-4 py-3 text-gray-600">
-                            {siteChanged && fromSiteName && <p className="text-xs text-blue-600 font-medium">{fromSiteName}</p>}
+                            {siteChanged && fromSiteName && <p className="text-xs text-indigo-600 font-medium">{fromSiteName}</p>}
                             <span className="font-medium">{fromLocation}</span>
                             {fromDept && <span className="text-gray-400"> · {fromDept}</span>}
                           </td>
                           <td className="px-4 py-3">
-                            {siteChanged && toSiteName && <p className="text-xs text-blue-600 font-medium flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" />{toSiteName}</p>}
+                            {siteChanged && toSiteName && <p className="text-xs text-indigo-600 font-medium flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" />{toSiteName}</p>}
                             <span className="inline-flex items-center gap-1 font-medium text-purple-700">
                               <ArrowRightLeft className="w-3 h-3" /> {toLocation}
                             </span>
@@ -2908,13 +3192,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Modale Gestion des Sites ════════════════════════════════════ */}
       {showSiteModal && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowSiteModal(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSiteModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
-                  <Globe className="w-5 h-5 text-blue-600" />
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center">
+                  <Globe className="w-5 h-5 text-indigo-600" />
                 </div>
                 <h2 className="text-lg font-bold text-gray-900">Gestion des sites</h2>
               </div>
@@ -2933,7 +3217,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 )}
                 <div className="space-y-2">
                   {sites.map(site => (
-                    <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-blue-400 bg-blue-50' : 'border-gray-100 hover:bg-gray-50'}`}
+                    <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 hover:bg-gray-50'}`}
                       onClick={() => { setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description }); }}>
                       <div className="flex items-start justify-between gap-2">
                         <div>
@@ -2944,7 +3228,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           {site.address && <p className="text-xs text-gray-400 mt-0.5">{site.address}</p>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs text-blue-600 font-medium">{site.equipmentCount} équip.</span>
+                          <span className="text-xs text-indigo-600 font-medium">{site.equipmentCount} équip.</span>
                           <button onClick={e => { e.stopPropagation(); handleDeleteSite(site.id); }}
                             className="text-red-400 hover:text-red-600" title="Supprimer">
                             <Trash2 className="w-3.5 h-3.5" />
@@ -2965,39 +3249,39 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Nom du site *</label>
                     <input type="text" value={siteForm.name} onChange={e => setSiteForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="Ex: Siège Paris" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                      placeholder="Ex: Siège Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Ville</label>
                       <input type="text" value={siteForm.city} onChange={e => setSiteForm(f => ({ ...f, city: e.target.value }))}
-                        placeholder="Paris" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                        placeholder="Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Pays</label>
                       <input type="text" value={siteForm.country} onChange={e => setSiteForm(f => ({ ...f, country: e.target.value }))}
-                        placeholder="France" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                        placeholder="France" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Adresse</label>
                     <input type="text" value={siteForm.address} onChange={e => setSiteForm(f => ({ ...f, address: e.target.value }))}
-                      placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                      placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
                     <textarea rows={2} value={siteForm.description} onChange={e => setSiteForm(f => ({ ...f, description: e.target.value }))}
-                      placeholder="Informations complémentaires…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
+                      placeholder="Informations complémentaires…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                   </div>
                   <div className="flex gap-2 pt-1">
                     {editingSiteId && (
                       <button onClick={() => { setEditingSiteId(null); setSiteForm(defaultSiteForm); }}
-                        className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+                        className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
                         Annuler
                       </button>
                     )}
                     <button onClick={handleSaveSite} disabled={siteLoading || !siteForm.name.trim()}
-                      className="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                      className="flex-1 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
                       {siteLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                       {editingSiteId ? 'Enregistrer' : 'Créer le site'}
                     </button>
@@ -3011,7 +3295,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Modale Réforme ═══════════════════════════════════════════════ */}
       {showReformModal && reformTarget && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowReformModal(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowReformModal(false)}>
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
@@ -3039,14 +3323,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <input type="number" min={1} max={reformTarget.quantity}
                     value={reformForm.reformQty}
                     onChange={e => setReformForm(f => ({ ...f, reformQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), reformTarget.quantity ?? 1) }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400" />
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                 </div>
               )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Raison de la réforme *</label>
                 <select value={reformForm.reason} onChange={e => setReformForm(f => ({ ...f, reason: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                   <option value="">— Sélectionner —</option>
                   <option>Fin de vie / obsolescence</option>
                   <option>Défaillance irréparable</option>
@@ -3060,7 +3344,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Remplacé par un équipement existant</label>
                 <select value={reformForm.replacedById ?? ''} onChange={e => setReformForm(f => ({ ...f, replacedById: e.target.value ? Number(e.target.value) : null }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                   <option value="">— Aucun remplacement ou non encore enregistré —</option>
                   {equipments.filter(e => e.id !== reformTarget.id && e.status !== 'réformé').map(e => (
                     <option key={e.id} value={e.id}>{e.name} — {e.location}</option>
@@ -3072,14 +3356,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes complémentaires</label>
                 <textarea rows={2} value={reformForm.notes} onChange={e => setReformForm(f => ({ ...f, notes: e.target.value }))}
                   placeholder="Informations supplémentaires…"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-gray-400" />
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowReformModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
+              <button onClick={() => setShowReformModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleReform} disabled={reformLoading || !reformForm.reason}
-                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm disabled:opacity-50 flex items-center gap-2">
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm disabled:opacity-50 flex items-center gap-2">
                 {reformLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 <Archive className="w-4 h-4" /> Confirmer la réforme
               </button>
@@ -3090,8 +3374,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Transfer modal ───────────────────────────────────────────────── */}
       {showTransferModal && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowTransferModal(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowTransferModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-5">
               <ArrowRightLeft className="w-5 h-5 text-purple-600" />
               <h3 className="text-lg font-bold text-gray-900">Transfert d'équipement</h3>
@@ -3110,7 +3394,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department, toSiteId: eq.siteId ?? null }));
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 text-sm"
                 >
                   <option value="" disabled>— Sélectionner un équipement —</option>
                   {equipments.filter(e => e.status !== 'réformé').map(e => (
@@ -3137,7 +3421,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 ) : (
                   <select value={transferForm.toSiteId ?? ''}
                     onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm bg-white">
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm bg-white">
                     <option value="">— Même site / Sans site —</option>
                     {sites.map(s => (
                       <option key={s.id} value={s.id}>{s.name}{s.city ? ` — ${s.city}` : ''}{s.country ? `, ${s.country}` : ''}</option>
@@ -3161,21 +3445,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </label>
                 <input type="text" value={transferForm.toLocation}
                   onChange={(e) => setTransferForm({ ...transferForm, toLocation: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
                   placeholder="Ex: Bureau 301, Salle serveurs…" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nouveau département *</label>
                 <input type="text" value={transferForm.toDepartment}
                   onChange={(e) => setTransferForm({ ...transferForm, toDepartment: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
                   placeholder="Ex: Comptabilité, RH…" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Raison du transfert</label>
                 <select value={transferForm.reason}
                   onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm">
                   <option>Réorganisation</option>
                   <option>Transfert de site</option>
                   <option>Maintenance</option>
@@ -3188,7 +3472,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
                 <input type="text" value={transferForm.technicianName}
                   onChange={(e) => setTransferForm({ ...transferForm, technicianName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
                   placeholder="Nom du technicien" />
               </div>
               {transferTarget && (transferTarget.quantity ?? 1) > 1 && (
@@ -3198,8 +3482,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </label>
                   <input type="number" min={1} max={transferTarget.quantity}
                     value={transferForm.transferQty}
-                    onChange={e => setTransferForm({ ...transferForm, transferQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), transferTarget.quantity) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm" />
+                    onChange={e => setTransferForm({ ...transferForm, transferQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), transferTarget.quantity ?? 1) })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm" />
                   {transferForm.transferQty < (transferTarget.quantity ?? 1) && (
                     <p className="text-xs text-purple-600 mt-1">Transfert partiel — {transferTarget.quantity - transferForm.transferQty} unité(s) resteront sur le site actuel.</p>
                   )}
@@ -3210,14 +3494,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <textarea value={transferForm.notes}
                   onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
                   rows={2}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
                   placeholder="Informations complémentaires…" />
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
+              <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleTransfer} disabled={transferLoading || !transferTarget}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-60 flex items-center gap-2">
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm disabled:opacity-60 flex items-center gap-2">
                 {transferLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
               </button>
@@ -3228,7 +3512,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Reports modal ────────────────────────────────────────────────── */}
       {showReportsModal && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowReportsModal(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowReportsModal(false)}>
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -3241,20 +3525,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-gray-100 shrink-0 px-6">
+            <div className="flex border-b border-gray-100 shrink-0 px-6 overflow-x-auto">
               {([
                 ['equipment','Parcours équipement'],
                 ['date','Par date'],
                 ['department','Par service'],
-                ['user','Par utilisateur'],
-                ...(isAdmin ? [['site','Par site']] : [])
+                ['user', isAdmin ? 'Par utilisateur' : 'Mes actions'],
+                ['site','Par site'],
               ] as const).map(([tab, label]) => (
                 <button key={tab} onClick={() => {
                   setReportsTab(tab as typeof reportsTab);
                   if (tab === 'user' && reportUserStats.length === 0) fetchReportByUser();
                   if (tab === 'site' && reportSiteStats.length === 0) fetchReportBySite();
                 }}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  className={`whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {label}
                 </button>
               ))}
@@ -3274,7 +3558,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         setReportHistory([]);
                         if (id) fetchReportHistory(id);
                       }}
-                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     >
                       <option value="">— Sélectionner un équipement —</option>
                       {equipments.map(eq => (
@@ -3284,11 +3568,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {reportHistory.length > 0 && (
                       <div className="flex gap-2 ml-auto">
                         <button onClick={() => exportReportExcel(`Parcours ${reportHistory[0]?.equipmentName}`, reportHistory)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-green-600" /> Excel
                         </button>
                         <button onClick={() => exportReportPdf(`Parcours — ${reportHistory[0]?.equipmentName}`, reportHistory)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-red-500" /> PDF
                         </button>
                       </div>
@@ -3363,17 +3647,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                       <input type="date" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                       <input type="date" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Service</label>
                       <select value={reportDeptFilter} onChange={e => setReportDeptFilter(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
                         <option value="">Tous</option>
                         {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
                           <option key={d} value={d}>{d}</option>
@@ -3383,7 +3667,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
                       <select value={reportTypeFilter} onChange={e => setReportTypeFilter(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
                         <option value="">Tous</option>
                         <option value="ordinateur">Ordinateur</option>
                         <option value="reseau">Réseau</option>
@@ -3394,11 +3678,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {reportDateEvents.length > 0 && (
                       <>
                         <button onClick={() => exportReportExcel('Rapport par date', reportDateEvents)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-green-600" /> Excel
                         </button>
                         <button onClick={() => exportReportPdf('Rapport par date', reportDateEvents)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-red-500" /> PDF
                         </button>
                       </>
@@ -3457,29 +3741,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <p className="text-sm text-gray-500">Activité globale par service ({reportDeptStats.length} service(s))</p>
                     <div className="flex gap-2">
                       <button onClick={fetchReportByDepartment}
-                        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                        className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                         <RefreshCcw className="w-3.5 h-3.5" /> Actualiser
                       </button>
                       {reportDeptStats.length > 0 && (
-                        <button onClick={() => {
-                          const rows = reportDeptStats.map(d => ({
-                            'Service': d.department,
-                            'Équipements': d.equipment_count,
-                            'Total événements': d.total_events,
-                            'Créations': d.creations,
-                            'Modifications': d.modifications,
-                            'Interventions': d.interventions,
-                            'Suppressions': d.suppressions,
-                            'Dernière activité': d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
-                          }));
-                          const ws = XLSX.utils.json_to_sheet(rows);
-                          const wb = XLSX.utils.book_new();
-                          XLSX.utils.book_append_sheet(wb, ws, 'Par service');
-                          XLSX.writeFile(wb, `rapport-services-${Date.now()}.xlsx`);
-                        }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
-                        </button>
+                        <>
+                          <button onClick={() => {
+                            const rows = reportDeptStats.map(d => ({
+                              'Service': d.department,
+                              'Équipements': d.equipment_count,
+                              'Total événements': d.total_events,
+                              'Créations': d.creations,
+                              'Modifications': d.modifications,
+                              'Interventions': d.interventions,
+                              'Suppressions': d.suppressions,
+                              'Dernière activité': d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
+                            }));
+                            const ws = XLSX.utils.json_to_sheet(rows);
+                            const wb = XLSX.utils.book_new();
+                            XLSX.utils.book_append_sheet(wb, ws, 'Par service');
+                            XLSX.writeFile(wb, `rapport-services-${Date.now()}.xlsx`);
+                          }}
+                            className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                            <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                          </button>
+                          <button onClick={() => exportDeptPdf(reportDeptStats)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                            <Download className="w-3.5 h-3.5 text-red-500" /> PDF
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -3493,7 +3783,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {reportDeptStats.length > 0 && (
                     <div className="space-y-3">
                       {reportDeptStats.map(dept => {
-                        const maxTotal = Math.max(...reportDeptStats.map(d => Number(d.total_events)));
+                        const maxTotal = Math.max(...reportDeptStats.map(d => Number(d.total_events)), 1);
                         const barWidth = Math.round((Number(dept.total_events) / maxTotal) * 100);
                         return (
                           <div key={dept.department} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -3526,22 +3816,28 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {/* ── Tab 4 : Par utilisateur ── */}
               {reportsTab === 'user' && (
                 <div className="space-y-4">
+                  {!isAdmin && (
+                    <div className="flex items-center gap-2 rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-2.5 text-sm text-indigo-700">
+                      <User className="w-4 h-4 shrink-0" />
+                      Rapport de vos actions sur vos sites assignés.
+                    </div>
+                  )}
                   {/* Filtres */}
                   <div className="flex flex-wrap items-end gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Du</label>
                       <input type="date" value={reportUserFrom} onChange={e => setReportUserFrom(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Au</label>
                       <input type="date" value={reportUserTo} onChange={e => setReportUserTo(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Service</label>
                       <select value={reportUserDeptFilter} onChange={e => setReportUserDeptFilter(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400">
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
                         <option value="">Tous les services</option>
                         {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
                           <option key={d} value={d}>{d}</option>
@@ -3549,29 +3845,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </select>
                     </div>
                     <button onClick={() => { setReportUserFrom(''); setReportUserTo(''); setReportUserDeptFilter(''); }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                       <RefreshCcw className="w-3.5 h-3.5" /> Réinitialiser
                     </button>
                     {reportUserStats.length > 0 && (
-                      <button onClick={() => {
-                        const rows = reportUserStats.map(u => ({
-                          'Utilisateur': u.user_name, 'Login': u.username,
-                          'Total actions': Number(u.total_actions),
-                          'Créations': Number(u.creations), 'Modifications': Number(u.modifications),
-                          'Interventions': Number(u.interventions), 'Transferts': Number(u.transferts),
-                          'Suppressions': Number(u.suppressions), 'Maintenances': Number(u.maintenances),
-                          'Réformes': Number(u.reformes),
-                          'Équipements traités': Number(u.equipment_count),
-                          'Services touchés': Number(u.dept_count),
-                          'Dernière action': u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
-                        }));
-                        const ws = XLSX.utils.json_to_sheet(rows);
-                        const wb = XLSX.utils.book_new();
-                        XLSX.utils.book_append_sheet(wb, ws, 'Par utilisateur');
-                        XLSX.writeFile(wb, `rapport-utilisateurs-${Date.now()}.xlsx`);
-                      }} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                        <Download className="w-3.5 h-3.5 text-green-600" /> Excel
-                      </button>
+                      <>
+                        <button onClick={() => {
+                          const rows = reportUserStats.map(u => ({
+                            'Utilisateur': u.user_name, 'Login': u.username,
+                            'Total actions': Number(u.total_actions),
+                            'Créations': Number(u.creations), 'Modifications': Number(u.modifications),
+                            'Interventions': Number(u.interventions), 'Transferts': Number(u.transferts),
+                            'Suppressions': Number(u.suppressions), 'Maintenances': Number(u.maintenances),
+                            'Réformes': Number(u.reformes),
+                            'Équipements traités': Number(u.equipment_count),
+                            'Services touchés': Number(u.dept_count),
+                            'Dernière action': u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
+                          }));
+                          const ws = XLSX.utils.json_to_sheet(rows);
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, ws, 'Par utilisateur');
+                          XLSX.writeFile(wb, `rapport-utilisateurs-${Date.now()}.xlsx`);
+                        }} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                        </button>
+                        <button onClick={() => exportUserPdf(reportUserStats)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-red-500" /> PDF
+                        </button>
+                      </>
                     )}
                   </div>
 
@@ -3592,8 +3894,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           <div className="text-2xl font-bold text-indigo-700">{reportUserStats.length}</div>
                           <div className="text-xs text-gray-500 mt-0.5">Utilisateur(s) actif(s)</div>
                         </div>
-                        <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-center">
-                          <div className="text-2xl font-bold text-blue-700">{reportUserStats.reduce((s, u) => s + Number(u.total_actions), 0)}</div>
+                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-center">
+                          <div className="text-2xl font-bold text-indigo-700">{reportUserStats.reduce((s, u) => s + Number(u.total_actions), 0)}</div>
                           <div className="text-xs text-gray-500 mt-0.5">Actions au total</div>
                         </div>
                         <div className="rounded-xl border border-green-100 bg-green-50 p-3 text-center">
@@ -3605,12 +3907,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       {/* Cartes par utilisateur */}
                       <div className="space-y-2">
                         {reportUserStats.map(user => {
-                          const total = Number(user.total_actions) || 1;
-                          const maxTotal = Math.max(...reportUserStats.map(u => Number(u.total_actions)));
+                          const maxTotal = Math.max(...reportUserStats.map(u => Number(u.total_actions)), 1);
                           const barW = Math.round((Number(user.total_actions) / maxTotal) * 100);
                           const isExpanded = reportUserExpanded === user.username;
                           const pills = [
-                            { label: 'Créations',     value: Number(user.creations),     color: 'bg-blue-100 text-blue-700' },
+                            { label: 'Créations',     value: Number(user.creations),     color: 'bg-indigo-100 text-indigo-700' },
                             { label: 'Modifications', value: Number(user.modifications), color: 'bg-yellow-100 text-yellow-700' },
                             { label: 'Interventions', value: Number(user.interventions), color: 'bg-green-100 text-green-700' },
                             { label: 'Transferts',    value: Number(user.transferts),    color: 'bg-purple-100 text-purple-700' },
@@ -3694,25 +3995,31 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               )}
 
-              {/* ── Tab 5: Par site (admin) ── */}
-              {reportsTab === 'site' && isAdmin && (
+              {/* ── Tab 5: Par site ── */}
+              {reportsTab === 'site' && (
                 <div className="space-y-4">
+                  {!isAdmin && (
+                    <div className="flex items-center gap-2 rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-2.5 text-sm text-indigo-700">
+                      <Globe className="w-4 h-4 shrink-0" />
+                      Rapport limité à vos sites assignés.
+                    </div>
+                  )}
                   {/* Filtres */}
                   <div className="flex flex-wrap items-end gap-3 bg-gray-50 rounded-xl p-4">
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                       <input type="date" value={reportSiteFrom} onChange={e => setReportSiteFrom(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                       <input type="date" value={reportSiteTo} onChange={e => setReportSiteTo(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
                       <select value={reportSiteTypeFilter} onChange={e => setReportSiteTypeFilter(e.target.value)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
                         <option value="">Tous</option>
                         <option value="ordinateur">Ordinateur</option>
                         <option value="reseau">Réseau</option>
@@ -3721,26 +4028,32 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </select>
                     </div>
                     <button onClick={() => { setReportSiteFrom(''); setReportSiteTo(''); setReportSiteTypeFilter(''); }}
-                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                       <RefreshCcw className="w-3.5 h-3.5" /> Réinitialiser
                     </button>
                     {reportSiteStats.length > 0 && (
-                      <button onClick={() => {
-                        const rows = reportSiteStats.map(s => ({
-                          'Site': s.site_name, 'Ville': s.city || '—', 'Pays': s.country || '—',
-                          'Équipements': s.equipment_count, 'Total événements': s.total_events,
-                          'Créations': s.creations, 'Modifications': s.modifications,
-                          'Transferts': s.transferts, 'Interventions': s.interventions,
-                          'Réformes': s.reformes, 'Suppressions': s.suppressions,
-                          'Dernière activité': s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
-                        }));
-                        const ws = XLSX.utils.json_to_sheet(rows);
-                        const wb = XLSX.utils.book_new();
-                        XLSX.utils.book_append_sheet(wb, ws, 'Par site');
-                        XLSX.writeFile(wb, `rapport-sites-${Date.now()}.xlsx`);
-                      }} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                        <Download className="w-3.5 h-3.5 text-green-600" /> Excel
-                      </button>
+                      <>
+                        <button onClick={() => {
+                          const rows = reportSiteStats.map(s => ({
+                            'Site': s.site_name, 'Ville': s.city || '—', 'Pays': s.country || '—',
+                            'Équipements': s.equipment_count, 'Total événements': s.total_events,
+                            'Créations': s.creations, 'Modifications': s.modifications,
+                            'Transferts': s.transferts, 'Interventions': s.interventions,
+                            'Réformes': s.reformes, 'Suppressions': s.suppressions,
+                            'Dernière activité': s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
+                          }));
+                          const ws = XLSX.utils.json_to_sheet(rows);
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, ws, 'Par site');
+                          XLSX.writeFile(wb, `rapport-sites-${Date.now()}.xlsx`);
+                        }} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-green-600" /> Excel
+                        </button>
+                        <button onClick={() => exportSitePdf(reportSiteStats)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                          <Download className="w-3.5 h-3.5 text-red-500" /> PDF
+                        </button>
+                      </>
                     )}
                   </div>
 
@@ -3780,7 +4093,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               </div>
                               <div className="flex gap-3 text-center shrink-0">
                                 {[
-                                  ['Équip.', site.equipment_count, 'text-blue-600'],
+                                  ['Équip.', site.equipment_count, 'text-indigo-600'],
                                   ['Créations', site.creations, 'text-green-600'],
                                   ['Modifs', site.modifications, 'text-yellow-600'],
                                   ['Transferts', site.transferts, 'text-purple-600'],
@@ -3839,11 +4152,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       {/* ── Monitoring modal ─────────────────────────────────────────────── */}
       {showMonitoringModal && (
         <div
-          className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowMonitoringModal(false)}
         >
           <div
-            className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -3866,7 +4179,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
                 <button
                   onClick={refreshMonitoring}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
                 >
                   <RefreshCcw className="w-3.5 h-3.5" />
                   Actualiser
@@ -3891,7 +4204,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </button>
               <button
                 onClick={() => setMonitoringTab('activities')}
-                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${monitoringTab === 'activities' ? 'border-blue-500 text-blue-700 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${monitoringTab === 'activities' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
               >
                 <span className="flex items-center gap-2">
                   <Clock className="w-4 h-4" />
@@ -3971,7 +4284,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   fetchActivities(session.userId);
                                   setMonitoringTab('activities');
                                 }}
-                                className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                className="text-xs text-indigo-600 hover:text-indigo-800 underline"
                               >
                                 Voir l'activité de {session.name} →
                               </button>
@@ -3996,7 +4309,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         activityUserFilterRef.current = null;
                         fetchActivities(null);
                       }}
-                      className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === null ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === null ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
                     >
                       Tous
                     </button>
@@ -4008,7 +4321,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           activityUserFilterRef.current = u.id;
                           fetchActivities(u.id);
                         }}
-                        className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === u.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
                       >
                         {u.name}
                       </button>
@@ -4064,11 +4377,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {showUserModal && (
         <div
-          className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowUserModal(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
@@ -4078,7 +4391,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <div className="flex justify-end mb-4">
               <button
                 onClick={openUserCreate}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700"
               >
                 <Plus className="w-4 h-4" />
                 Ajouter un utilisateur
@@ -4146,7 +4459,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium">
                               Accès
                             </button>
-                            <button onClick={() => openUserEdit(user)} className="text-blue-600 hover:text-blue-900" title="Modifier identité">
+                            <button onClick={() => openUserEdit(user)} className="text-indigo-600 hover:text-indigo-900" title="Modifier identité">
                               <Edit className="w-4 h-4" />
                             </button>
                             {user.id !== currentUser.id && (
@@ -4173,11 +4486,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {showUserFormModal && (
         <div
-          className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowUserFormModal(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+            className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
@@ -4194,7 +4507,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   type="text"
                   value={userFormData.username}
                   onChange={(e) => setUserFormData({ ...userFormData, username: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                 />
               </div>
               <div>
@@ -4203,7 +4516,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   type="text"
                   value={userFormData.name}
                   onChange={(e) => setUserFormData({ ...userFormData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                 />
               </div>
               <div>
@@ -4211,7 +4524,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={userFormData.role}
                   onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value as UserFormData['role'] })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                 >
                   <option value="admin">Administrateur</option>
                   <option value="technicien">Technicien</option>
@@ -4227,7 +4540,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   value={userFormData.password}
                   onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
                   placeholder={userEditingId ? 'Laisser vide pour ne pas changer' : ''}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                 />
               </div>
 
@@ -4243,12 +4556,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {PERMISSION_CONFIG.map((perm) => {
                       const checked = userFormData.permissions.includes(perm.value);
                       const colorMap: Record<string, string> = {
-                        blue:   checked ? 'border-blue-400 bg-blue-50'   : 'border-gray-200 hover:border-blue-300',
+                        blue:   checked ? 'border-indigo-400 bg-indigo-50'   : 'border-gray-200 hover:border-indigo-300',
                         green:  checked ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-green-300',
                         orange: checked ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300'
                       };
                       const badgeMap: Record<string, string> = {
-                        blue: 'bg-blue-100 text-blue-700', green: 'bg-green-100 text-green-700', orange: 'bg-orange-100 text-orange-700'
+                        blue: 'bg-indigo-100 text-indigo-700', green: 'bg-green-100 text-green-700', orange: 'bg-orange-100 text-orange-700'
                       };
                       return (
                         <label
@@ -4330,14 +4643,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   type="button"
                   onClick={() => setShowUserFormModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
                 >
                   Annuler
                 </button>
                 <button
                   type="button"
                   onClick={handleUserSubmit}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
                 >
                   {userEditingId ? 'Modifier' : 'Ajouter'}
                 </button>
@@ -4349,7 +4662,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Modale Gestion des accès ════════════════════════════════════════ */}
       {showAccessModal && accessTarget && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50" onClick={() => setShowAccessModal(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAccessModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="px-6 py-4 border-b flex items-center justify-between">
@@ -4372,7 +4685,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     { value: 'technicien', label: 'Technicien', desc: 'Selon permissions', color: 'blue' },
                     { value: 'user', label: 'Utilisateur', desc: 'Selon permissions', color: 'gray' },
                   ] as const).map(r => (
-                    <label key={r.value} className={`flex flex-col gap-1 rounded-xl border-2 p-3 cursor-pointer transition-colors ${accessForm.role === r.value ? r.value === 'admin' ? 'border-red-400 bg-red-50' : r.value === 'technicien' ? 'border-blue-400 bg-blue-50' : 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <label key={r.value} className={`flex flex-col gap-1 rounded-xl border-2 p-3 cursor-pointer transition-colors ${accessForm.role === r.value ? r.value === 'admin' ? 'border-red-400 bg-red-50' : r.value === 'technicien' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
                       <input type="radio" name="role" value={r.value} checked={accessForm.role === r.value}
                         onChange={() => setAccessForm(f => ({ ...f, role: r.value }))} className="sr-only" />
                       <span className="text-sm font-semibold text-gray-800">{r.label}</span>
@@ -4390,7 +4703,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {PERMISSION_CONFIG.map(perm => {
                       const checked = accessForm.permissions.includes(perm.value);
                       const colorMap: Record<string, string> = {
-                        blue:   checked ? 'border-blue-400 bg-blue-50'   : 'border-gray-200 hover:border-blue-300',
+                        blue:   checked ? 'border-indigo-400 bg-indigo-50'   : 'border-gray-200 hover:border-indigo-300',
                         green:  checked ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-green-300',
                         orange: checked ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300',
                       };
@@ -4457,9 +4770,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             {/* Footer */}
             <div className="px-6 py-4 border-t flex justify-end gap-3 bg-gray-50 rounded-b-2xl">
-              <button onClick={() => setShowAccessModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 text-sm">Annuler</button>
+              <button onClick={() => setShowAccessModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleSaveAccess} disabled={accessLoading}
-                className="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
                 {accessLoading ? 'Enregistrement…' : 'Enregistrer'}
               </button>
             </div>
@@ -4494,7 +4807,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={activityFilter.username}
                   onChange={e => setActivityFilter(f => ({ ...f, username: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400"
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
                 >
                   <option value="">— Tous les utilisateurs —</option>
                   {userAccounts.map((u: UserAccount) => <option key={u.id} value={u.username}>{u.name} ({u.username})</option>)}
@@ -4505,7 +4818,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={activityFilter.action}
                   onChange={e => setActivityFilter(f => ({ ...f, action: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400"
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
                 >
                   <option value="">— Toutes les actions —</option>
                   {['Connexion','Déconnexion','Ajout équipement','Modification équipement','Suppression équipement',
@@ -4520,13 +4833,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                 <input type="date" value={activityFilter.dateFrom}
                   onChange={e => setActivityFilter(f => ({ ...f, dateFrom: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400" />
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                 <input type="date" value={activityFilter.dateTo}
                   onChange={e => setActivityFilter(f => ({ ...f, dateTo: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-400" />
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
               </div>
               <button
                 onClick={() => {
@@ -4543,8 +4856,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   onClick={() => {
                     const rows = activityEntries.map(e => ({
-                      'Date / Heure': new Date(e.createdAt).toLocaleString('fr-FR'),
-                      'Utilisateur': e.userName,
+                      'Date / Heure': new Date(e.timestamp).toLocaleString('fr-FR'),
+                      'Utilisateur': e.name,
                       'Login': e.username,
                       'Action': e.action,
                       'Détails': e.details,
@@ -4577,8 +4890,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       startY: 26,
                       head: [['Date / Heure', 'Utilisateur', 'Login', 'Action', 'Détails', 'IP']],
                       body: activityEntries.map(e => [
-                        new Date(e.createdAt).toLocaleString('fr-FR'),
-                        e.userName,
+                        new Date(e.timestamp).toLocaleString('fr-FR'),
+                        e.name,
                         e.username,
                         e.action,
                         e.details || '—',
@@ -4605,12 +4918,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             const connexions   = activityEntries.filter(e => e.action === 'Connexion').length;
             const modifications = activityEntries.filter(e => e.action.includes('équipement') || e.action.includes('utilisateur') || e.action.includes('site')).length;
             const uniqueUsers  = new Set(activityEntries.map(e => e.username)).size;
-            const lastEntry    = activityEntries[0];
             return (
               <div className="px-6 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border-b border-gray-100 shrink-0">
                 {[
                   { label: 'Total actions', value: activityEntries.length, color: 'text-teal-700', bg: 'bg-teal-50' },
-                  { label: 'Utilisateurs actifs', value: uniqueUsers, color: 'text-blue-700', bg: 'bg-blue-50' },
+                  { label: 'Utilisateurs actifs', value: uniqueUsers, color: 'text-indigo-700', bg: 'bg-indigo-50' },
                   { label: 'Connexions', value: connexions, color: 'text-green-700', bg: 'bg-green-50' },
                   { label: 'Opérations', value: modifications, color: 'text-purple-700', bg: 'bg-purple-50' },
                 ].map(({ label, value, color, bg }) => (
@@ -4682,6 +4994,310 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Chat ════════════════════════════════════════════════════════════════ */}
+      {showChatModal && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowChatModal(false)} />
+
+          <div className="relative flex bg-white shadow-2xl w-full max-w-3xl" style={{height:'100vh'}}>
+
+            {/* ── Sidebar ───────────────────────────────────────────────────── */}
+            <div className="w-60 shrink-0 border-r border-gray-100 bg-gray-50 flex flex-col">
+              <div className="flex items-center gap-2 px-4 py-4 border-b border-gray-200">
+                <MessageCircle className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-gray-900 flex-1">Messagerie</h3>
+              </div>
+
+              {/* Global */}
+              <button
+                onClick={() => openChatConversation('global')}
+                className={`flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === 'global' ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+              >
+                <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                  <Globe className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">Chat global</p>
+                  <p className="text-xs text-gray-400 truncate">Tous les utilisateurs</p>
+                </div>
+                {chatUnread.global > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                    {Math.min(9, chatUnread.global)}
+                  </span>
+                )}
+              </button>
+
+              {/* Groups section */}
+              <div className="px-4 pt-3 pb-1 flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Groupes</p>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowCreateGroup(true)}
+                    className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold"
+                    title="Créer un groupe"
+                  >+ Nouveau</button>
+                )}
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                {chatGroups.length === 0 && (
+                  <p className="px-4 py-2 text-xs text-gray-400 italic">Aucun groupe</p>
+                )}
+                {chatGroups.map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => openGroupConversation(g.id)}
+                    className={`flex items-center gap-3 px-4 py-2.5 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup === g.id ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-purple-600 font-bold text-sm">
+                      {g.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{g.name}</p>
+                      <p className="text-xs text-gray-400">{g.member_ids.length} membres</p>
+                    </div>
+                    {chatUnread.groups[g.id] > 0 && (
+                      <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                        {Math.min(9, chatUnread.groups[g.id])}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* DMs section */}
+              <div className="px-4 pt-3 pb-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Messages privés</p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {chatUsers.map(u => (
+                  <button
+                    key={u.id}
+                    onClick={() => openChatConversation(u.id)}
+                    className={`flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === u.id ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center shrink-0 text-white text-sm font-bold">
+                      {u.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
+                      <p className="text-xs text-gray-400 truncate">@{u.username}</p>
+                    </div>
+                    {chatUnread.dms[u.id] > 0 && (
+                      <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                        {Math.min(9, chatUnread.dms[u.id])}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Messages area ─────────────────────────────────────────────── */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {/* Header */}
+              <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 bg-white shrink-0">
+                {chatActiveGroup != null
+                  ? <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold">
+                      {(chatGroups.find(g => g.id === chatActiveGroup)?.name ?? 'G').charAt(0).toUpperCase()}
+                    </div>
+                  : chatConversation === 'global'
+                    ? <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center"><Globe className="w-5 h-5 text-indigo-600" /></div>
+                    : <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold">
+                        {(chatUsers.find(u => u.id === chatConversation)?.name ?? '?').charAt(0).toUpperCase()}
+                      </div>
+                }
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 truncate">
+                    {chatActiveGroup != null
+                      ? chatGroups.find(g => g.id === chatActiveGroup)?.name ?? '—'
+                      : chatConversation === 'global'
+                        ? 'Chat global'
+                        : chatUsers.find(u => u.id === chatConversation)?.name ?? '—'}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {chatActiveGroup != null
+                      ? `Groupe · ${chatGroups.find(g => g.id === chatActiveGroup)?.member_ids.length ?? 0} membres`
+                      : chatConversation === 'global'
+                        ? 'Canal partagé — visible par tous'
+                        : 'Conversation privée'}
+                  </p>
+                </div>
+                <button onClick={() => setShowChatModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                  <XCircle className="w-5 h-5 text-gray-400" />
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                {chatLoading && (
+                  <div className="text-center py-10 text-gray-400 text-sm">Chargement…</div>
+                )}
+                {!chatLoading && chatMessages.length === 0 && (
+                  <div className="text-center py-16 text-gray-400">
+                    <MessageCircle className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">Aucun message pour l'instant.</p>
+                    <p className="text-xs mt-1">Soyez le premier à écrire !</p>
+                  </div>
+                )}
+                {chatMessages.map(msg => {
+                  const isOwn = msg.senderId === currentUser.id;
+                  return (
+                    <div key={msg.id} className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
+                      {!isOwn && (
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                          {msg.senderName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className={`max-w-xs lg:max-w-sm flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                        {!isOwn && (
+                          <span className="text-xs text-gray-500 mb-0.5 ml-1">{msg.senderName}</span>
+                        )}
+                        <div className={`px-3 py-2 rounded-2xl text-sm break-words ${isOwn ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
+                          {msg.content}
+                        </div>
+                        <span className="text-xs text-gray-400 mt-0.5 mx-1">
+                          {new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="px-4 py-3 border-t border-gray-100 bg-white shrink-0">
+                <form onSubmit={handleSendChatMessage} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    placeholder={
+                      chatActiveGroup != null
+                        ? `Message dans ${chatGroups.find(g => g.id === chatActiveGroup)?.name ?? 'le groupe'}…`
+                        : chatConversation === 'global'
+                          ? 'Message au canal global…'
+                          : `Message privé à ${chatUsers.find(u => u.id === chatConversation)?.name ?? ''}…`
+                    }
+                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white transition-colors"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim() || chatSending}
+                    className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Create Group Modal ══════════════════════════════════════════════════ */}
+      {/* ── Toast notification ──────────────────────────────────────────────── */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium text-white transition-all ${
+            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-indigo-500'
+          }`}
+        >
+          {toast.type === 'error' && <AlertTriangle className="w-4 h-4 shrink-0" />}
+          {toast.type === 'success' && <CheckCircle className="w-4 h-4 shrink-0" />}
+          {toast.type === 'info' && <Info className="w-4 h-4 shrink-0" />}
+          <span>{toast.message}</span>
+          <button onClick={() => setToast(null)} className="ml-1 opacity-70 hover:opacity-100">
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* ── Confirm dialog ──────────────────────────────────────────────────── */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmModal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
+            </div>
+            <p className="text-gray-800 font-medium mb-6 leading-snug">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm font-medium"
+              >Annuler</button>
+              <button
+                onClick={confirmModal.onConfirm}
+                className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium"
+              >Confirmer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateGroup && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCreateGroup(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Créer un groupe</h3>
+            <form onSubmit={handleCreateGroup} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nom du groupe</label>
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={e => setNewGroupName(e.target.value)}
+                  placeholder="Ex: Équipe technique…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Membres</label>
+                <div className="max-h-48 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-2">
+                  {chatUsers.map(u => (
+                    <label key={u.id} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newGroupMembers.includes(u.id)}
+                        onChange={e => setNewGroupMembers(prev =>
+                          e.target.checked ? [...prev, u.id] : prev.filter(id => id !== u.id)
+                        )}
+                        className="rounded text-indigo-600"
+                      />
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                        {u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{u.name}</p>
+                        <p className="text-xs text-gray-400">@{u.username}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {newGroupMembers.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">{newGroupMembers.length} membre(s) sélectionné(s)</p>
+                )}
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowCreateGroup(false); setNewGroupName(''); setNewGroupMembers([]); }}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
+                >Annuler</button>
+                <button
+                  type="submit"
+                  disabled={!newGroupName.trim() || newGroupMembers.length === 0 || groupCreating}
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40"
+                >{groupCreating ? 'Création…' : 'Créer le groupe'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
