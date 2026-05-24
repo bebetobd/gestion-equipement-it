@@ -33,7 +33,7 @@ interface ITEquipmentManagerProps {
   onLogout: () => void;
 }
 
-type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante';
+type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'autre';
 type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant' | 'réformé';
 
 interface Equipment {
@@ -167,7 +167,8 @@ const equipmentTypes = [
   { value: 'ordinateur' as EquipmentType, label: 'Ordinateur', icon: Monitor },
   { value: 'reseau' as EquipmentType, label: 'Équipement Réseau', icon: Wifi },
   { value: 'serveur' as EquipmentType, label: 'Serveur', icon: Server },
-  { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer }
+  { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer },
+  { value: 'autre' as EquipmentType, label: 'Autre', icon: Archive }
 ];
 
 const roleDisplay: Record<string, { label: string; classes: string }> = {
