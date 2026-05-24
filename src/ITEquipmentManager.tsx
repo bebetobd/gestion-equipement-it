@@ -2308,22 +2308,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         )}
 
         {showForm && (
-          <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => {
-              setShowForm(false);
-              resetForm();
-            }}
-          >
-            <div
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <h2 className="text-xl font-bold mb-4">
-                {editingId !== null ? 'Modifier l\'équipement' : 'Nouvel équipement'}
-              </h2>
-
-              <div className="space-y-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => { setShowForm(false); resetForm(); }} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[90vh]">
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                  <Monitor className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-bold text-gray-900">{editingId !== null ? 'Modifier l\'équipement' : 'Nouvel équipement'}</h2>
+                  <p className="text-xs text-gray-400">{editingId !== null ? 'Modifier les informations' : 'Ajouter un équipement au parc'}</p>
+                </div>
+                <button onClick={() => { setShowForm(false); resetForm(); }} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                  <XCircle className="w-5 h-5 text-gray-400" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l'équipement *</label>
@@ -2537,19 +2538,25 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {showDetailsModal && selectedEquipment && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
 
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">{selectedEquipment.name}</h3>
-                  <p className="text-xs text-gray-500">{selectedEquipment.brand} {selectedEquipment.model} · {selectedEquipment.serialNumber}</p>
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                  <Monitor className="w-5 h-5 text-indigo-600" />
                 </div>
-                <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-bold text-gray-900 truncate">{selectedEquipment.name}</h3>
+                  <p className="text-xs text-gray-400">{selectedEquipment.brand} {selectedEquipment.model}{selectedEquipment.serialNumber ? ` · ${selectedEquipment.serialNumber}` : ''}</p>
+                </div>
+                <button onClick={() => setShowDetailsModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                  <XCircle className="w-5 h-5 text-gray-400" />
+                </button>
               </div>
 
               {/* Tabs */}
@@ -2724,18 +2731,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl mx-4 flex flex-col" style={{ maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
                 <Wrench className="w-5 h-5 text-orange-600" />
-                <h2 className="text-lg font-bold text-gray-900">Module Maintenance</h2>
-                <span className="text-sm text-gray-500">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Module Maintenance</h2>
+                <p className="text-xs text-gray-400">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
                   className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
-                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="text-gray-400 hover:text-gray-700 text-xl ml-2">✕</button>
+                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-gray-100">
+                  <XCircle className="w-5 h-5 text-gray-400" />
+                </button>
               </div>
             </div>
 
@@ -3151,14 +3162,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSiteModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center">
-                  <Globe className="w-5 h-5 text-indigo-600" />
-                </div>
-                <h2 className="text-lg font-bold text-gray-900">Gestion des sites</h2>
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                <Globe className="w-5 h-5 text-indigo-600" />
               </div>
-              <button onClick={() => setShowSiteModal(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Gestion des sites</h2>
+                <p className="text-xs text-gray-400">Configurer les sites et localisations</p>
+              </div>
+              <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
 
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
@@ -3251,18 +3265,22 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Modale Réforme ═══════════════════════════════════════════════ */}
       {showReformModal && reformTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowReformModal(false)}>
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowReformModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
                 <Archive className="w-5 h-5 text-gray-600" />
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">Réformer l'équipement</h3>
-                <p className="text-sm text-gray-500">{reformTarget.name}</p>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Réformer l'équipement</h2>
+                <p className="text-xs text-gray-400 truncate">{reformTarget.name}</p>
               </div>
+              <button onClick={() => setShowReformModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
-
+            <div className="flex-1 overflow-y-auto p-6">
             <div className="space-y-4">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
                 {(reformTarget.quantity ?? 1) > 1 && reformForm.reformQty < (reformTarget.quantity ?? 1)
@@ -3324,18 +3342,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <Archive className="w-4 h-4" /> Confirmer la réforme
               </button>
             </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* ── Transfer modal ───────────────────────────────────────────────── */}
       {showTransferModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowTransferModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-5">
-              <ArrowRightLeft className="w-5 h-5 text-purple-600" />
-              <h3 className="text-lg font-bold text-gray-900">Transfert d'équipement</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowTransferModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
+                <ArrowRightLeft className="w-5 h-5 text-purple-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Transfert d'équipement</h2>
+                <p className="text-xs text-gray-400">Déplacer vers un autre site ou emplacement</p>
+              </div>
+              <button onClick={() => setShowTransferModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
+            <div className="overflow-y-auto p-6 flex-1">
 
             {/* Sélecteur d'équipement (quand ouvert depuis le module) */}
             {!transferTarget ? (
@@ -3462,6 +3491,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
               </button>
             </div>
+            </div>
           </div>
         </div>
       )}
@@ -3472,12 +3502,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
                 <Calendar className="w-5 h-5 text-indigo-600" />
-                <h2 className="text-lg font-bold text-gray-900">Module Rapports</h2>
               </div>
-              <button onClick={() => setShowReportsModal(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Module Rapports</h2>
+                <p className="text-xs text-gray-400">Statistiques et historique du parc</p>
+              </div>
+              <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
 
             {/* Tabs */}
@@ -4116,15 +4151,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-green-100">
-                  <Activity className="w-5 h-5 text-green-600" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900">Monitoring en temps réel</h2>
-                  <p className="text-xs text-gray-500">Actualisation automatique toutes les 10 secondes</p>
-                </div>
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
+                <Activity className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Monitoring en temps réel</h2>
+                <p className="text-xs text-gray-400">Sessions actives et journal d'activité</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -4140,7 +4173,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <RefreshCcw className="w-3.5 h-3.5" />
                   Actualiser
                 </button>
-                <button onClick={() => setShowMonitoringModal(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none" aria-label="Fermer">✕</button>
+                <button onClick={() => setShowMonitoringModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Fermer">
+                  <XCircle className="w-5 h-5 text-gray-400" />
+                </button>
               </div>
             </div>
 
@@ -4332,18 +4367,25 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       )}
 
       {showUserModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setShowUserModal(false)}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowUserModal(false)} />
           <div
-            className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Gestion des utilisateurs</h2>
-              <button onClick={() => setShowUserModal(false)} className="text-gray-500 hover:text-gray-900" aria-label="Fermer">✕</button>
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Gestion des utilisateurs</h2>
+                <p className="text-xs text-gray-400">Rôles, permissions et accès par site</p>
+              </div>
+              <button onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
+            <div className="flex-1 overflow-y-auto p-6">
             <div className="flex justify-end mb-4">
               <button
                 onClick={openUserCreate}
@@ -4436,6 +4478,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </tbody>
               </table>
             </div>
+            </div>
           </div>
         </div>
       )}
@@ -4449,9 +4492,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">{userEditingId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}</h2>
-              <button onClick={() => setShowUserFormModal(false)} className="text-gray-500 hover:text-gray-900" aria-label="Fermer">✕</button>
+            <div className="flex items-center gap-3 px-0 py-0 pb-4 border-b border-gray-100 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                <User className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">{userEditingId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}</h2>
+                <p className="text-xs text-gray-400">{userEditingId ? 'Modifier le compte' : 'Créer un nouveau compte'}</p>
+              </div>
+              <button onClick={() => setShowUserFormModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
             {userFormError && (
               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{userFormError}</div>
@@ -4621,12 +4672,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAccessModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="px-6 py-4 border-b flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">Gestion des accès</h2>
-                <p className="text-sm text-gray-500">{accessTarget.name} <span className="font-mono text-gray-400">@{accessTarget.username}</span></p>
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5 text-indigo-600" />
               </div>
-              <button onClick={() => setShowAccessModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">Gestion des accès</h2>
+                <p className="text-xs text-gray-400">{accessTarget.name} <span className="font-mono">@{accessTarget.username}</span></p>
+              </div>
+              <button onClick={() => setShowAccessModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
 
             <div className="px-6 py-5 space-y-6">
