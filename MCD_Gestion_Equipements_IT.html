@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCD – Gestion Équipements IT</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f4f8; color: #1e293b; }
+
+    /* ── Cover ── */
+    .cover {
+      background: linear-gradient(135deg, #0f2744 0%, #1d4ed8 100%);
+      color: white; padding: 56px 80px 44px;
+    }
+    .cover h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
+    .cover .sub { font-size: 1.1rem; opacity: .8; margin-bottom: 28px; }
+    .cover .pills { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pill {
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+      padding: 4px 14px; border-radius: 999px; font-size: .82rem; backdrop-filter: blur(4px);
+    }
+
+    /* ── Action bar ── */
+    .action-bar {
+      background: white; padding: 10px 40px; display: flex; gap: 10px; align-items: center;
+      border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 200;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    .btn {
+      padding: 7px 18px; border-radius: 6px; border: none; cursor: pointer;
+      font-size: .88rem; font-weight: 600; transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-blue { background: #1d4ed8; color: white; }
+    .btn-gray { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+    /* ── Main content ── */
+    .content { max-width: 1550px; margin: 0 auto; padding: 44px 40px; }
+    .section { margin-bottom: 56px; }
+    .section-title {
+      font-size: 1.25rem; font-weight: 800; color: #0f2744; margin-bottom: 20px;
+      padding-bottom: 8px; border-bottom: 3px solid #1d4ed8; display: inline-block;
+    }
+
+    /* ── Diagram ── */
+    .diagram-wrap {
+      background: white; border-radius: 12px; padding: 24px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08); overflow-x: auto;
+    }
+    svg text { font-family: 'Segoe UI', Tahoma, sans-serif; }
+
+    /* ── Entity cards ── */
+    .entity-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 18px;
+    }
+    .ecard { background: white; border-radius: 10px; overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,.07); border: 1px solid #e2e8f0; }
+    .ecard-head {
+      background: #0f2744; color: white; padding: 10px 16px;
+      font-weight: 700; font-size: .95rem; display: flex; align-items: center; gap: 8px;
+    }
+    .ecard-head .icon { font-size: 1rem; }
+    .etable { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    .etable th {
+      background: #f8fafc; padding: 6px 12px; text-align: left; font-weight: 600;
+      color: #64748b; font-size: .75rem; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .etable td { padding: 5px 12px; border-top: 1px solid #f1f5f9; color: #334155; }
+    .etable tr:hover td { background: #f8fafc; }
+    .bpk { background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 4px;
+      font-size: .7rem; font-weight: 700; }
+    .bfk { background: #dbeafe; color: #1e40af; padding: 1px 6px; border-radius: 4px;
+      font-size: .7rem; font-weight: 700; }
+    .btype { background: #f1f5f9; color: #475569; padding: 1px 6px; border-radius: 4px;
+      font-size: .7rem; }
+    .benum { background: #fce7f3; color: #9d174d; padding: 1px 6px; border-radius: 4px;
+      font-size: .7rem; }
+
+    /* ── Relations table ── */
+    .rtable { width: 100%; border-collapse: collapse; background: white; border-radius: 10px;
+      overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.07); font-size: .87rem; }
+    .rtable th { background: #0f2744; color: white; padding: 12px 16px; text-align: left; }
+    .rtable td { padding: 9px 16px; border-bottom: 1px solid #f1f5f9; }
+    .rtable tr:last-child td { border-bottom: none; }
+    .rtable tr:hover td { background: #f8fafc; }
+    .card { font-weight: 700; }
+    .card-1 { color: #1d4ed8; }
+    .card-n { color: #dc2626; }
+    .rel-name { font-style: italic; color: #0f2744; font-weight: 600; }
+
+    /* ── Legend ── */
+    .legend { display: flex; flex-wrap: wrap; gap: 20px; background: white;
+      padding: 16px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      margin-bottom: 20px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #475569; }
+
+    @media print {
+      .action-bar { display: none; }
+      body { background: white; }
+      .content { padding: 20px; max-width: none; }
+      .diagram-wrap { box-shadow: none; border: 1px solid #e2e8f0; }
+      .section { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════ COVER ═══════════════════════════════════ -->
+<div class="cover">
+  <h1>Modèle Conceptuel de Données</h1>
+  <p class="sub">Système de Gestion des Équipements Informatiques</p>
+  <div class="pills">
+    <span class="pill">Méthode Merise</span>
+    <span class="pill">Version 1.0</span>
+    <span class="pill">Mai 2026</span>
+    <span class="pill">PostgreSQL · Neon</span>
+    <span class="pill">12 entités · 15 associations</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ ACTION BAR ══════════════════════════════════ -->
+<div class="action-bar">
+  <button class="btn btn-blue" onclick="window.print()">🖨️ Imprimer / PDF</button>
+  <button class="btn btn-gray" onclick="downloadHtml()">⬇️ Télécharger HTML</button>
+</div>
+
+<!-- ══════════════════════════════ CONTENT ════════════════════════════════════ -->
+<div class="content">
+
+  <!-- ── Section 1 : Diagramme ── -->
+  <div class="section">
+    <div class="section-title">Diagramme MCD</div>
+
+    <div class="legend">
+      <div class="legend-item">
+        <svg width="32" height="18"><rect x="0" y="0" width="32" height="18" rx="3" fill="#0f2744"/></svg>
+        Entité
+      </div>
+      <div class="legend-item">
+        <svg width="60" height="18"><ellipse cx="30" cy="9" rx="28" ry="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/></svg>
+        Association
+      </div>
+      <div class="legend-item">
+        <svg width="40" height="18"><line x1="0" y1="9" x2="40" y2="9" stroke="#94a3b8" stroke-width="1.5"/></svg>
+        Lien
+      </div>
+      <div class="legend-item">
+        <span style="font-size:.82rem;color:#1d4ed8;font-weight:700">(0,1) (1,1) (0,N) (1,N)</span>&nbsp;Cardinalités
+      </div>
+      <div class="legend-item">
+        <span class="bpk">PK</span> Clé primaire &nbsp;
+        <span class="bfk">FK</span> Clé étrangère
+      </div>
+    </div>
+
+    <div class="diagram-wrap">
+      <svg width="1460" height="900" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- ── Background ── -->
+        <rect width="1460" height="900" fill="#f8fafc" rx="8"/>
+
+        <!-- ── Subtle grid ── -->
+        <g stroke="#e2e8f0" stroke-width="0.5" opacity="0.6">
+          <line x1="0" y1="200" x2="1460" y2="200"/>
+          <line x1="0" y1="400" x2="1460" y2="400"/>
+          <line x1="0" y1="600" x2="1460" y2="600"/>
+          <line x1="0" y1="800" x2="1460" y2="800"/>
+          <line x1="340" y1="0" x2="340" y2="900"/>
+          <line x1="680" y1="0" x2="680" y2="900"/>
+          <line x1="1020" y1="0" x2="1020" y2="900"/>
+          <line x1="1360" y1="0" x2="1360" y2="900"/>
+        </g>
+
+        <!-- ═══════════════════════════════════════
+             LINES  (drawn first, under entities)
+        ════════════════════════════════════════ -->
+
+        <!-- 1. UTILISATEUR ↔ JOURNAL_ACTIVITE (vertical) -->
+        <line x1="170" y1="278" x2="170" y2="100" stroke="#94a3b8" stroke-width="1.5"/>
+        <!-- cardinalities -->
+        <text x="178" y="272" font-size="10" fill="#374151">(1,1)</text>
+        <text x="178" y="118" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 2. UTILISATEUR ↔ SESSION (vertical) -->
+        <line x1="155" y1="308" x2="155" y2="502" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="162" y="323" font-size="10" fill="#374151">(1,1)</text>
+        <text x="162" y="494" font-size="10" fill="#374151">(0,1)</text>
+
+        <!-- 3. UTILISATEUR ↔ GROUPE_CHAT (left-side, goes around) -->
+        <polyline points="80,295 40,295 40,750 85,750" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="44" y="288" font-size="10" fill="#374151">(0,N)</text>
+        <text x="44" y="765" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 4. UTILISATEUR ↔ SITE (diagonal) -->
+        <line x1="240" y1="287" x2="425" y2="92" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="248" y="283" font-size="10" fill="#374151">(0,N)</text>
+        <text x="405" y="108" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 5. UTILISATEUR ↔ VISITE (diagonal) -->
+        <line x1="240" y1="298" x2="418" y2="488" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="248" y="312" font-size="10" fill="#374151">(0,N)</text>
+        <text x="398" y="480" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 6. UTILISATEUR ↔ MESSAGE_CHAT (diagonal) -->
+        <line x1="240" y1="303" x2="422" y2="742" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="246" y="320" font-size="10" fill="#374151">(1,1)</text>
+        <text x="404" y="738" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 7. SITE ↔ EQUIPEMENT (diagonal) -->
+        <line x1="572" y1="88" x2="748" y2="284" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="555" y="105" font-size="10" fill="#374151">(1,1)</text>
+        <text x="728" y="278" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 8. SITE ↔ VISITE (vertical) -->
+        <line x1="500" y1="100" x2="500" y2="478" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="507" y="115" font-size="10" fill="#374151">(1,1)</text>
+        <text x="507" y="470" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 9. EQUIPEMENT ↔ MAINTENANCE (diagonal up-right) -->
+        <line x1="912" y1="286" x2="1108" y2="168" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="892" y="280" font-size="10" fill="#374151">(1,1)</text>
+        <text x="1090" y="182" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 10. EQUIPEMENT ↔ EVENEMENT (diagonal right) -->
+        <line x1="912" y1="295" x2="1108" y2="395" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="892" y="308" font-size="10" fill="#374151">(1,1)</text>
+        <text x="1092" y="382" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 11. EQUIPEMENT ↔ DOCUMENT (diagonal down-right) -->
+        <line x1="912" y1="302" x2="1108" y2="638" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="894" y="315" font-size="10" fill="#374151">(1,1)</text>
+        <text x="1092" y="628" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 12. EQUIPEMENT ↔ VISITE (diagonal left-down) -->
+        <line x1="750" y1="300" x2="582" y2="483" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="730" y="316" font-size="10" fill="#374151">(0,N)</text>
+        <text x="566" y="476" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 13. VISITE ↔ MAINTENANCE (long diagonal) -->
+        <line x1="582" y1="484" x2="1108" y2="170" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="596" y="478" font-size="10" fill="#374151">(0,1)</text>
+        <text x="1090" y="190" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 14. GROUPE_CHAT ↔ MESSAGE_CHAT (horizontal) -->
+        <line x1="245" y1="750" x2="418" y2="750" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="248" y="743" font-size="10" fill="#374151">(1,1)</text>
+        <text x="386" y="743" font-size="10" fill="#374151">(0,N)</text>
+
+        <!-- 15. EQUIPEMENT self-ref REMPLACE (arc above) -->
+        <path d="M 830,278 Q 830,218 905,218 Q 980,218 980,278" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="838" y="272" font-size="10" fill="#374151">(0,1)</text>
+        <text x="960" y="272" font-size="10" fill="#374151">(0,1)</text>
+
+        <!-- ═══════════════════════════════════════
+             ASSOCIATIONS (ovals)
+        ════════════════════════════════════════ -->
+
+        <!-- 1. génère (UTILISATEUR → JOURNAL) -->
+        <ellipse cx="170" cy="188" rx="46" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="170" y="192" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">génère</text>
+
+        <!-- 2. a (UTILISATEUR → SESSION) -->
+        <ellipse cx="155" cy="403" rx="32" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="155" y="407" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">a</text>
+
+        <!-- 3. appartient (UTILISATEUR → GROUPE) -->
+        <ellipse cx="40" cy="523" rx="32" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="40" y="527" font-size="9" fill="#1d4ed8" text-anchor="middle" font-style="italic">appartient</text>
+
+        <!-- 4. accède à (UTILISATEUR → SITE) -->
+        <ellipse cx="330" cy="188" rx="40" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="330" y="192" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">accède à</text>
+
+        <!-- 5. planifie (UTILISATEUR → VISITE) -->
+        <ellipse cx="328" cy="393" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="328" y="397" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">planifie</text>
+
+        <!-- 6. envoie (UTILISATEUR → MESSAGE) -->
+        <ellipse cx="330" cy="522" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="330" y="526" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">envoie</text>
+
+        <!-- 7. héberge (SITE → EQUIPEMENT) -->
+        <ellipse cx="660" cy="186" rx="40" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="660" y="190" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">héberge</text>
+
+        <!-- 8. reçoit (SITE → VISITE) -->
+        <ellipse cx="500" cy="288" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="500" y="292" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">reçoit</text>
+
+        <!-- 9. fait l'objet de (EQUIPEMENT → MAINTENANCE) -->
+        <ellipse cx="1010" cy="227" rx="55" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="1010" y="231" font-size="9" fill="#1d4ed8" text-anchor="middle" font-style="italic">fait l'objet de</text>
+
+        <!-- 10. génère (EQUIPEMENT → EVENEMENT) -->
+        <ellipse cx="1010" cy="345" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="1010" y="349" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">génère</text>
+
+        <!-- 11. possède (EQUIPEMENT → DOCUMENT) -->
+        <ellipse cx="1010" cy="470" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="1010" y="474" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">possède</text>
+
+        <!-- 12. implique (EQUIPEMENT ↔ VISITE) -->
+        <ellipse cx="666" cy="391" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="666" y="395" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">implique</text>
+
+        <!-- 13. déclenche (VISITE → MAINTENANCE) -->
+        <ellipse cx="845" cy="327" rx="44" ry="16" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
+        <text x="845" y="331" font-size="10" fill="#9d174d" text-anchor="middle" font-style="italic">déclenche</text>
+
+        <!-- 14. inclut (GROUPE → MESSAGE) -->
+        <ellipse cx="332" cy="750" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="332" y="754" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">inclut</text>
+
+        <!-- 15. remplace (EQUIPEMENT self) -->
+        <ellipse cx="905" cy="218" rx="40" ry="16" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+        <text x="905" y="222" font-size="10" fill="#15803d" text-anchor="middle" font-style="italic">remplace</text>
+
+        <!-- ═══════════════════════════════════════
+             ENTITIES (drawn last, on top)
+        ════════════════════════════════════════ -->
+
+        <!-- JOURNAL_ACTIVITE (left top) -->
+        <g>
+          <rect x="80" y="65" width="180" height="30" rx="4" fill="#0f2744"/>
+          <text x="170" y="85" font-size="12" fill="white" text-anchor="middle" font-weight="700">JOURNAL_ACTIVITE</text>
+        </g>
+
+        <!-- UTILISATEUR (left center) -->
+        <g>
+          <rect x="80" y="278" width="160" height="30" rx="4" fill="#0f2744"/>
+          <text x="160" y="298" font-size="12" fill="white" text-anchor="middle" font-weight="700">UTILISATEUR</text>
+        </g>
+
+        <!-- SESSION (left lower) -->
+        <g>
+          <rect x="80" y="502" width="150" height="30" rx="4" fill="#0f2744"/>
+          <text x="155" y="522" font-size="12" fill="white" text-anchor="middle" font-weight="700">SESSION</text>
+        </g>
+
+        <!-- GROUPE_CHAT (left bottom) -->
+        <g>
+          <rect x="85" y="735" width="160" height="30" rx="4" fill="#0f2744"/>
+          <text x="165" y="755" font-size="12" fill="white" text-anchor="middle" font-weight="700">GROUPE_CHAT</text>
+        </g>
+
+        <!-- SITE (center-left top) -->
+        <g>
+          <rect x="420" y="65" width="160" height="30" rx="4" fill="#1d4ed8"/>
+          <text x="500" y="85" font-size="12" fill="white" text-anchor="middle" font-weight="700">SITE</text>
+        </g>
+
+        <!-- VISITE_SITE (center-left lower) -->
+        <g>
+          <rect x="418" y="478" width="164" height="30" rx="4" fill="#1d4ed8"/>
+          <text x="500" y="498" font-size="12" fill="white" text-anchor="middle" font-weight="700">VISITE_SITE</text>
+        </g>
+
+        <!-- MESSAGE_CHAT (center-left bottom) -->
+        <g>
+          <rect x="418" y="735" width="164" height="30" rx="4" fill="#0f2744"/>
+          <text x="500" y="755" font-size="12" fill="white" text-anchor="middle" font-weight="700">MESSAGE_CHAT</text>
+        </g>
+
+        <!-- EQUIPEMENT (center) -->
+        <g>
+          <rect x="750" y="278" width="162" height="30" rx="4" fill="#7c3aed"/>
+          <text x="831" y="298" font-size="12" fill="white" text-anchor="middle" font-weight="700">EQUIPEMENT</text>
+        </g>
+
+        <!-- MAINTENANCE (right top) -->
+        <g>
+          <rect x="1108" y="152" width="164" height="30" rx="4" fill="#b45309"/>
+          <text x="1190" y="172" font-size="12" fill="white" text-anchor="middle" font-weight="700">MAINTENANCE</text>
+        </g>
+
+        <!-- EVENEMENT (right center) -->
+        <g>
+          <rect x="1108" y="382" width="164" height="30" rx="4" fill="#0f2744"/>
+          <text x="1190" y="402" font-size="12" fill="white" text-anchor="middle" font-weight="700">EVENEMENT_EQ</text>
+        </g>
+
+        <!-- DOCUMENT (right lower) -->
+        <g>
+          <rect x="1108" y="632" width="164" height="30" rx="4" fill="#0f2744"/>
+          <text x="1190" y="652" font-size="12" fill="white" text-anchor="middle" font-weight="700">DOCUMENT_EQ</text>
+        </g>
+
+        <!-- ── Column labels ── -->
+        <text x="170" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Utilisateurs &amp; Accès</text>
+        <text x="500" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Sites &amp; Visites</text>
+        <text x="831" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Équipements</text>
+        <text x="1190" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Tickets &amp; Historique</text>
+
+        <!-- ── Chat cluster label ── -->
+        <rect x="55" y="715" width="465" height="170" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="70" y="710" font-size="10" fill="#94a3b8" font-weight="600">Module Chat</text>
+
+      </svg>
+    </div>
+  </div>
+
+  <!-- ── Section 2 : Entités détaillées ── -->
+  <div class="section">
+    <div class="section-title">Détail des Entités</div>
+    <div class="entity-grid">
+
+      <!-- UTILISATEUR -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">👤</span> UTILISATEUR</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>username</td><td><span class="btype">VARCHAR(100)</span></td><td>Identifiant unique</td></tr>
+            <tr><td>password</td><td><span class="btype">TEXT</span></td><td>Haché (bcrypt)</td></tr>
+            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom complet</td></tr>
+            <tr><td>role</td><td><span class="benum">admin | user</span></td><td>Rôle global</td></tr>
+            <tr><td>permissions</td><td><span class="btype">TEXT[]</span></td><td>lecture | écriture | admin</td></tr>
+            <tr><td>allowed_site_ids</td><td><span class="btype">INTEGER[]</span></td><td>Sites autorisés</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SITE -->
+      <div class="ecard">
+        <div class="ecard-head" style="background:#1d4ed8"><span class="icon">🏢</span> SITE</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom du site</td></tr>
+            <tr><td>city</td><td><span class="btype">VARCHAR(100)</span></td><td>Ville</td></tr>
+            <tr><td>country</td><td><span class="btype">VARCHAR(100)</span></td><td>Pays</td></tr>
+            <tr><td>address</td><td><span class="btype">TEXT</span></td><td>Adresse complète</td></tr>
+            <tr><td>description</td><td><span class="btype">TEXT</span></td><td>Notes</td></tr>
+            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de création</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- EQUIPEMENT -->
+      <div class="ecard">
+        <div class="ecard-head" style="background:#7c3aed"><span class="icon">💻</span> EQUIPEMENT</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>site_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → SITE</span></td></tr>
+            <tr><td>replaced_by_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
+            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom de l'équipement</td></tr>
+            <tr><td>type</td><td><span class="benum">ordinateur | serveur | switch | ...</span></td><td>Catégorie</td></tr>
+            <tr><td>brand / model</td><td><span class="btype">VARCHAR(100)</span></td><td>Marque / Modèle</td></tr>
+            <tr><td>serial_number</td><td><span class="btype">VARCHAR(100)</span></td><td>N° de série</td></tr>
+            <tr><td>ip_address</td><td><span class="btype">VARCHAR(50)</span></td><td>Adresse IP</td></tr>
+            <tr><td>location / department</td><td><span class="btype">VARCHAR(200)</span></td><td>Emplacement / Service</td></tr>
+            <tr><td>status</td><td><span class="benum">actif | inactif | panne | retraité</span></td><td>État</td></tr>
+            <tr><td>purchase_date / warranty</td><td><span class="btype">VARCHAR(20)</span></td><td>Achat / Garantie</td></tr>
+            <tr><td>quantity</td><td><span class="btype">INTEGER</span></td><td>Quantité</td></tr>
+            <tr><td>visited</td><td><span class="btype">BOOLEAN</span></td><td>Visité</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- MAINTENANCE -->
+      <div class="ecard">
+        <div class="ecard-head" style="background:#b45309"><span class="icon">🔧</span> MAINTENANCE</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
+            <tr><td>visit_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → VISITE_SITE</span></td></tr>
+            <tr><td>status</td><td><span class="benum">en_attente | ouvert | en_cours | résolu</span></td><td>État du ticket</td></tr>
+            <tr><td>priority</td><td><span class="benum">basse | normale | haute | critique</span></td><td>Priorité</td></tr>
+            <tr><td>failure_desc</td><td><span class="btype">TEXT</span></td><td>Description de la panne</td></tr>
+            <tr><td>diagnosis</td><td><span class="btype">TEXT</span></td><td>Diagnostic</td></tr>
+            <tr><td>solution</td><td><span class="btype">TEXT</span></td><td>Solution appliquée</td></tr>
+            <tr><td>parts_replaced</td><td><span class="btype">TEXT</span></td><td>Pièces remplacées</td></tr>
+            <tr><td>technician / opened_by</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien / Créé par</td></tr>
+            <tr><td>opened_at / started_at / closed_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatages</td></tr>
+            <tr><td>notes</td><td><span class="btype">TEXT</span></td><td>Journal interne</td></tr>
+            <tr><td>site_name</td><td><span class="btype">VARCHAR(200)</span></td><td>Dénormalisation site</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- VISITE_SITE -->
+      <div class="ecard">
+        <div class="ecard-head" style="background:#1d4ed8"><span class="icon">📅</span> VISITE_SITE</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>site_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → SITE</span></td></tr>
+            <tr><td>equipment_ids</td><td><span class="btype">INTEGER[]</span></td><td><span class="bfk">Réf. → EQUIPEMENT[]</span></td></tr>
+            <tr><td>scheduled_date / scheduled_time</td><td><span class="btype">DATE / VARCHAR</span></td><td>Date planifiée</td></tr>
+            <tr><td>technician</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien assigné</td></tr>
+            <tr><td>purpose</td><td><span class="btype">TEXT</span></td><td>Objectif de la visite</td></tr>
+            <tr><td>status</td><td><span class="benum">planifié | en_cours | terminé | reporté | annulé</span></td><td>État</td></tr>
+            <tr><td>with_maintenance</td><td><span class="btype">BOOLEAN</span></td><td>Inclut maintenance</td></tr>
+            <tr><td>maintenance_desc</td><td><span class="btype">TEXT</span></td><td>Description maintenance</td></tr>
+            <tr><td>validation_comment</td><td><span class="btype">TEXT</span></td><td>Commentaire de clôture</td></tr>
+            <tr><td>validated_at / validated_by</td><td><span class="btype">TIMESTAMPTZ / VARCHAR</span></td><td>Validation</td></tr>
+            <tr><td>rescheduled_date</td><td><span class="btype">DATE</span></td><td>Nouvelle date si reporté</td></tr>
+            <tr><td>created_by / created_at</td><td><span class="btype">VARCHAR / TIMESTAMPTZ</span></td><td>Création</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- EVENEMENT_EQUIPEMENT -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">📋</span> EVENEMENT_EQUIPEMENT</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
+            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>action</td><td><span class="benum">Création | Modification | Intervention | Transfert | Suppression</span></td><td>Type d'action</td></tr>
+            <tr><td>details</td><td><span class="btype">TEXT</span></td><td>Description</td></tr>
+            <tr><td>changes</td><td><span class="btype">JSON</span></td><td>Diff avant/après</td></tr>
+            <tr><td>technician</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien</td></tr>
+            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>IP de l'auteur</td></tr>
+            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- DOCUMENT_EQUIPEMENT -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">📄</span> DOCUMENT_EQUIPEMENT</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
+            <tr><td>filename</td><td><span class="btype">VARCHAR(500)</span></td><td>Nom du fichier</td></tr>
+            <tr><td>file_type</td><td><span class="btype">VARCHAR(100)</span></td><td>MIME type</td></tr>
+            <tr><td>file_size</td><td><span class="btype">INTEGER</span></td><td>Taille en octets</td></tr>
+            <tr><td>file_data</td><td><span class="btype">TEXT (Base64)</span></td><td>Contenu du fichier</td></tr>
+            <tr><td>description</td><td><span class="btype">TEXT</span></td><td>Description</td></tr>
+            <tr><td>uploaded_by</td><td><span class="btype">VARCHAR(200)</span></td><td>Auteur du dépôt</td></tr>
+            <tr><td>uploaded_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de dépôt</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SESSION -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">🖥️</span> SESSION</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bpk">PK</span> <span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>username</td><td><span class="btype">VARCHAR(100)</span></td><td>Dénormalisé</td></tr>
+            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom complet</td></tr>
+            <tr><td>role</td><td><span class="benum">admin | user</span></td><td>Rôle</td></tr>
+            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>IP de connexion</td></tr>
+            <tr><td>login_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Heure de connexion</td></tr>
+            <tr><td>last_seen</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Dernier heartbeat</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- JOURNAL_ACTIVITE -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">📝</span> JOURNAL_ACTIVITE</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>username / user_name</td><td><span class="btype">VARCHAR</span></td><td>Dénormalisé</td></tr>
+            <tr><td>action</td><td><span class="btype">VARCHAR(200)</span></td><td>Type d'action</td></tr>
+            <tr><td>details</td><td><span class="btype">TEXT</span></td><td>Détails</td></tr>
+            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>Adresse IP</td></tr>
+            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- GROUPE_CHAT -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">👥</span> GROUPE_CHAT</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>name</td><td><span class="btype">VARCHAR(255)</span></td><td>Nom du groupe</td></tr>
+            <tr><td>created_by</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de création</td></tr>
+          </tbody>
+        </table>
+        <div style="padding:6px 12px;font-size:.78rem;color:#64748b;background:#f8fafc;border-top:1px solid #f1f5f9">
+          Table de jointure : <strong>CHAT_GROUP_MEMBERS</strong> (group_id PK FK, user_id PK FK)
+        </div>
+      </div>
+
+      <!-- MESSAGE_CHAT -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">💬</span> MESSAGE_CHAT</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
+            <tr><td>sender_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>recipient_id</td><td><span class="btype">INTEGER (nullable)</span></td><td><span class="bfk">FK → UTILISATEUR</span> (DM)</td></tr>
+            <tr><td>group_id</td><td><span class="btype">INTEGER (nullable)</span></td><td><span class="bfk">FK → GROUPE_CHAT</span></td></tr>
+            <tr><td>content</td><td><span class="btype">TEXT</span></td><td>Contenu du message</td></tr>
+            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
+          </tbody>
+        </table>
+        <div style="padding:6px 12px;font-size:.78rem;color:#64748b;background:#f8fafc;border-top:1px solid #f1f5f9">
+          Si <code>recipient_id</code> = NULL et <code>group_id</code> = NULL → message global
+        </div>
+      </div>
+
+      <!-- MARQUEUR_LECTURE -->
+      <div class="ecard">
+        <div class="ecard-head"><span class="icon">✅</span> MARQUEUR_LECTURE</div>
+        <table class="etable">
+          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
+          <tbody>
+            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bpk">PK</span> <span class="bfk">FK → UTILISATEUR</span></td></tr>
+            <tr><td>conversation_key</td><td><span class="btype">VARCHAR(100)</span></td><td><span class="bpk">PK</span> ex: "global", "dm:1:2", "group:5"</td></tr>
+            <tr><td>last_read_id</td><td><span class="btype">INTEGER</span></td><td>ID du dernier message lu</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div><!-- /entity-grid -->
+  </div>
+
+  <!-- ── Section 3 : Associations ── -->
+  <div class="section">
+    <div class="section-title">Table des Associations</div>
+    <table class="rtable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Association</th>
+          <th>Entité A</th>
+          <th>Card. A</th>
+          <th>Card. B</th>
+          <th>Entité B</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td class="rel-name">GENERE (activité)</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>JOURNAL_ACTIVITE</td>
+          <td>Chaque action utilisateur crée une entrée de journal</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td class="rel-name">A</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-1">(0,1)</span></td>
+          <td>SESSION</td>
+          <td>Un utilisateur a au plus une session active (monitoring)</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td class="rel-name">APPARTIENT À</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>GROUPE_CHAT</td>
+          <td>Association N:N via CHAT_GROUP_MEMBERS</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td class="rel-name">ACCÈDE À</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>SITE</td>
+          <td>Contrôle d'accès via allowed_site_ids[] dans UTILISATEUR</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td class="rel-name">PLANIFIE</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>VISITE_SITE</td>
+          <td>Un utilisateur peut créer et/ou effectuer plusieurs visites</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td class="rel-name">ENVOIE</td>
+          <td>UTILISATEUR</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>MESSAGE_CHAT</td>
+          <td>Un message appartient toujours à un expéditeur</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td class="rel-name">HÉBERGE</td>
+          <td>SITE</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>EQUIPEMENT</td>
+          <td>Un équipement est rattaché à un site (site_id)</td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td class="rel-name">REÇOIT</td>
+          <td>SITE</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>VISITE_SITE</td>
+          <td>Un site peut faire l'objet de plusieurs visites</td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td class="rel-name">FAIT L'OBJET DE</td>
+          <td>EQUIPEMENT</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>MAINTENANCE</td>
+          <td>Un ticket de maintenance référence l'équipement concerné</td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td class="rel-name">GENERE (événement)</td>
+          <td>EQUIPEMENT</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>EVENEMENT_EQUIPEMENT</td>
+          <td>Toute modification d'équipement génère un événement (audit trail)</td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td class="rel-name">POSSÈDE</td>
+          <td>EQUIPEMENT</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>DOCUMENT_EQUIPEMENT</td>
+          <td>Documents (PDF, images…) attachés à un équipement</td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td class="rel-name">IMPLIQUE</td>
+          <td>EQUIPEMENT</td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>VISITE_SITE</td>
+          <td>Stocké via equipment_ids[] dans VISITE_SITE</td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td class="rel-name">DÉCLENCHE</td>
+          <td>VISITE_SITE</td>
+          <td><span class="card card-1">(0,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>MAINTENANCE</td>
+          <td>Une visite avec maintenance crée des tickets en_attente (visit_id)</td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td class="rel-name">INCLUT</td>
+          <td>GROUPE_CHAT</td>
+          <td><span class="card card-1">(1,1)</span></td>
+          <td><span class="card card-n">(0,N)</span></td>
+          <td>MESSAGE_CHAT</td>
+          <td>Les messages d'un groupe sont liés via group_id</td>
+        </tr>
+        <tr>
+          <td>15</td>
+          <td class="rel-name">REMPLACE</td>
+          <td>EQUIPEMENT</td>
+          <td><span class="card card-1">(0,1)</span></td>
+          <td><span class="card card-1">(0,1)</span></td>
+          <td>EQUIPEMENT</td>
+          <td>Auto-référence : replaced_by_id → id (traçabilité du remplacement)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Section 4 : Règles de gestion ── -->
+  <div class="section">
+    <div class="section-title">Règles de Gestion Principales</div>
+    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.07);">
+      <ol style="padding-left:20px;line-height:2;font-size:.9rem;color:#334155;">
+        <li>Un <strong>utilisateur</strong> ne peut accéder qu'aux sites de sa liste <code>allowed_site_ids</code> (sauf rôle admin).</li>
+        <li>Un <strong>équipement</strong> appartient à exactement un site ; il peut en être détaché (site_id = NULL) temporairement.</li>
+        <li>Un <strong>ticket de maintenance</strong> est créé automatiquement à l'état <em>en_attente</em> lorsqu'une visite est planifiée avec <code>with_maintenance = true</code>.</li>
+        <li>À la <strong>clôture d'une visite</strong>, chaque ticket lié peut être : résolu (traité sur place), rouvert (à programmer) ou conservé en attente.</li>
+        <li>Un <strong>ticket résolu</strong> ne peut plus être modifié ni supprimé.</li>
+        <li>Un <strong>site</strong> ne peut être supprimé que s'il ne possède plus d'équipements.</li>
+        <li>Chaque modification d'équipement génère un <strong>événement</strong> horodaté avec le diff avant/après (audit trail non modifiable).</li>
+        <li>La <strong>présence en ligne</strong> d'un utilisateur est déterminée si son <code>last_seen</code> date de moins de 5 minutes (heartbeat toutes les 60 s).</li>
+        <li>Un <strong>message chat</strong> est global si <code>recipient_id</code> et <code>group_id</code> sont NULL, privé si <code>recipient_id</code> est défini, de groupe si <code>group_id</code> est défini.</li>
+        <li>Un équipement peut être <strong>remplacé</strong> par un autre via <code>replaced_by_id</code> ; la chaîne de remplacement est traçable.</li>
+      </ol>
+    </div>
+  </div>
+
+</div><!-- /content -->
+
+<script>
+  function downloadHtml() {
+    const blob = new Blob([document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'MCD_Gestion_Equipements_IT.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+</script>
+</body>
+</html>
