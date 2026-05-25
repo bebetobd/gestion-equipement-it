@@ -472,6 +472,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
   const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
+  const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [noteLoading, setNoteLoading] = useState(false);
@@ -490,6 +491,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [allTransfers, setAllTransfers] = useState<any[]>([]);
   const [transferModuleLoading, setTransferModuleLoading] = useState(false);
   const [transferModuleFilter, setTransferModuleFilter] = useState({ department: '', from: '', to: '' });
+  const [showTransferReport, setShowTransferReport] = useState(false);
 
   // Reform
   const [showReformModal, setShowReformModal] = useState(false);
@@ -549,7 +551,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
-  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user' | 'site'>('equipment');
+  const [reportsTab, setReportsTab] = useState<'equipment' | 'date' | 'department' | 'user' | 'site' | 'maintenance' | 'visits'>('equipment');
+  const [reportMaintenanceAll, setReportMaintenanceAll] = useState<MaintenanceRecord[]>([]);
+  const [reportMaintenanceLoading, setReportMaintenanceLoading] = useState(false);
+  const [reportVisitsAll, setReportVisitsAll] = useState<SiteVisit[]>([]);
+  const [reportVisitsLoading, setReportVisitsLoading] = useState(false);
   const [reportEquipmentId, setReportEquipmentId] = useState<number | ''>('');
   const [reportHistory, setReportHistory] = useState<EquipmentEvent[]>([]);
   const [reportHistoryLoading, setReportHistoryLoading] = useState(false);
@@ -841,6 +847,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (res.ok) setReportSiteDetail(await res.json());
     } catch {}
     setReportSiteDetailLoading(false);
+  };
+
+  const fetchReportMaintenance = async () => {
+    setReportMaintenanceLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/maintenance?limit=500`, { headers: authHeaders() });
+      if (r.ok) setReportMaintenanceAll(await r.json());
+    } catch {}
+    setReportMaintenanceLoading(false);
+  };
+
+  const fetchReportVisits = async () => {
+    setReportVisitsLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/visits`, { headers: authHeaders() });
+      if (r.ok) setReportVisitsAll(await r.json());
+    } catch {}
+    setReportVisitsLoading(false);
   };
 
   const getEventActionStyle = (action: string) => {
@@ -1869,8 +1893,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const closeAllModules = () => {
     setShowTransferModule(false);
+    setShowTransferReport(false);
     setShowMaintenanceModule(false);
     setShowMaintenanceForm(false);
+    setShowMaintenanceReport(false);
     setSelectedMaintenance(null);
     setShowReportsModal(false);
     setShowMonitoringModal(false);
@@ -2969,6 +2995,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
+              <button onClick={() => setShowMaintenanceReport(false)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${!showMaintenanceReport ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                Liste des tickets
+              </button>
+              <button onClick={() => { setShowMaintenanceReport(true); if (maintenanceFilter !== 'all') { setMaintenanceFilter('all'); fetchMaintenance('all'); } }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showMaintenanceReport ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                Rapport
+              </button>
+            </div>
+
             {/* Stats bar */}
             <div className="grid grid-cols-4 gap-4 px-6 py-3 bg-gray-50 border-b shrink-0">
               {[
@@ -2985,7 +3023,125 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               ))}
             </div>
 
+            {/* Rapport maintenance */}
+            {showMaintenanceReport && (() => {
+              const all = maintenanceRecords;
+              const byStatus = (['en_attente','ouvert','en_cours','résolu'] as const).map(s => ({
+                s, label: maintenanceStatusLabel[s] ?? s, style: maintenanceStatusStyle[s],
+                count: all.filter(m => m.status === s).length,
+              }));
+              const byPriority: Record<string, number> = {};
+              all.forEach(m => { byPriority[m.priority] = (byPriority[m.priority] ?? 0) + 1; });
+              const byTech: Record<string, { total: number; resolved: number }> = {};
+              all.forEach(m => {
+                const t = m.technician || 'Non assigné';
+                if (!byTech[t]) byTech[t] = { total: 0, resolved: 0 };
+                byTech[t].total++;
+                if (m.status === 'résolu') byTech[t].resolved++;
+              });
+              const byEq: Record<string, number> = {};
+              all.forEach(m => { if (m.equipmentName) { byEq[m.equipmentName] = (byEq[m.equipmentName] ?? 0) + 1; } });
+              const resolved = all.filter(m => m.status === 'résolu' && m.openedAt && m.closedAt);
+              const avgMs = resolved.length ? resolved.reduce((acc, m) => acc + (new Date(m.closedAt!).getTime() - new Date(m.openedAt).getTime()), 0) / resolved.length : 0;
+              const avgH = Math.round(avgMs / 3600000);
+              const prioColors: Record<string, string> = { critique: 'bg-red-500', haute: 'bg-orange-400', normale: 'bg-blue-400', basse: 'bg-gray-300' };
+              return (
+                <div className="flex-1 overflow-auto px-6 pb-6 pt-4 space-y-6">
+                  {/* Stat cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {[
+                      { label: 'Total tickets', value: all.length, color: 'text-gray-800' },
+                      { label: 'Actifs', value: all.filter(m => m.status !== 'résolu').length, color: 'text-red-600' },
+                      { label: 'Résolus', value: resolved.length, color: 'text-green-600' },
+                      { label: 'Délai moyen résolution', value: avgH > 0 ? `${avgH}h` : '—', color: 'text-indigo-600' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                        <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                        <div className="text-xs text-gray-500 mt-1">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Par statut */}
+                    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <h3 className="font-semibold text-gray-700 mb-4">Par statut</h3>
+                      <div className="space-y-3">
+                        {byStatus.map(({ label, style, count }) => (
+                          <div key={label} className="flex items-center gap-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium w-24 text-center shrink-0 ${style}`}>{label}</span>
+                            <div className="flex-1 bg-gray-100 rounded-full h-2">
+                              <div className="h-2 rounded-full bg-orange-400 transition-all" style={{ width: `${all.length ? (count / all.length) * 100 : 0}%` }} />
+                            </div>
+                            <span className="text-sm font-bold text-gray-700 w-6 text-right">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Par priorité */}
+                    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <h3 className="font-semibold text-gray-700 mb-4">Par priorité</h3>
+                      <div className="space-y-3">
+                        {Object.entries(byPriority).sort((a, b) => b[1] - a[1]).map(([prio, cnt]) => (
+                          <div key={prio} className="flex items-center gap-3">
+                            <span className="text-xs text-gray-600 capitalize w-20 shrink-0">{prio}</span>
+                            <div className="flex-1 bg-gray-100 rounded-full h-2">
+                              <div className={`h-2 rounded-full transition-all ${prioColors[prio] ?? 'bg-gray-400'}`} style={{ width: `${all.length ? (cnt / all.length) * 100 : 0}%` }} />
+                            </div>
+                            <span className="text-sm font-bold text-gray-700 w-6 text-right">{cnt}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Par technicien */}
+                    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <h3 className="font-semibold text-gray-700 mb-3">Par technicien</h3>
+                      <table className="w-full text-sm">
+                        <thead><tr className="text-xs text-gray-400 border-b">
+                          <th className="pb-2 text-left">Technicien</th>
+                          <th className="pb-2 text-right">Total</th>
+                          <th className="pb-2 text-right">Résolus</th>
+                          <th className="pb-2 text-right">Taux</th>
+                        </tr></thead>
+                        <tbody>
+                          {Object.entries(byTech).sort((a, b) => b[1].total - a[1].total).map(([tech, d]) => (
+                            <tr key={tech} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="py-1.5 font-medium text-gray-800">{tech}</td>
+                              <td className="py-1.5 text-right text-gray-500">{d.total}</td>
+                              <td className="py-1.5 text-right text-green-600 font-medium">{d.resolved}</td>
+                              <td className="py-1.5 text-right text-indigo-600 font-medium">{d.total ? Math.round((d.resolved / d.total) * 100) : 0}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Par équipement */}
+                    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <h3 className="font-semibold text-gray-700 mb-3">Top équipements en panne</h3>
+                      <div className="space-y-2">
+                        {Object.entries(byEq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([eq, cnt]) => {
+                          const max = Math.max(...Object.values(byEq), 1);
+                          return (
+                            <div key={eq} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 truncate flex-1">{eq}</span>
+                              <div className="w-24 bg-gray-100 rounded-full h-1.5 shrink-0">
+                                <div className="h-1.5 rounded-full bg-orange-400" style={{ width: `${(cnt / max) * 100}%` }} />
+                              </div>
+                              <span className="text-xs font-bold text-gray-700 w-4 text-right">{cnt}</span>
+                            </div>
+                          );
+                        })}
+                        {Object.keys(byEq).length === 0 && <p className="text-sm text-gray-400">Aucun équipement lié</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Body */}
+            {!showMaintenanceReport && (
             <div className="flex flex-1 overflow-hidden">
 
               {/* List */}
@@ -3242,6 +3398,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
       )}
@@ -3265,6 +3422,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </button>
           </div>
 
+          {/* Tabs */}
+          <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
+            <button onClick={() => setShowTransferReport(false)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${!showTransferReport ? 'border-purple-500 text-purple-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              Liste des transferts
+            </button>
+            <button onClick={() => setShowTransferReport(true)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showTransferReport ? 'border-purple-500 text-purple-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              Rapport
+            </button>
+          </div>
+
           {/* Stats */}
           <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 shrink-0">
             {[
@@ -3280,6 +3449,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             ))}
           </div>
 
+          {!showTransferReport && (<>
           {/* Filters */}
           <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
             <select
@@ -3382,6 +3552,99 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             )}
           </div>
+          </>)}
+
+          {/* Rapport transferts */}
+          {showTransferReport && (() => {
+            const byDestDept: Record<string, number> = {};
+            const byType: Record<string, number> = {};
+            const byTech: Record<string, number> = {};
+            allTransfers.forEach(ev => {
+              const { toDept } = getTransferLocations(ev);
+              const dept = toDept || 'Non défini';
+              byDestDept[dept] = (byDestDept[dept] ?? 0) + 1;
+              const t = ev.equipmentType || 'Autre';
+              byType[t] = (byType[t] ?? 0) + 1;
+              const tech = ev.technician || ev.userName || 'Inconnu';
+              byTech[tech] = (byTech[tech] ?? 0) + 1;
+            });
+            const thisMonth = allTransfers.filter(t => new Date(t.createdAt) > new Date(Date.now() - 30*24*3600*1000)).length;
+            const maxDept = Math.max(...Object.values(byDestDept), 1);
+            const maxType = Math.max(...Object.values(byType), 1);
+            return (
+              <div className="flex-1 overflow-auto px-6 pb-6 pt-4 space-y-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Total transferts', value: allTransfers.length, color: 'text-purple-700' },
+                    { label: 'Ce mois', value: thisMonth, color: 'text-blue-600' },
+                    { label: 'Services destination', value: Object.keys(byDestDept).length, color: 'text-green-600' },
+                    { label: 'Équipements déplacés', value: new Set(allTransfers.map(t => t.equipmentId)).size, color: 'text-orange-600' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                      <div className="text-xs text-gray-500 mt-1">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                    <h3 className="font-semibold text-gray-700 mb-4">Par service destination</h3>
+                    <div className="space-y-2">
+                      {Object.entries(byDestDept).sort((a,b)=>b[1]-a[1]).map(([dept, cnt]) => (
+                        <div key={dept} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600 truncate w-36 shrink-0">{dept}</span>
+                          <div className="flex-1 bg-gray-100 rounded-full h-2">
+                            <div className="h-2 rounded-full bg-purple-400" style={{width:`${(cnt/maxDept)*100}%`}}/>
+                          </div>
+                          <span className="text-sm font-bold text-gray-700 w-6 text-right">{cnt}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                    <h3 className="font-semibold text-gray-700 mb-4">Par type d'équipement</h3>
+                    <div className="space-y-2">
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type, cnt]) => (
+                        <div key={type} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600 capitalize w-28 shrink-0">{type}</span>
+                          <div className="flex-1 bg-gray-100 rounded-full h-2">
+                            <div className="h-2 rounded-full bg-blue-400" style={{width:`${(cnt/maxType)*100}%`}}/>
+                          </div>
+                          <span className="text-sm font-bold text-gray-700 w-6 text-right">{cnt}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                  <h3 className="font-semibold text-gray-700 mb-3">Par technicien</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([tech, cnt]) => (
+                      <div key={tech} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                        <span className="text-sm text-gray-700 font-medium">{tech}</span>
+                        <span className="text-xs bg-purple-100 text-purple-700 rounded-full px-2 py-0.5 font-bold">{cnt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                  <h3 className="font-semibold text-gray-700 mb-3">10 derniers transferts</h3>
+                  <div className="space-y-2">
+                    {allTransfers.slice(0,10).map(ev => {
+                      const { fromDept, toDept } = getTransferLocations(ev);
+                      return (
+                        <div key={ev.id} className="flex items-center gap-3 text-sm border-b border-gray-50 pb-2">
+                          <span className="text-xs text-gray-400 shrink-0 w-20">{new Date(ev.createdAt).toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})}</span>
+                          <span className="font-medium text-gray-800 truncate flex-1">{ev.equipmentName}</span>
+                          <span className="text-xs text-gray-500 shrink-0">{fromDept || '—'} → {toDept || '—'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3753,11 +4016,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 ['department','Par service'],
                 ['user', isAdmin ? 'Par utilisateur' : 'Mes actions'],
                 ['site','Par site'],
+                ['maintenance','Maintenance'],
+                ['visits','Visites'],
               ] as const).map(([tab, label]) => (
                 <button key={tab} onClick={() => {
                   setReportsTab(tab as typeof reportsTab);
                   if (tab === 'user' && reportUserStats.length === 0) fetchReportByUser();
                   if (tab === 'site' && reportSiteStats.length === 0) fetchReportBySite();
+                  if (tab === 'maintenance' && reportMaintenanceAll.length === 0) fetchReportMaintenance();
+                  if (tab === 'visits' && reportVisitsAll.length === 0) fetchReportVisits();
                 }}
                   className={`whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {label}
@@ -4362,6 +4629,188 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       })}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Tab Maintenance ── */}
+              {reportsTab === 'maintenance' && (
+                <div className="space-y-6">
+                  {reportMaintenanceLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+                  {!reportMaintenanceLoading && reportMaintenanceAll.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">
+                      <p>Aucun ticket de maintenance trouvé.</p>
+                      <button onClick={fetchReportMaintenance} className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">Charger</button>
+                    </div>
+                  )}
+                  {reportMaintenanceAll.length > 0 && (() => {
+                    const all = reportMaintenanceAll;
+                    const byStatus = (['en_attente','ouvert','en_cours','résolu'] as const).map(s => ({
+                      label: maintenanceStatusLabel[s] ?? s, style: maintenanceStatusStyle[s],
+                      count: all.filter(m => m.status === s).length,
+                    }));
+                    const byPriority: Record<string,number> = {};
+                    all.forEach(m => { byPriority[m.priority] = (byPriority[m.priority]??0)+1; });
+                    const byTech: Record<string,{total:number;resolved:number}> = {};
+                    all.forEach(m => {
+                      const t = m.technician||'Non assigné';
+                      if (!byTech[t]) byTech[t]={total:0,resolved:0};
+                      byTech[t].total++;
+                      if (m.status==='résolu') byTech[t].resolved++;
+                    });
+                    const resolved = all.filter(m=>m.status==='résolu'&&m.openedAt&&m.closedAt);
+                    const avgMs = resolved.length ? resolved.reduce((a,m)=>a+(new Date(m.closedAt!).getTime()-new Date(m.openedAt).getTime()),0)/resolved.length : 0;
+                    const avgH = Math.round(avgMs/3600000);
+                    const prioColors: Record<string,string> = {critique:'bg-red-500',haute:'bg-orange-400',normale:'bg-blue-400',basse:'bg-gray-300'};
+                    return (<>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {[
+                          {label:'Total tickets',value:all.length,color:'text-gray-800'},
+                          {label:'Actifs',value:all.filter(m=>m.status!=='résolu').length,color:'text-red-600'},
+                          {label:'Résolus',value:resolved.length,color:'text-green-600'},
+                          {label:'Délai moyen résolution',value:avgH>0?`${avgH}h`:'—',color:'text-indigo-600'},
+                        ].map(({label,value,color})=>(
+                          <div key={label} className="bg-white rounded-xl border p-4 shadow-sm">
+                            <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                            <div className="text-xs text-gray-500 mt-1">{label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div className="bg-white rounded-xl border p-4 shadow-sm">
+                          <h3 className="font-semibold text-gray-700 mb-4">Par statut</h3>
+                          {byStatus.map(({label,style,count})=>(
+                            <div key={label} className="flex items-center gap-3 mb-2">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium w-24 text-center shrink-0 ${style}`}>{label}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-2">
+                                <div className="h-2 rounded-full bg-orange-400" style={{width:`${all.length?(count/all.length)*100:0}%`}}/>
+                              </div>
+                              <span className="text-sm font-bold text-gray-700 w-6 text-right">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="bg-white rounded-xl border p-4 shadow-sm">
+                          <h3 className="font-semibold text-gray-700 mb-4">Par priorité</h3>
+                          {Object.entries(byPriority).sort((a,b)=>b[1]-a[1]).map(([prio,cnt])=>(
+                            <div key={prio} className="flex items-center gap-3 mb-2">
+                              <span className="text-xs text-gray-600 capitalize w-20 shrink-0">{prio}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-2">
+                                <div className={`h-2 rounded-full ${prioColors[prio]??'bg-gray-400'}`} style={{width:`${all.length?(cnt/all.length)*100:0}%`}}/>
+                              </div>
+                              <span className="text-sm font-bold text-gray-700 w-6 text-right">{cnt}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-xl border p-4 shadow-sm">
+                        <h3 className="font-semibold text-gray-700 mb-3">Par technicien</h3>
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-xs text-gray-400 border-b">
+                            <th className="pb-2 text-left">Technicien</th>
+                            <th className="pb-2 text-right">Total</th>
+                            <th className="pb-2 text-right">Résolus</th>
+                            <th className="pb-2 text-right">Taux</th>
+                          </tr></thead>
+                          <tbody>
+                            {Object.entries(byTech).sort((a,b)=>b[1].total-a[1].total).map(([tech,d])=>(
+                              <tr key={tech} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="py-1.5 font-medium text-gray-800">{tech}</td>
+                                <td className="py-1.5 text-right text-gray-500">{d.total}</td>
+                                <td className="py-1.5 text-right text-green-600 font-medium">{d.resolved}</td>
+                                <td className="py-1.5 text-right text-indigo-600 font-medium">{d.total?Math.round((d.resolved/d.total)*100):0}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>);
+                  })()}
+                </div>
+              )}
+
+              {/* ── Tab Visites ── */}
+              {reportsTab === 'visits' && (
+                <div className="space-y-6">
+                  {reportVisitsLoading && <div className="text-center py-12 text-gray-400">Chargement…</div>}
+                  {!reportVisitsLoading && reportVisitsAll.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">
+                      <p>Aucune visite trouvée.</p>
+                      <button onClick={fetchReportVisits} className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">Charger</button>
+                    </div>
+                  )}
+                  {reportVisitsAll.length > 0 && (() => {
+                    const all = reportVisitsAll;
+                    const visitStatusStyle: Record<string,string> = {
+                      planifié:'bg-indigo-100 text-indigo-700', en_cours:'bg-yellow-100 text-yellow-700',
+                      terminé:'bg-green-100 text-green-700', reporté:'bg-orange-100 text-orange-700', annulé:'bg-red-100 text-red-700'
+                    };
+                    const byStatus = (['planifié','en_cours','terminé','reporté','annulé'] as const).map(s=>({
+                      label:s.charAt(0).toUpperCase()+s.slice(1).replace('_',' '),
+                      style:visitStatusStyle[s], count:all.filter(v=>v.status===s).length
+                    }));
+                    const bySite: Record<string,{total:number;terminé:number}> = {};
+                    all.forEach(v=>{
+                      const s=v.siteName||'Inconnu';
+                      if(!bySite[s]) bySite[s]={total:0,terminé:0};
+                      bySite[s].total++;
+                      if(v.status==='terminé') bySite[s].terminé++;
+                    });
+                    const byTech: Record<string,number> = {};
+                    all.forEach(v=>{ const t=v.technician||'Non assigné'; byTech[t]=(byTech[t]??0)+1; });
+                    const withMaint = all.filter(v=>v.withMaintenance).length;
+                    const maxSite = Math.max(...Object.values(bySite).map(s=>s.total),1);
+                    return (<>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {[
+                          {label:'Total visites',value:all.length,color:'text-blue-700'},
+                          {label:'Terminées',value:all.filter(v=>v.status==='terminé').length,color:'text-green-600'},
+                          {label:'À venir',value:all.filter(v=>v.status==='planifié'||v.status==='en_cours').length,color:'text-indigo-600'},
+                          {label:'Avec maintenance',value:withMaint,color:'text-orange-600'},
+                        ].map(({label,value,color})=>(
+                          <div key={label} className="bg-white rounded-xl border p-4 shadow-sm">
+                            <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                            <div className="text-xs text-gray-500 mt-1">{label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div className="bg-white rounded-xl border p-4 shadow-sm">
+                          <h3 className="font-semibold text-gray-700 mb-4">Par statut</h3>
+                          {byStatus.map(({label,style,count})=>(
+                            <div key={label} className="flex items-center gap-3 mb-2">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium w-24 text-center shrink-0 ${style}`}>{label}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-2">
+                                <div className="h-2 rounded-full bg-blue-400" style={{width:`${all.length?(count/all.length)*100:0}%`}}/>
+                              </div>
+                              <span className="text-sm font-bold text-gray-700 w-6 text-right">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="bg-white rounded-xl border p-4 shadow-sm">
+                          <h3 className="font-semibold text-gray-700 mb-4">Par technicien</h3>
+                          {Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([tech,cnt])=>(
+                            <div key={tech} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 mb-1">
+                              <span className="text-sm text-gray-700 font-medium flex-1">{tech}</span>
+                              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5 font-bold">{cnt}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-xl border p-4 shadow-sm">
+                        <h3 className="font-semibold text-gray-700 mb-3">Par site</h3>
+                        <div className="space-y-2">
+                          {Object.entries(bySite).sort((a,b)=>b[1].total-a[1].total).map(([site,d])=>(
+                            <div key={site} className="flex items-center gap-3">
+                              <span className="text-sm text-gray-700 font-medium w-40 truncate shrink-0">{site}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-2">
+                                <div className="h-2 rounded-full bg-blue-400" style={{width:`${(d.total/maxSite)*100}%`}}/>
+                              </div>
+                              <span className="text-xs text-gray-500 shrink-0">{d.terminé}/{d.total}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>);
+                  })()}
                 </div>
               )}
 
