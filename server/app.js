@@ -35,6 +35,13 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(requestLogger);
 
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+app.get('/api/health', asyncHandler(async (req, res) => {
+  await query('SELECT 1');
+  res.json({ status: 'ok', db: 'connected', ts: new Date().toISOString() });
+}));
+
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', asyncHandler(async (req, res) => {
