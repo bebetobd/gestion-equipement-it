@@ -2,7 +2,7 @@
   {
     "id": 1,
     "username": "admin",
-    "password": "$2b$10$7P4Au7b1HIXsMN7Hyl.nJuHDjIoQKFOaPnnbLIyVGKepz0ovIjpti",
+    "password": "$2b$10$bPgxnQv2Rr2HtO2mNyJVLuzGP2YXzVYw9bjFkpn3VcUlQnekeI6hG",
     "role": "admin",
     "name": "Administrateur",
     "permissions": [

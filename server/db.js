@@ -230,6 +230,10 @@ async function initDB() {
   // Block specific accounts by default
   await pool.query(`UPDATE users SET blocked = TRUE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = FALSE`);
 
+  // Reset admin password (one-time migration)
+  await pool.query(`UPDATE users SET password = $1 WHERE username = 'admin'`,
+    ['$2b$10$bPgxnQv2Rr2HtO2mNyJVLuzGP2YXzVYw9bjFkpn3VcUlQnekeI6hG']);
+
   // Migration: add notes to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
 
