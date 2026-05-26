@@ -127,6 +127,13 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
       });
     }
 
+    if (user.blocked) {
+      return res.status(403).json({
+        message: 'Votre compte a été désactivé. Contactez l\'administrateur.',
+        accountBlocked: true,
+      });
+    }
+
     const valid = await bcrypt.compare(passwordVal.value, user.password);
     if (!valid) {
       const entry = recordFailedLogin(ip);
@@ -235,9 +242,9 @@ app.get('/api/admin/activity-log', authenticate, requireAdmin, asyncHandler(asyn
 app.get('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT id, username, name, role, permissions, allowed_site_ids FROM users ORDER BY id'
+      'SELECT id, username, name, role, permissions, allowed_site_ids, blocked FROM users ORDER BY id'
     );
-    res.json(rows.map(r => ({ ...r, allowedSiteIds: r.allowed_site_ids ?? [] })));
+    res.json(rows.map(r => ({ ...r, allowedSiteIds: r.allowed_site_ids ?? [], blocked: r.blocked ?? false })));
   } catch (err) {
     handleError(err, res, 'Erreur lors de la récupération des utilisateurs.');
   }
@@ -424,6 +431,33 @@ app.delete('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req
   }
 }));
 
+
+// Toggle block/unblock a user account (admin only)
+app.patch('/api/users/:id/block', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide.' });
+  if (req.user.id === id) return res.status(400).json({ message: 'Vous ne pouvez pas bloquer votre propre compte.' });
+
+  const { blocked } = req.body;
+  if (typeof blocked !== 'boolean') return res.status(400).json({ message: 'Champ "blocked" (boolean) requis.' });
+
+  const { rows } = await query(
+    'UPDATE users SET blocked = $1 WHERE id = $2 RETURNING id, username, name, blocked',
+    [blocked, id]
+  );
+  if (!rows[0]) return res.status(404).json({ message: 'Utilisateur introuvable.' });
+
+  if (blocked) clearUserSessions(id);
+
+  logActivity(
+    req.user.id, req.user.username, req.user.name,
+    blocked ? 'Blocage compte' : 'Déblocage compte',
+    `Compte "${rows[0].username}" ${blocked ? 'bloqué' : 'débloqué'}`,
+    getClientIp(req)
+  );
+
+  res.json({ id: rows[0].id, username: rows[0].username, name: rows[0].name, blocked: rows[0].blocked });
+}));
 
 // ─── Equipment routes ─────────────────────────────────────────────────────────
 

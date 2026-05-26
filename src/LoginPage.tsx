@@ -57,6 +57,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       });
       const data = await response.json();
 
+      if (response.status === 403 && data.accountBlocked) {
+        // Compte désactivé par l'administrateur
+        setError(data.message || 'Votre compte a été désactivé. Contactez l\'administrateur.');
+        return;
+      }
+
       if (response.status === 429 || data.blocked) {
         // Compte bloqué par le serveur
         const mins = data.minutesLeft ?? 15;

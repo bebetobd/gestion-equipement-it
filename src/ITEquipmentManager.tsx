@@ -5,7 +5,7 @@ import {
   XCircle, Info, Clock, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
-  MessageCircle, Send, X
+  MessageCircle, Send, X, Ban, ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -286,6 +286,7 @@ interface UserAccount {
   role: 'admin' | 'technicien' | 'user';
   permissions: string[];
   allowedSiteIds: number[];
+  blocked?: boolean;
 }
 
 interface UserFormData {
@@ -1197,6 +1198,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           await fetchUsers();
         } catch {
           setError('Impossible de supprimer l\'utilisateur.');
+        }
+      }
+    });
+  };
+
+  const handleToggleBlock = async (user: UserAccount) => {
+    const newBlocked = !user.blocked;
+    const label = newBlocked ? 'bloquer' : 'débloquer';
+    setConfirmModal({
+      message: `Êtes-vous sûr de vouloir ${label} le compte de "${user.name}" ?`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const res = await fetch(`${API_USERS}/${user.id}/block`, {
+            method: 'PATCH',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blocked: newBlocked }),
+          });
+          if (res.status === 401) { handleUnauthorized(); return; }
+          if (!res.ok) throw new Error();
+          await fetchUsers();
+        } catch {
+          setError(`Impossible de ${label} le compte.`);
         }
       }
     });
@@ -5285,8 +5309,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {userAccounts.map((user) => {
                     const info = roleDisplay[user.role] ?? { label: user.role, classes: 'bg-gray-100 text-gray-700' };
                     return (
-                      <tr key={user.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-900 font-mono">{user.username}</td>
+                      <tr key={user.id} className={`hover:bg-gray-50 ${user.blocked ? 'bg-red-50/40' : ''}`}>
+                        <td className="px-4 py-3 text-sm font-mono">
+                          <span className={user.blocked ? 'text-red-500 line-through' : 'text-gray-900'}>{user.username}</span>
+                          {user.blocked && <span className="ml-2 rounded-full px-1.5 py-0.5 text-xs font-semibold bg-red-100 text-red-600">Bloqué</span>}
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-900">{user.name}</td>
                         <td className="px-4 py-3">
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${info.classes}`}>{info.label}</span>
@@ -5334,6 +5361,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             <button onClick={() => openUserEdit(user)} className="text-indigo-600 hover:text-indigo-900" title="Modifier identité">
                               <Edit className="w-4 h-4" />
                             </button>
+                            {user.id !== currentUser.id && (
+                              <button
+                                onClick={() => handleToggleBlock(user)}
+                                className={user.blocked ? 'text-green-600 hover:text-green-800' : 'text-orange-500 hover:text-orange-700'}
+                                title={user.blocked ? 'Débloquer le compte' : 'Bloquer le compte'}
+                              >
+                                {user.blocked ? <ShieldCheck className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                              </button>
+                            )}
                             {user.id !== currentUser.id && (
                               <button onClick={() => handleDeleteUser(user.id)} className="text-red-600 hover:text-red-900" title="Supprimer">
                                 <Trash2 className="w-4 h-4" />

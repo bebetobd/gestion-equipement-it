@@ -225,6 +225,11 @@ async function initDB() {
   // Migration: add allowed_site_ids to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_site_ids INTEGER[] NOT NULL DEFAULT '{}'`);
 
+  // Migration: add blocked flag to users
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
+  // Block specific accounts by default
+  await pool.query(`UPDATE users SET blocked = TRUE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = FALSE`);
+
   // Migration: add notes to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
 
