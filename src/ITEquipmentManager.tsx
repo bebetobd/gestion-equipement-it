@@ -5,7 +5,7 @@ import {
   XCircle, Info, Clock, Download, ChevronDown,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
-  MessageCircle, Send
+  MessageCircle, Send, X
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -479,7 +479,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // Sites
   const [sites, setSites] = useState<Site[]>([]);
-  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
   const [showSiteModal, setShowSiteModal] = useState(false);
   const defaultSiteForm: SiteForm = { name: '', city: '', country: '', address: '', description: '' };
   const [siteForm, setSiteForm] = useState<SiteForm>(defaultSiteForm);
@@ -1211,7 +1211,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Auto-select site when user has exactly one allowed site
   useEffect(() => {
     if (userAllowedSiteIds.length === 1 && sites.length > 0) {
-      setSelectedSiteId(userAllowedSiteIds[0]);
+      setSelectedSiteIds([userAllowedSiteIds[0]]);
     }
   }, [sites, userAllowedSiteIds.length]);
 
@@ -1255,6 +1255,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const timer = setTimeout(() => fetchReportBySite(), 500);
     return () => clearTimeout(timer);
   }, [reportSiteFrom, reportSiteTo, reportSiteTypeFilter, showReportsModal, reportsTab]);
+
+  // Auto-refresh dashboard data every 60 s (équipements + maintenance count)
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchEquipments();
+      fetchMaintenance(maintenanceFilter);
+    }, 60000);
+    return () => clearInterval(id);
+  }, [maintenanceFilter]);
 
   // Chat: load users and groups once on mount
   useEffect(() => { fetchChatUsers(); fetchChatGroups(); }, []);
@@ -1325,7 +1334,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openNewEquipmentForm = () => {
     resetForm();
-    if (selectedSiteId) setFormData(prev => ({ ...prev, siteId: selectedSiteId }));
+    if (selectedSiteIds.length === 1) setFormData(prev => ({ ...prev, siteId: selectedSiteIds[0] }));
     setShowForm(true);
   };
 
@@ -1616,7 +1625,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         try {
           const r = await fetch(`${API_BASE_URL}/api/sites/${id}`, { method: 'DELETE', headers: authHeaders() });
           if (!r.ok) { const d = await r.json(); setToast({ message: d.message, type: 'error' }); return; }
-          if (selectedSiteId === id) setSelectedSiteId(null);
+          setSelectedSiteIds(prev => prev.filter(s => s !== id));
           await fetchSites();
         } catch { setToast({ message: 'Erreur réseau.', type: 'error' }); }
       }
@@ -2005,7 +2014,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
     const matchesType   = filterType   === 'all' || equipment.type   === filterType;
     const matchesStatus = filterStatus === 'all' || equipment.status === filterStatus;
-    const matchesSite   = selectedSiteId === null || equipment.siteId === selectedSiteId;
+    const matchesSite   = selectedSiteIds.length === 0 || (equipment.siteId != null && selectedSiteIds.includes(equipment.siteId as number));
 
     return matchesSearch && matchesType && matchesStatus && matchesSite;
   });
@@ -2185,56 +2194,85 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               ) : null;
             })() : (
-            /* Plusieurs sites ou admin → dropdown */
-            <div className="relative flex-1 max-w-sm" ref={siteDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setShowSiteDropdown(v => !v)}
-                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 text-left hover:border-indigo-400 hover:shadow-md transition-all"
-              >
-                <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  {selectedSiteId === null ? (
-                    <span className="text-sm text-gray-400">— Sélectionner un site —</span>
-                  ) : (() => {
-                    const s = sites.find(s => s.id === selectedSiteId);
-                    return s ? (
-                      <>
-                        <span className="text-sm font-semibold text-gray-800 block truncate">{s.name}</span>
-                        <span className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {equipments.filter(e => e.siteId === s.id).length} équip.</span>
-                      </>
-                    ) : null;
-                  })()}
-                </div>
-                <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showSiteDropdown ? 'rotate-180' : ''}`} />
-              </button>
-
-              {showSiteDropdown && (
-                <div className="absolute left-0 top-full mt-1 w-full min-w-[260px] bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
-                  {(isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id))).map(site => {
-                    const count = equipments.filter(e => e.siteId === site.id).length;
-                    const selected = selectedSiteId === site.id;
+            /* Plusieurs sites ou admin → multi-select avec chips */
+            <div className="flex-1" ref={siteDropdownRef}>
+              {/* Chips des sites sélectionnés */}
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                {selectedSiteIds.length === 0 ? (
+                  <span className="text-xs text-gray-400 italic">Tous les sites affichés</span>
+                ) : (
+                  selectedSiteIds.map(id => {
+                    const s = sites.find(s => s.id === id);
+                    if (!s) return null;
                     return (
-                      <button key={site.id} type="button"
-                        onClick={() => { setSelectedSiteId(site.id); setShowVisitSiteDropdown(false); }}
-                        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
-                      >
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${selected ? 'bg-indigo-500' : 'bg-gray-200'}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${selected ? 'text-indigo-700' : 'text-gray-800'}`}>{site.name}</p>
-                          <p className="text-xs text-gray-400 flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
-                          </p>
-                        </div>
-                        {selected && <CheckCircle className="w-4 h-4 text-indigo-500 shrink-0" />}
-                      </button>
+                      <span key={id} className="inline-flex items-center gap-1 bg-indigo-100 text-indigo-700 text-xs font-medium px-3 py-1 rounded-full">
+                        {s.name}
+                        <button type="button" onClick={() => setSelectedSiteIds(prev => prev.filter(i => i !== id))}
+                          className="ml-1 hover:text-indigo-900 transition-colors">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
                     );
-                  })}
-                  {sites.length === 0 && (
-                    <p className="px-4 py-3 text-sm text-gray-400 text-center">Aucun site configuré.</p>
-                  )}
-                </div>
-              )}
+                  })
+                )}
+                {selectedSiteIds.length > 0 && (
+                  <button type="button" onClick={() => setSelectedSiteIds([])}
+                    className="text-xs text-gray-400 hover:text-red-500 underline transition-colors">
+                    Tout désélectionner
+                  </button>
+                )}
+              </div>
+
+              {/* Bouton ouverture dropdown */}
+              <div className="relative">
+                <button type="button" onClick={() => setShowSiteDropdown(v => !v)}
+                  className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-2.5 text-sm text-gray-700 hover:border-indigo-400 hover:shadow-md transition-all">
+                  <Globe className="w-4 h-4 text-indigo-500" />
+                  Filtrer par site
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSiteDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showSiteDropdown && (
+                  <div className="absolute left-0 top-full mt-1 min-w-[280px] bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
+                    {/* Tout sélectionner / désélectionner */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sites disponibles</span>
+                      <button type="button"
+                        onClick={() => {
+                          const available = isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id));
+                          setSelectedSiteIds(selectedSiteIds.length === available.length ? [] : available.map(s => s.id));
+                        }}
+                        className="text-xs text-indigo-600 hover:underline font-medium">
+                        {selectedSiteIds.length === (isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id))).length
+                          ? 'Tout désélectionner' : 'Tout sélectionner'}
+                      </button>
+                    </div>
+
+                    {(isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id))).map(site => {
+                      const count = equipments.filter(e => e.siteId === site.id).length;
+                      const selected = selectedSiteIds.includes(site.id);
+                      return (
+                        <button key={site.id} type="button"
+                          onClick={() => setSelectedSiteIds(prev => selected ? prev.filter(i => i !== site.id) : [...prev, site.id])}
+                          className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'}`}>
+                            {selected && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium truncate ${selected ? 'text-indigo-700' : 'text-gray-800'}`}>{site.name}</p>
+                            <p className="text-xs text-gray-400 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {sites.length === 0 && (
+                      <p className="px-4 py-3 text-sm text-gray-400 text-center">Aucun site configuré.</p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             )}
 
@@ -2259,7 +2297,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             </div>
             <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-              {selectedSiteId ? `Site sélectionné` : 'Tous les sites'}
+              {selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) filtré(s)` : 'Tous les sites'}
             </div>
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -2409,7 +2447,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
         {loading ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center text-gray-400">Chargement des données…</div>
-        ) : sites.length > 0 && selectedSiteId === null ? (
+        ) : false ? (
           <div className="bg-white rounded-lg shadow-sm p-16 flex flex-col items-center justify-center text-center">
             <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
               <Globe className="w-8 h-8 text-indigo-400" />
@@ -4092,7 +4130,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         {/* Timeline */}
                         <div className="relative pl-6 space-y-0">
                           <div className="absolute left-2 top-0 bottom-0 w-0.5 bg-gray-200" />
-                          {reportHistory.map((ev, i) => {
+                          {reportHistory.map((ev) => {
                             const style = getEventActionStyle(ev.action);
                             return (
                               <div key={ev.id} className="relative pb-6">
