@@ -78,6 +78,241 @@ function recordFailedLogin(ip) {
 app.use(express.json({ limit: '10mb' }));
 app.use(requestLogger);
 
+// ─── API Portal (page HTML d'authentification) ────────────────────────────────
+
+app.get(['/api', '/api/'], (req, res) => {
+  // If the client explicitly wants JSON, return a brief info object
+  if (req.headers.accept?.includes('application/json')) {
+    return res.json({ name: 'Gestion Équipements IT — API', version: '1.0', auth: '/api/auth/login' });
+  }
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>API · Gestion Équipements IT</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;
+       background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#312e81 100%);
+       display:flex;align-items:center;justify-content:center;padding:1rem;color:#f1f5f9}
+  .card{background:#fff;border-radius:1.25rem;box-shadow:0 25px 50px rgba(0,0,0,.4);
+        width:100%;max-width:520px;overflow:hidden}
+  .header{background:linear-gradient(135deg,#1e40af,#4338ca);padding:1.5rem 2rem;
+          display:flex;align-items:center;gap:.875rem}
+  .icon{width:2.75rem;height:2.75rem;background:rgba(255,255,255,.15);border-radius:.75rem;
+        display:flex;align-items:center;justify-content:center;font-size:1.375rem;flex-shrink:0}
+  .header h1{font-size:1.125rem;font-weight:700;color:#fff}
+  .header p{font-size:.75rem;color:#bfdbfe;margin-top:.1rem}
+  .body{padding:1.75rem 2rem}
+  label{display:block;font-size:.8125rem;font-weight:600;color:#374151;margin-bottom:.375rem}
+  .input-wrap{position:relative;margin-bottom:1rem}
+  .input-wrap svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
+                  width:1rem;height:1rem;color:#9ca3af;pointer-events:none}
+  input{width:100%;padding:.625rem .875rem .625rem 2.375rem;border:1.5px solid #d1d5db;
+        border-radius:.625rem;font-size:.875rem;outline:none;transition:border .15s,box-shadow .15s;color:#111}
+  input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+  .eye{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);
+       background:none;border:none;cursor:pointer;color:#9ca3af;padding:.125rem}
+  .btn{width:100%;padding:.75rem;background:#2563eb;color:#fff;border:none;
+       border-radius:.625rem;font-size:.9375rem;font-weight:600;cursor:pointer;
+       transition:background .15s;display:flex;align-items:center;justify-content:center;gap:.5rem}
+  .btn:hover:not(:disabled){background:#1d4ed8}
+  .btn:disabled{background:#9ca3af;cursor:not-allowed}
+  .error{background:#fef2f2;border:1px solid #fecaca;border-radius:.625rem;
+         padding:.75rem 1rem;font-size:.8125rem;color:#b91c1c;margin-bottom:1rem}
+  .success{display:none;margin-top:1.25rem}
+  .success.show{display:block}
+  .token-box{background:#0f172a;border-radius:.75rem;padding:1rem;margin-bottom:1rem;
+             font-family:'Courier New',monospace;font-size:.6875rem;color:#34d399;
+             word-break:break-all;line-height:1.6;position:relative}
+  .copy-btn{position:absolute;top:.5rem;right:.5rem;background:#1e3a5f;border:none;
+            border-radius:.375rem;color:#93c5fd;font-size:.6875rem;padding:.25rem .625rem;
+            cursor:pointer;transition:background .15s}
+  .copy-btn:hover{background:#1e40af}
+  .user-info{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:.625rem;
+             padding:.875rem 1rem;margin-bottom:1rem;font-size:.8125rem}
+  .user-info strong{color:#166534;font-size:.875rem;display:block;margin-bottom:.25rem}
+  .user-info span{color:#15803d}
+  .badge{display:inline-flex;align-items:center;background:#dbeafe;color:#1d4ed8;
+         border-radius:999px;padding:.125rem .625rem;font-size:.6875rem;font-weight:600;margin:.125rem}
+  .endpoints{margin-top:1rem}
+  .endpoints h3{font-size:.8125rem;font-weight:700;color:#6b7280;text-transform:uppercase;
+                letter-spacing:.05em;margin-bottom:.625rem}
+  .ep{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:.5rem;
+      background:#f8fafc;margin-bottom:.375rem;font-size:.75rem}
+  .ep .method{font-family:monospace;font-weight:700;min-width:2.75rem;font-size:.6875rem}
+  .method.get{color:#059669}.method.post{color:#d97706}.method.put{color:#7c3aed}
+  .method.patch{color:#0284c7}.method.delete{color:#dc2626}
+  .ep .path{font-family:'Courier New',monospace;color:#374151;flex:1}
+  .ep .desc{color:#6b7280;font-size:.6875rem}
+  .open-app{display:block;text-align:center;margin-top:1.25rem;padding:.625rem;
+            background:#eff6ff;border:1px solid #bfdbfe;border-radius:.625rem;
+            color:#1d4ed8;font-size:.8125rem;font-weight:600;text-decoration:none;
+            transition:background .15s}
+  .open-app:hover{background:#dbeafe}
+  .footer{padding:.875rem 2rem;border-top:1px solid #f1f5f9;
+          font-size:.6875rem;color:#9ca3af;display:flex;justify-content:space-between;align-items:center}
+  .spin{width:1rem;height:1rem;border:2px solid rgba(255,255,255,.3);
+        border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .copied{color:#10b981!important;font-weight:700}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="icon">🖥️</div>
+    <div>
+      <h1>Gestion Équipements IT</h1>
+      <p>Portail d'accès à l'API REST</p>
+    </div>
+  </div>
+  <div class="body">
+    <div id="loginSection">
+      <div id="errMsg" class="error" style="display:none"></div>
+      <div class="input-wrap">
+        <label for="usr">Identifiant</label>
+        <div style="position:relative">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <input id="usr" type="text" placeholder="Votre identifiant" autocomplete="username" />
+        </div>
+      </div>
+      <div class="input-wrap">
+        <label for="pwd">Mot de passe</label>
+        <div style="position:relative">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input id="pwd" type="password" placeholder="Votre mot de passe" autocomplete="current-password" />
+          <button class="eye" id="eyeBtn" onclick="togglePwd()" tabindex="-1">
+            <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1rem;height:1rem"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <button class="btn" id="loginBtn" onclick="doLogin()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1rem;height:1rem"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Se connecter
+      </button>
+    </div>
+    <div class="success" id="successSection">
+      <div class="user-info" id="userInfo"></div>
+      <div class="token-box" id="tokenBox">
+        <button class="copy-btn" id="copyBtn" onclick="copyToken()">Copier</button>
+        <span id="tokenText"></span>
+      </div>
+      <div class="endpoints">
+        <h3>Endpoints disponibles</h3>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/health</span><span class="desc">Statut du serveur</span></div>
+        <div class="ep"><span class="method post">POST</span><span class="path">/api/auth/login</span><span class="desc">Authentification</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/auth/me</span><span class="desc">Profil utilisateur</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/equipments</span><span class="desc">Liste des équipements</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/sites</span><span class="desc">Liste des sites</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/maintenance</span><span class="desc">Fiches de maintenance</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/visits</span><span class="desc">Visites planifiées</span></div>
+        <div class="ep"><span class="method get">GET</span><span class="path">/api/users</span><span class="desc">Utilisateurs (admin)</span></div>
+      </div>
+      <a class="open-app" href="/">← Ouvrir l'application</a>
+      <button class="btn" onclick="doLogout()" style="margin-top:.75rem;background:#dc2626">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1rem;height:1rem"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Se déconnecter
+      </button>
+    </div>
+  </div>
+  <div class="footer">
+    <span>API v1.0 · Sécurisée JWT</span>
+    <span id="healthStatus">⬤ Vérification…</span>
+  </div>
+</div>
+
+<script>
+  const BASE = '';
+  let currentToken = null;
+
+  async function checkHealth() {
+    try {
+      const r = await fetch(BASE + '/api/health');
+      const d = await r.json();
+      document.getElementById('healthStatus').textContent = d.status === 'ok' ? '⬤ En ligne' : '⬤ Dégradé';
+      document.getElementById('healthStatus').style.color = d.status === 'ok' ? '#10b981' : '#f59e0b';
+    } catch {
+      document.getElementById('healthStatus').textContent = '⬤ Hors ligne';
+      document.getElementById('healthStatus').style.color = '#ef4444';
+    }
+  }
+
+  function togglePwd() {
+    const p = document.getElementById('pwd');
+    p.type = p.type === 'password' ? 'text' : 'password';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errMsg');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function hideError() { document.getElementById('errMsg').style.display = 'none'; }
+
+  async function doLogin() {
+    const u = document.getElementById('usr').value.trim();
+    const p = document.getElementById('pwd').value;
+    if (!u || !p) { showError('Veuillez remplir tous les champs.'); return; }
+    hideError();
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spin"></div> Connexion…';
+    try {
+      const r = await fetch(BASE + '/api/auth/login', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username:u, password:p})
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.message || 'Identifiants incorrects.'); return; }
+      currentToken = d.token;
+      document.getElementById('tokenText').textContent = d.token;
+      const perms = (d.user.permissions || []).map(p => '<span class="badge">'+p+'</span>').join('');
+      document.getElementById('userInfo').innerHTML =
+        '<strong>✓ Connecté en tant que ' + d.user.name + '</strong>' +
+        '<span>Rôle : <b>' + d.user.role + '</b> &nbsp;|&nbsp; Permissions : ' + (perms || '<em>aucune</em>') + '</span>';
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('successSection').classList.add('show');
+    } catch { showError('Impossible de joindre le serveur.'); }
+    finally { btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1rem;height:1rem"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Se connecter'; }
+  }
+
+  function copyToken() {
+    navigator.clipboard.writeText(currentToken || '').then(() => {
+      const b = document.getElementById('copyBtn');
+      b.textContent = '✓ Copié !';
+      b.classList.add('copied');
+      setTimeout(() => { b.textContent = 'Copier'; b.classList.remove('copied'); }, 2000);
+    });
+  }
+
+  async function doLogout() {
+    if (currentToken) {
+      await fetch(BASE + '/api/auth/logout', {method:'POST', headers:{Authorization:'Bearer '+currentToken}}).catch(()=>{});
+    }
+    currentToken = null;
+    document.getElementById('loginSection').style.display = 'block';
+    document.getElementById('successSection').classList.remove('show');
+    document.getElementById('usr').value = '';
+    document.getElementById('pwd').value = '';
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const ls = document.getElementById('loginSection');
+      if (ls.style.display !== 'none') doLogin();
+    }
+  });
+
+  checkHealth();
+</script>
+</body>
+</html>`);
+});
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 app.get('/api/health', asyncHandler(async (req, res) => {
