@@ -3083,8 +3083,86 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               const avgMs = resolved.length ? resolved.reduce((acc, m) => acc + (new Date(m.closedAt!).getTime() - new Date(m.openedAt).getTime()), 0) / resolved.length : 0;
               const avgH = Math.round(avgMs / 3600000);
               const prioColors: Record<string, string> = { critique: 'bg-red-500', haute: 'bg-orange-400', normale: 'bg-blue-400', basse: 'bg-gray-300' };
+              const exportMaintenanceExcel = () => {
+                const wb = XLSX.utils.book_new();
+                // Feuille résumé statut
+                const wsStatus = XLSX.utils.json_to_sheet(byStatus.map(r => ({ Statut: r.label, Nombre: r.count })));
+                XLSX.utils.book_append_sheet(wb, wsStatus, 'Par statut');
+                // Feuille par technicien
+                const wsTech = XLSX.utils.json_to_sheet(
+                  Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => ({
+                    Technicien: t, Total: d.total, Résolus: d.resolved,
+                    'Taux (%)': d.total ? Math.round((d.resolved / d.total) * 100) : 0,
+                  }))
+                );
+                XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
+                // Feuille par équipement
+                const wsEq = XLSX.utils.json_to_sheet(
+                  Object.entries(byEq).sort((a,b) => b[1] - a[1]).map(([eq, cnt]) => ({ Équipement: eq, Tickets: cnt }))
+                );
+                XLSX.utils.book_append_sheet(wb, wsEq, 'Par équipement');
+                // Feuille tous tickets
+                const wsAll = XLSX.utils.json_to_sheet(all.map(m => ({
+                  '#': m.id, Statut: maintenanceStatusLabel[m.status] ?? m.status,
+                  Priorité: m.priority, Équipement: m.equipmentName || '—',
+                  Technicien: m.technician || '—', Description: m.failureDesc,
+                  'Ouvert le': m.openedAt ? new Date(m.openedAt).toLocaleString('fr-FR') : '—',
+                  'Résolu le': m.closedAt ? new Date(m.closedAt).toLocaleString('fr-FR') : '—',
+                })));
+                XLSX.utils.book_append_sheet(wb, wsAll, 'Tous les tickets');
+                XLSX.writeFile(wb, `rapport-maintenance-${Date.now()}.xlsx`);
+              };
+
+              const exportMaintenancePdf = () => {
+                const doc = new jsPDF({ orientation: 'landscape' });
+                doc.setFontSize(16); doc.text('Rapport Maintenance', 14, 16);
+                doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${all.length} tickets`, 14, 23);
+                // Stats
+                doc.setFontSize(12); doc.text('Résumé', 14, 32);
+                autoTable(doc, {
+                  startY: 35,
+                  head: [['Statut', 'Nombre']],
+                  body: byStatus.map(r => [r.label, r.count]),
+                  theme: 'striped', headStyles: { fillColor: [234, 88, 12] },
+                });
+                // Par technicien
+                const y1 = (doc as any).lastAutoTable.finalY + 8;
+                doc.setFontSize(12); doc.text('Par technicien', 14, y1);
+                autoTable(doc, {
+                  startY: y1 + 3,
+                  head: [['Technicien', 'Total', 'Résolus', 'Taux (%)']],
+                  body: Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => [
+                    t, d.total, d.resolved, d.total ? Math.round((d.resolved / d.total) * 100) + '%' : '0%',
+                  ]),
+                  theme: 'striped', headStyles: { fillColor: [234, 88, 12] },
+                });
+                // Top équipements
+                const y2 = (doc as any).lastAutoTable.finalY + 8;
+                if (y2 < 180) {
+                  doc.setFontSize(12); doc.text('Top équipements en panne', 14, y2);
+                  autoTable(doc, {
+                    startY: y2 + 3,
+                    head: [['Équipement', 'Tickets']],
+                    body: Object.entries(byEq).sort((a,b) => b[1] - a[1]).slice(0, 10).map(([eq, cnt]) => [eq, cnt]),
+                    theme: 'striped', headStyles: { fillColor: [234, 88, 12] },
+                  });
+                }
+                doc.save(`rapport-maintenance-${Date.now()}.pdf`);
+              };
+
               return (
                 <div className="flex-1 overflow-auto px-6 pb-6 pt-4 space-y-6">
+                  {/* Boutons export */}
+                  <div className="flex justify-end gap-2">
+                    <button onClick={exportMaintenanceExcel}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                      <Download className="w-4 h-4 text-green-600" /> Excel
+                    </button>
+                    <button onClick={exportMaintenancePdf}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                      <Download className="w-4 h-4 text-red-500" /> PDF
+                    </button>
+                  </div>
                   {/* Stat cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {[
@@ -3609,8 +3687,78 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             const thisMonth = allTransfers.filter(t => new Date(t.createdAt) > new Date(Date.now() - 30*24*3600*1000)).length;
             const maxDept = Math.max(...Object.values(byDestDept), 1);
             const maxType = Math.max(...Object.values(byType), 1);
+            const exportTransferExcel = () => {
+              const wb = XLSX.utils.book_new();
+              const wsDept = XLSX.utils.json_to_sheet(
+                Object.entries(byDestDept).sort((a,b)=>b[1]-a[1]).map(([dept, cnt]) => ({ 'Service destination': dept, Transferts: cnt }))
+              );
+              XLSX.utils.book_append_sheet(wb, wsDept, 'Par service');
+              const wsType = XLSX.utils.json_to_sheet(
+                Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type, cnt]) => ({ 'Type équipement': type, Transferts: cnt }))
+              );
+              XLSX.utils.book_append_sheet(wb, wsType, 'Par type');
+              const wsTech = XLSX.utils.json_to_sheet(
+                Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([tech, cnt]) => ({ Technicien: tech, Transferts: cnt }))
+              );
+              XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
+              const wsAll = XLSX.utils.json_to_sheet(allTransfers.map(ev => {
+                const { fromDept, toDept } = getTransferLocations(ev);
+                return {
+                  Équipement: ev.equipmentName, Type: ev.equipmentType,
+                  'Service source': fromDept || '—', 'Service destination': toDept || '—',
+                  Technicien: ev.technician || ev.userName,
+                  Date: new Date(ev.createdAt).toLocaleDateString('fr-FR'),
+                };
+              }));
+              XLSX.utils.book_append_sheet(wb, wsAll, 'Tous les transferts');
+              XLSX.writeFile(wb, `rapport-transferts-${Date.now()}.xlsx`);
+            };
+
+            const exportTransferPdf = () => {
+              const doc = new jsPDF({ orientation: 'landscape' });
+              doc.setFontSize(16); doc.text('Rapport Transferts', 14, 16);
+              doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${allTransfers.length} transferts`, 14, 23);
+              doc.setFontSize(12); doc.text('Par service destination', 14, 32);
+              autoTable(doc, {
+                startY: 35,
+                head: [['Service destination', 'Transferts']],
+                body: Object.entries(byDestDept).sort((a,b)=>b[1]-a[1]).map(([d,c]) => [d,c]),
+                theme: 'striped', headStyles: { fillColor: [124, 58, 237] },
+              });
+              const y1 = (doc as any).lastAutoTable.finalY + 8;
+              doc.setFontSize(12); doc.text("Par type d'équipement", 14, y1);
+              autoTable(doc, {
+                startY: y1 + 3,
+                head: [["Type d'équipement", 'Transferts']],
+                body: Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,c]) => [t,c]),
+                theme: 'striped', headStyles: { fillColor: [124, 58, 237] },
+              });
+              const y2 = (doc as any).lastAutoTable.finalY + 8;
+              if (y2 < 180) {
+                doc.setFontSize(12); doc.text('Par technicien', 14, y2);
+                autoTable(doc, {
+                  startY: y2 + 3,
+                  head: [['Technicien', 'Transferts']],
+                  body: Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([t,c]) => [t,c]),
+                  theme: 'striped', headStyles: { fillColor: [124, 58, 237] },
+                });
+              }
+              doc.save(`rapport-transferts-${Date.now()}.pdf`);
+            };
+
             return (
               <div className="flex-1 overflow-auto px-6 pb-6 pt-4 space-y-6">
+                {/* Boutons export */}
+                <div className="flex justify-end gap-2">
+                  <button onClick={exportTransferExcel}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                    <Download className="w-4 h-4 text-green-600" /> Excel
+                  </button>
+                  <button onClick={exportTransferPdf}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                    <Download className="w-4 h-4 text-red-500" /> PDF
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
                     { label: 'Total transferts', value: allTransfers.length, color: 'text-purple-700' },
@@ -5845,8 +5993,86 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   'reporté':{label:'Reporté',cls:'bg-orange-100 text-orange-700'},
                   'annulé':{label:'Annulé',cls:'bg-red-100 text-red-700'},
                 };
+                const exportVisitsExcel = () => {
+                  const wb = XLSX.utils.book_new();
+                  // Par statut
+                  const wsStatus = XLSX.utils.json_to_sheet(byStatus.map(r => ({
+                    Statut: statusLabels[r.status]?.label ?? r.status, Nombre: r.count,
+                  })));
+                  XLSX.utils.book_append_sheet(wb, wsStatus, 'Par statut');
+                  // Par site
+                  const wsSite = XLSX.utils.json_to_sheet(bySite.map(r => ({
+                    Site: r.site, Total: r.total, Terminées: r.terminé,
+                    'Dernière visite': r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
+                  })));
+                  XLSX.utils.book_append_sheet(wb, wsSite, 'Par site');
+                  // Par technicien
+                  const wsTech = XLSX.utils.json_to_sheet(techRows.map(([t, cnt]) => ({ Technicien: t, Visites: cnt })));
+                  XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
+                  // Toutes les visites
+                  const wsAll = XLSX.utils.json_to_sheet(visits.map(v => ({
+                    '#': v.id, Site: v.siteName,
+                    Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'),
+                    Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status,
+                    Objectif: v.purpose, 'Avec maintenance': v.withMaintenance ? 'Oui' : 'Non',
+                    Commentaire: v.validationComment || '—', 'Validé par': v.validatedBy || '—',
+                    'Reporté au': v.rescheduledDate ? new Date(v.rescheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
+                  })));
+                  XLSX.utils.book_append_sheet(wb, wsAll, 'Toutes les visites');
+                  XLSX.writeFile(wb, `rapport-visites-${Date.now()}.xlsx`);
+                };
+
+                const exportVisitsPdf = () => {
+                  const doc = new jsPDF({ orientation: 'landscape' });
+                  doc.setFontSize(16); doc.text('Rapport Visites de site', 14, 16);
+                  doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${visits.length} visites`, 14, 23);
+                  // Par statut
+                  doc.setFontSize(12); doc.text('Répartition par statut', 14, 32);
+                  autoTable(doc, {
+                    startY: 35,
+                    head: [['Statut', 'Nombre']],
+                    body: byStatus.map(r => [statusLabels[r.status]?.label ?? r.status, r.count]),
+                    theme: 'striped', headStyles: { fillColor: [79, 70, 229] },
+                  });
+                  // Par site
+                  const y1 = (doc as any).lastAutoTable.finalY + 8;
+                  doc.setFontSize(12); doc.text('Visites par site', 14, y1);
+                  autoTable(doc, {
+                    startY: y1 + 3,
+                    head: [['Site', 'Total', 'Terminées', 'Dernière visite terminée']],
+                    body: bySite.map(r => [
+                      r.site, r.total, r.terminé,
+                      r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
+                    ]),
+                    theme: 'striped', headStyles: { fillColor: [79, 70, 229] },
+                  });
+                  // Par technicien
+                  const y2 = (doc as any).lastAutoTable.finalY + 8;
+                  if (y2 < 180) {
+                    doc.setFontSize(12); doc.text('Visites par technicien', 14, y2);
+                    autoTable(doc, {
+                      startY: y2 + 3,
+                      head: [['Technicien', 'Nombre de visites']],
+                      body: techRows.map(([t, cnt]) => [t, cnt]),
+                      theme: 'striped', headStyles: { fillColor: [79, 70, 229] },
+                    });
+                  }
+                  doc.save(`rapport-visites-${Date.now()}.pdf`);
+                };
+
                 return (
                   <div className="space-y-6 mt-2">
+                    {/* Boutons export */}
+                    <div className="flex justify-end gap-2">
+                      <button onClick={exportVisitsExcel}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                        <Download className="w-4 h-4 text-green-600" /> Excel
+                      </button>
+                      <button onClick={exportVisitsPdf}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                        <Download className="w-4 h-4 text-red-500" /> PDF
+                      </button>
+                    </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                       <h3 className="font-semibold text-gray-800 mb-3">Répartition par statut</h3>
                       <div className="flex flex-wrap gap-3">
