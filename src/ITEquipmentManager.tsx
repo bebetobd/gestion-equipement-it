@@ -598,7 +598,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         setShowModulesMenu(false);
       }
       if (siteDropdownRef.current && !siteDropdownRef.current.contains(e.target as Node)) {
-        setShowVisitSiteDropdown(false);
+        setShowSiteDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
