@@ -394,7 +394,6 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
       { expiresIn: jwtExpiresIn }
     );
 
-    const ip = getClientIp(req);
     const now = new Date().toISOString();
 
     // Clear old tokens
