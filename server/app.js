@@ -29,9 +29,52 @@ import {
 
 export const app = express();
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
+// ─── CORS restreint ────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'https://gestion-equipement-it.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://localhost:3000',
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // Postman / server-to-server
+    if (allowedOrigins.includes(origin) || /^https:\/\/gestion-equipement-[\w-]+\.vercel\.app$/.test(origin)) {
+      return cb(null, true);
+    }
+    cb(new Error('CORS: Origine non autorisée'));
+  },
+  credentials: true,
+}));
 
-app.use(cors());
+// ─── Rate limiting login ───────────────────────────────────────────────────────
+const loginAttempts = new Map(); // IP → { count, blockedUntil }
+const MAX_ATTEMPTS   = 5;
+const BLOCK_MS       = 15 * 60 * 1000; // 15 minutes
+
+function getRateLimit(ip) {
+  const now   = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry) return { blocked: false, remaining: MAX_ATTEMPTS };
+  if (entry.blockedUntil && now < entry.blockedUntil) {
+    return { blocked: true, minutesLeft: Math.ceil((entry.blockedUntil - now) / 60000) };
+  }
+  if (entry.blockedUntil && now >= entry.blockedUntil) {
+    loginAttempts.delete(ip);
+    return { blocked: false, remaining: MAX_ATTEMPTS };
+  }
+  return { blocked: false, remaining: MAX_ATTEMPTS - entry.count };
+}
+
+function recordFailedLogin(ip) {
+  const entry = loginAttempts.get(ip) ?? { count: 0, blockedUntil: null };
+  entry.count++;
+  if (entry.count >= MAX_ATTEMPTS) entry.blockedUntil = Date.now() + BLOCK_MS;
+  loginAttempts.set(ip, entry);
+  return entry;
+}
+
+// ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(requestLogger);
 
@@ -45,6 +88,18 @@ app.get('/api/health', asyncHandler(async (req, res) => {
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', asyncHandler(async (req, res) => {
+  const ip = getClientIp(req);
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  const rate = getRateLimit(ip);
+  if (rate.blocked) {
+    return res.status(429).json({
+      message: `Trop de tentatives. Réessayez dans ${rate.minutesLeft} minute(s).`,
+      blocked: true,
+      minutesLeft: rate.minutesLeft,
+    });
+  }
+
   const { username, password } = req.body;
 
   // Validate inputs
@@ -63,13 +118,28 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
     const user = rows[0];
 
     if (!user) {
-      return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
+      const entry = recordFailedLogin(ip);
+      const remaining = Math.max(0, MAX_ATTEMPTS - entry.count);
+      return res.status(401).json({
+        message: 'Identifiant ou mot de passe incorrect.',
+        remaining,
+        blocked: entry.blockedUntil != null,
+      });
     }
 
     const valid = await bcrypt.compare(passwordVal.value, user.password);
     if (!valid) {
-      return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
+      const entry = recordFailedLogin(ip);
+      const remaining = Math.max(0, MAX_ATTEMPTS - entry.count);
+      return res.status(401).json({
+        message: 'Identifiant ou mot de passe incorrect.',
+        remaining,
+        blocked: entry.blockedUntil != null,
+      });
     }
+
+    // Connexion réussie → réinitialiser le compteur
+    loginAttempts.delete(ip);
 
     const permissions = user.permissions ?? [];
     const jwtSecret = process.env.JWT_SECRET || 'gestion-it-secret-2024';

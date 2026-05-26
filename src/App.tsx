@@ -17,13 +17,35 @@ const App = () => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(true);
 
+  const doLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setCurrentUser(null);
+  };
+
+  // ── Intercepteur global 401 : déconnexion automatique si token expiré ──────
+  useEffect(() => {
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await original(...args);
+      if (res.status === 401) {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
+        // Ne pas déconnecter sur la route login elle-même
+        if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me')) {
+          doLogout();
+        }
+      }
+      return res;
+    };
+    return () => { window.fetch = original; };
+  }, []);
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     const stored = localStorage.getItem('user');
     if (token && stored) {
       try {
         const user: AuthUser = JSON.parse(stored);
-        // Verify token is still valid against the server
         fetch(apiUrl('/api/auth/me'), {
           headers: { Authorization: `Bearer ${token}` }
         })
@@ -36,7 +58,7 @@ const App = () => {
             }
           })
           .catch(() => {
-            // Backend unreachable — trust stored user for now
+            // Backend injoignable — on fait confiance au token stocké
             setCurrentUser(user);
           })
           .finally(() => setChecking(false));
@@ -66,9 +88,7 @@ const App = () => {
         });
       } catch {}
     }
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setCurrentUser(null);
+    doLogout();
   };
 
   if (checking) {
