@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
-  XCircle, Info, Clock, Download, ChevronDown,
+  XCircle, Info, Clock, Download, ChevronDown, ChevronLeft, ChevronRight,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck
@@ -407,6 +407,54 @@ const Section = ({ icon, title, color, children }: { icon: React.ReactNode; titl
   );
 };
 
+const PAGE_SIZE = 50;
+
+function Pagination({ total, page, onChange }: { total: number; page: number; onChange: (p: number) => void }) {
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  if (total <= PAGE_SIZE) return null;
+  const from = (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
+
+  // Build page list with ellipsis
+  const raw: number[] = [];
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || (i >= page - 1 && i <= page + 1)) raw.push(i);
+  }
+  const items: (number | '…')[] = [];
+  let prev = 0;
+  for (const p of raw) {
+    if (prev && p - prev > 1) items.push('…');
+    items.push(p);
+    prev = p;
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-white text-xs select-none">
+      <span className="text-gray-400">{from}–{to} sur {total}</span>
+      <div className="flex items-center gap-0.5">
+        <button onClick={() => onChange(page - 1)} disabled={page === 1}
+          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        {items.map((p, i) =>
+          p === '…' ? (
+            <span key={`e${i}`} className="px-1 text-gray-400">…</span>
+          ) : (
+            <button key={p} onClick={() => onChange(p as number)}
+              className={`min-w-[1.75rem] h-7 rounded-lg font-medium transition ${p === page ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+              {p}
+            </button>
+          )
+        )}
+        <button onClick={() => onChange(page + 1)} disabled={page === totalPages}
+          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) => {
   const isAdmin = currentUser.role === 'admin';
   const roleInfo = roleDisplay[currentUser.role] ?? { label: currentUser.role, classes: 'bg-gray-100 text-gray-700' };
@@ -427,6 +475,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | EquipmentType>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | EquipmentStatus>('all');
+  const [equipPage, setEquipPage] = useState(1);
+  const [maintenancePage, setMaintenancePage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [formData, setFormData] = useState<EquipmentFormData>(defaultFormData);
@@ -1238,6 +1289,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       setSelectedSiteIds([userAllowedSiteIds[0]]);
     }
   }, [sites, userAllowedSiteIds.length]);
+
+  // Reset pages when filters change
+  useEffect(() => { setEquipPage(1); }, [searchTerm, filterType, filterStatus]);
+  useEffect(() => { setMaintenancePage(1); }, [maintenanceFilter]);
+  useEffect(() => { setActivityPage(1); }, [activityUserFilter]);
 
   // Load monitoring data when modal opens
   useEffect(() => {
@@ -2052,6 +2108,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const maintenanceCount = filteredEquipments.filter((equipment) => equipment.status === 'maintenance').length;
   const notVisitedCount = filteredEquipments.filter((equipment) => !equipment.visited).length;
 
+  const pagedEquipments   = filteredEquipments.slice((equipPage - 1) * PAGE_SIZE, equipPage * PAGE_SIZE);
+  const pagedMaintenance  = maintenanceRecords.slice((maintenancePage - 1) * PAGE_SIZE, maintenancePage * PAGE_SIZE);
+  const pagedActivityLogs = activityLogs.slice((activityPage - 1) * PAGE_SIZE, activityPage * PAGE_SIZE);
+
   return (
     <>
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
@@ -2494,7 +2554,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {filteredEquipments.map((equipment) => (
+                  {pagedEquipments.map((equipment) => (
                     <tr key={equipment.id} className="hover:bg-indigo-50/30 transition-colors border-b border-gray-50 last:border-0">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -2608,6 +2668,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   ))}
                 </tbody>
               </table>
+              <Pagination total={filteredEquipments.length} page={equipPage} onChange={setEquipPage} />
             </div>
           </div>
         )}
@@ -3296,7 +3357,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-100">
-                    {maintenanceRecords.map(ticket => (
+                    {pagedMaintenance.map(ticket => (
                       <div key={ticket.id} onClick={() => { setSelectedMaintenance(ticket); setShowMaintenanceForm(false); setShowNoteForm(false); setNoteText(''); }}
                         className={`p-4 cursor-pointer hover:bg-gray-50 transition ${selectedMaintenance?.id === ticket.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`}>
                         <div className="flex items-start justify-between gap-2 mb-1">
@@ -3316,6 +3377,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
                       </div>
                     ))}
+                    <Pagination total={maintenanceRecords.length} page={maintenancePage} onChange={setMaintenancePage} />
                   </div>
                 )}
               </div>
@@ -5235,7 +5297,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 bg-white">
-                          {activityLogs.map((entry) => (
+                          {pagedActivityLogs.map((entry) => (
                             <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
                               <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap font-mono">
                                 {formatDateTime(entry.timestamp)}
@@ -5255,6 +5317,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           ))}
                         </tbody>
                       </table>
+                      <Pagination total={activityLogs.length} page={activityPage} onChange={setActivityPage} />
                     </div>
                   )}
                 </div>
