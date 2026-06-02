@@ -338,6 +338,81 @@ async function initDB() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_licenses_expiry ON licenses(expiry_date)`);
 
+  // Coordonnées géographiques des sites (pour la carte)
+  await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION`);
+  await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION`);
+
+  // Contrats de maintenance
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_contracts (
+      id             SERIAL PRIMARY KEY,
+      title          VARCHAR(300) NOT NULL DEFAULT '',
+      vendor         VARCHAR(200) NOT NULL DEFAULT '',
+      contract_number VARCHAR(100) NOT NULL DEFAULT '',
+      site_id        INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+      equipment_ids  INTEGER[] NOT NULL DEFAULT '{}',
+      start_date     DATE,
+      end_date       DATE,
+      amount         NUMERIC(12,2),
+      currency       VARCHAR(10) NOT NULL DEFAULT 'XOF',
+      scope          TEXT NOT NULL DEFAULT '',
+      contact_name   VARCHAR(200) NOT NULL DEFAULT '',
+      contact_email  VARCHAR(200) NOT NULL DEFAULT '',
+      contact_phone  VARCHAR(50)  NOT NULL DEFAULT '',
+      status         VARCHAR(20)  NOT NULL DEFAULT 'actif',
+      notes          TEXT NOT NULL DEFAULT '',
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON maintenance_contracts(end_date)`);
+
+  // Demandes d'achat
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS purchase_requests (
+      id              SERIAL PRIMARY KEY,
+      title           VARCHAR(300) NOT NULL DEFAULT '',
+      equipment_type  VARCHAR(50)  NOT NULL DEFAULT 'ordinateur',
+      quantity        INTEGER      NOT NULL DEFAULT 1,
+      estimated_cost  NUMERIC(12,2),
+      currency        VARCHAR(10)  NOT NULL DEFAULT 'XOF',
+      priority        VARCHAR(20)  NOT NULL DEFAULT 'normale',
+      justification   TEXT NOT NULL DEFAULT '',
+      requested_by    VARCHAR(200) NOT NULL DEFAULT '',
+      department      VARCHAR(200) NOT NULL DEFAULT '',
+      site_id         INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+      status          VARCHAR(20)  NOT NULL DEFAULT 'en_attente',
+      approved_by     VARCHAR(200) NOT NULL DEFAULT '',
+      approved_at     TIMESTAMPTZ,
+      rejection_reason TEXT NOT NULL DEFAULT '',
+      notes           TEXT NOT NULL DEFAULT '',
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_status ON purchase_requests(status)`);
+
+  // Demandes RMA (retour garantie)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rma_requests (
+      id               SERIAL PRIMARY KEY,
+      equipment_id     INTEGER REFERENCES equipments(id) ON DELETE SET NULL,
+      equipment_name   VARCHAR(200) NOT NULL DEFAULT '',
+      serial_number    VARCHAR(100) NOT NULL DEFAULT '',
+      vendor           VARCHAR(200) NOT NULL DEFAULT '',
+      rma_number       VARCHAR(100) NOT NULL DEFAULT '',
+      reason           TEXT NOT NULL DEFAULT '',
+      shipped_date     DATE,
+      received_date    DATE,
+      resolution       TEXT NOT NULL DEFAULT '',
+      status           VARCHAR(20)  NOT NULL DEFAULT 'ouvert',
+      technician       VARCHAR(200) NOT NULL DEFAULT '',
+      notes            TEXT NOT NULL DEFAULT '',
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // Webhook Slack/Teams
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS slack_webhook TEXT NOT NULL DEFAULT ''`);
+
   initialized = true;
 }
 

@@ -1735,6 +1735,156 @@ app.post('/api/email/monthly-report', authenticate, requireAdmin, asyncHandler(a
   res.json({ sent: ok });
 }));
 
+// ─── Ping réseau ──────────────────────────────────────────────────────────────
+import { exec } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
+
+app.get('/api/ping/:ip', authenticate, asyncHandler(async (req, res) => {
+  const ip = req.params.ip;
+  if (!/^[\d.]+$/.test(ip) && !/^[a-zA-Z0-9.-]+$/.test(ip)) {
+    return res.status(400).json({ reachable: false, error: 'IP invalide' });
+  }
+  try {
+    const cmd = process.platform === 'win32' ? `ping -n 1 -w 1000 ${ip}` : `ping -c 1 -W 1 ${ip}`;
+    await execAsync(cmd, { timeout: 3000 });
+    res.json({ reachable: true, ip });
+  } catch {
+    res.json({ reachable: false, ip });
+  }
+}));
+
+// ─── Slack / Teams webhook ────────────────────────────────────────────────────
+app.post('/api/notify/webhook', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { webhookUrl, message } = req.body;
+  if (!webhookUrl || !message) return res.status(400).json({ message: 'webhookUrl et message requis' });
+  try {
+    const r = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message }),
+    });
+    res.json({ sent: r.ok, status: r.status });
+  } catch (e) {
+    res.json({ sent: false, error: e.message });
+  }
+}));
+
+// ─── Contrats de maintenance ──────────────────────────────────────────────────
+app.get('/api/contracts', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM maintenance_contracts ORDER BY end_date ASC NULLS LAST');
+  res.json(rows);
+}));
+app.post('/api/contracts', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const f = req.body;
+  const { rows } = await query(
+    `INSERT INTO maintenance_contracts (title,vendor,contract_number,site_id,equipment_ids,start_date,end_date,amount,currency,scope,contact_name,contact_email,contact_phone,status,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'']
+  );
+  res.status(201).json(rows[0]);
+}));
+app.put('/api/contracts/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const f = req.body;
+  const { rows } = await query(
+    `UPDATE maintenance_contracts SET title=$1,vendor=$2,contract_number=$3,site_id=$4,equipment_ids=$5,start_date=$6,end_date=$7,amount=$8,currency=$9,scope=$10,contact_name=$11,contact_email=$12,contact_phone=$13,status=$14,notes=$15 WHERE id=$16 RETURNING *`,
+    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'',req.params.id]
+  );
+  if (!rows.length) return res.status(404).json({ message: 'Contrat introuvable' });
+  res.json(rows[0]);
+}));
+app.delete('/api/contracts/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  await query('DELETE FROM maintenance_contracts WHERE id=$1', [req.params.id]);
+  res.status(204).end();
+}));
+
+// ─── Demandes d'achat ─────────────────────────────────────────────────────────
+app.get('/api/purchases', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM purchase_requests ORDER BY created_at DESC');
+  res.json(rows);
+}));
+app.post('/api/purchases', authenticate, asyncHandler(async (req, res) => {
+  const f = req.body;
+  const { rows } = await query(
+    `INSERT INTO purchase_requests (title,equipment_type,quantity,estimated_cost,currency,priority,justification,requested_by,department,site_id,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [f.title||'',f.equipmentType||'ordinateur',f.quantity||1,f.estimatedCost||null,f.currency||'XOF',f.priority||'normale',f.justification||'',f.requestedBy||req.user.name,f.department||'',f.siteId||null,f.notes||'']
+  );
+  res.status(201).json(rows[0]);
+}));
+app.patch('/api/purchases/:id/approve', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE purchase_requests SET status='approuvé', approved_by=$1, approved_at=NOW() WHERE id=$2 RETURNING *`,
+    [req.user.name, req.params.id]
+  );
+  res.json(rows[0]);
+}));
+app.patch('/api/purchases/:id/reject', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE purchase_requests SET status='rejeté', rejection_reason=$1, approved_by=$2 WHERE id=$3 RETURNING *`,
+    [req.body.reason||'', req.user.name, req.params.id]
+  );
+  res.json(rows[0]);
+}));
+app.delete('/api/purchases/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM purchase_requests WHERE id=$1', [req.params.id]);
+  res.status(204).end();
+}));
+
+// ─── RMA ──────────────────────────────────────────────────────────────────────
+app.get('/api/rma', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM rma_requests ORDER BY created_at DESC');
+  res.json(rows);
+}));
+app.post('/api/rma', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const f = req.body;
+  const { rows } = await query(
+    `INSERT INTO rma_requests (equipment_id,equipment_name,serial_number,vendor,rma_number,reason,shipped_date,received_date,resolution,status,technician,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'']
+  );
+  res.status(201).json(rows[0]);
+}));
+app.put('/api/rma/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const f = req.body;
+  const { rows } = await query(
+    `UPDATE rma_requests SET equipment_id=$1,equipment_name=$2,serial_number=$3,vendor=$4,rma_number=$5,reason=$6,shipped_date=$7,received_date=$8,resolution=$9,status=$10,technician=$11,notes=$12 WHERE id=$13 RETURNING *`,
+    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'',req.params.id]
+  );
+  res.json(rows[0]);
+}));
+app.delete('/api/rma/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  await query('DELETE FROM rma_requests WHERE id=$1', [req.params.id]);
+  res.status(204).end();
+}));
+
+// ─── Sites — mise à jour coordonnées GPS ──────────────────────────────────────
+app.patch('/api/sites/:id/coords', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { latitude, longitude } = req.body;
+  const { rows } = await query(
+    'UPDATE sites SET latitude=$1, longitude=$2 WHERE id=$3 RETURNING *',
+    [latitude, longitude, req.params.id]
+  );
+  res.json(rows[0]);
+}));
+
+// ─── Détection anomalies ──────────────────────────────────────────────────────
+app.get('/api/anomalies', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query(`
+    SELECT e.id, e.name, e.type, e.department, e.location,
+           COUNT(m.id)::int AS ticket_count,
+           MAX(m.opened_at) AS last_ticket
+    FROM equipments e
+    JOIN maintenance_records m ON m.equipment_id = e.id
+    WHERE m.opened_at >= NOW() - INTERVAL '6 months'
+    GROUP BY e.id, e.name, e.type, e.department, e.location
+    HAVING COUNT(m.id) >= 3
+    ORDER BY ticket_count DESC
+    LIMIT 20
+  `);
+  res.json(rows);
+}));
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {

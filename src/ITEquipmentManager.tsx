@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
@@ -13,6 +13,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Document as DocxDocument, Packer, Paragraph as DocxParagraph, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, TextRun, HeadingLevel, WidthType } from 'docx';
 import { QRCodeSVG } from 'qrcode.react';
+import JsBarcode from 'jsbarcode';
+import 'leaflet/dist/leaflet.css';
 
 interface AuthUser {
   id: number;
@@ -636,6 +638,142 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // ── QR Code ────────────────────────────────────────────────────────────────
   const [qrEquipment, setQrEquipment] = useState<Equipment | null>(null);
 
+  // ── Contrats de maintenance ────────────────────────────────────────────────
+  interface MaintenanceContract {
+    id: number; title: string; vendor: string; contract_number: string;
+    site_id: number | null; equipment_ids: number[]; start_date: string | null;
+    end_date: string | null; amount: number | null; currency: string;
+    scope: string; contact_name: string; contact_email: string; contact_phone: string;
+    status: string; notes: string; created_at: string;
+  }
+  const [showContractsModule, setShowContractsModule] = useState(false);
+  const [contracts, setContracts] = useState<MaintenanceContract[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
+  const [showContractForm, setShowContractForm] = useState(false);
+  const [editingContractId, setEditingContractId] = useState<number | null>(null);
+  const defaultContractForm = { title: '', vendor: '', contractNumber: '', siteId: null as number | null, equipmentIds: [] as number[], startDate: '', endDate: '', amount: '' as string, currency: 'XOF', scope: '', contactName: '', contactEmail: '', contactPhone: '', status: 'actif', notes: '' };
+  const [contractForm, setContractForm] = useState(defaultContractForm);
+
+  const fetchContracts = async () => { setContractsLoading(true); try { const r = await fetch(`${API_BASE_URL}/api/contracts`, { headers: authHeaders() }); if (r.ok) setContracts(await r.json()); } finally { setContractsLoading(false); } };
+  const saveContract = async () => {
+    const url = editingContractId ? `${API_BASE_URL}/api/contracts/${editingContractId}` : `${API_BASE_URL}/api/contracts`;
+    const r = await fetch(url, { method: editingContractId ? 'PUT' : 'POST', headers: authHeaders(), body: JSON.stringify(contractForm) });
+    if (r.ok) { const s = await r.json(); if (editingContractId) setContracts(p => p.map(c => c.id === s.id ? s : c)); else setContracts(p => [s, ...p]); setShowContractForm(false); setEditingContractId(null); setContractForm(defaultContractForm); }
+  };
+  const deleteContract = (id: number) => setConfirmModal({ message: 'Supprimer ce contrat ?', onConfirm: async () => { setConfirmModal(null); await fetch(`${API_BASE_URL}/api/contracts/${id}`, { method: 'DELETE', headers: authHeaders() }); setContracts(p => p.filter(c => c.id !== id)); } });
+
+  // ── Demandes d'achat ───────────────────────────────────────────────────────
+  interface PurchaseRequest {
+    id: number; title: string; equipment_type: string; quantity: number;
+    estimated_cost: number | null; currency: string; priority: string;
+    justification: string; requested_by: string; department: string;
+    site_id: number | null; status: string; approved_by: string;
+    approved_at: string | null; rejection_reason: string; notes: string; created_at: string;
+  }
+  const [showPurchasesModule, setShowPurchasesModule] = useState(false);
+  const [purchases, setPurchases] = useState<PurchaseRequest[]>([]);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+  const defaultPurchaseForm = { title: '', equipmentType: 'ordinateur', quantity: 1, estimatedCost: '' as string, currency: 'XOF', priority: 'normale', justification: '', requestedBy: currentUser.name, department: '', siteId: null as number | null, notes: '' };
+  const [purchaseForm, setPurchaseForm] = useState(defaultPurchaseForm);
+
+  const fetchPurchases = async () => { setPurchasesLoading(true); try { const r = await fetch(`${API_BASE_URL}/api/purchases`, { headers: authHeaders() }); if (r.ok) setPurchases(await r.json()); } finally { setPurchasesLoading(false); } };
+  const savePurchase = async () => { const r = await fetch(`${API_BASE_URL}/api/purchases`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(purchaseForm) }); if (r.ok) { const s = await r.json(); setPurchases(p => [s, ...p]); setShowPurchaseForm(false); setPurchaseForm(defaultPurchaseForm); } };
+  const approvePurchase = async (id: number) => { const r = await fetch(`${API_BASE_URL}/api/purchases/${id}/approve`, { method: 'PATCH', headers: authHeaders() }); if (r.ok) { const s = await r.json(); setPurchases(p => p.map(x => x.id === id ? s : x)); } };
+  const rejectPurchase = async (id: number, reason: string) => { const r = await fetch(`${API_BASE_URL}/api/purchases/${id}/reject`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ reason }) }); if (r.ok) { const s = await r.json(); setPurchases(p => p.map(x => x.id === id ? s : x)); } };
+
+  // ── RMA ────────────────────────────────────────────────────────────────────
+  interface RMARequest {
+    id: number; equipment_id: number | null; equipment_name: string;
+    serial_number: string; vendor: string; rma_number: string; reason: string;
+    shipped_date: string | null; received_date: string | null; resolution: string;
+    status: string; technician: string; notes: string; created_at: string;
+  }
+  const [showRMAModule, setShowRMAModule] = useState(false);
+  const [rmaRequests, setRMARequests] = useState<RMARequest[]>([]);
+  const [rmaLoading, setRMALoading] = useState(false);
+  const [showRMAForm, setShowRMAForm] = useState(false);
+  const [editingRMAId, setEditingRMAId] = useState<number | null>(null);
+  const defaultRMAForm = { equipmentId: null as number | null, equipmentName: '', serialNumber: '', vendor: '', rmaNumber: '', reason: '', shippedDate: '', receivedDate: '', resolution: '', status: 'ouvert', technician: currentUser.name, notes: '' };
+  const [rmaForm, setRMAForm] = useState(defaultRMAForm);
+
+  const fetchRMA = async () => { setRMALoading(true); try { const r = await fetch(`${API_BASE_URL}/api/rma`, { headers: authHeaders() }); if (r.ok) setRMARequests(await r.json()); } finally { setRMALoading(false); } };
+  const saveRMA = async () => {
+    const url = editingRMAId ? `${API_BASE_URL}/api/rma/${editingRMAId}` : `${API_BASE_URL}/api/rma`;
+    const r = await fetch(url, { method: editingRMAId ? 'PUT' : 'POST', headers: authHeaders(), body: JSON.stringify(rmaForm) });
+    if (r.ok) { const s = await r.json(); if (editingRMAId) setRMARequests(p => p.map(x => x.id === s.id ? s : x)); else setRMARequests(p => [s, ...p]); setShowRMAForm(false); setEditingRMAId(null); setRMAForm(defaultRMAForm); }
+  };
+
+  // ── Détection anomalies ────────────────────────────────────────────────────
+  interface AnomalyItem { id: number; name: string; type: string; department: string; location: string; ticket_count: number; last_ticket: string; }
+  const [showAnomalies, setShowAnomalies] = useState(false);
+  const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const fetchAnomalies = async () => { try { const r = await fetch(`${API_BASE_URL}/api/anomalies`, { headers: authHeaders() }); if (r.ok) setAnomalies(await r.json()); } catch {} };
+
+  // ── Ping réseau ────────────────────────────────────────────────────────────
+  const [pingResults, setPingResults] = useState<Record<number, boolean | null>>({});
+  const pingEquipment = async (id: number, ip: string) => {
+    if (!ip) return;
+    setPingResults(p => ({ ...p, [id]: null }));
+    try { const r = await fetch(`${API_BASE_URL}/api/ping/${ip}`, { headers: authHeaders() }); const d = await r.json(); setPingResults(p => ({ ...p, [id]: d.reachable })); } catch { setPingResults(p => ({ ...p, [id]: false })); }
+  };
+  const pingAllEquipments = () => { filteredEquipments.filter(e => e.ipAddress).forEach(e => pingEquipment(e.id, e.ipAddress)); };
+
+  // ── Slack/Teams webhook ────────────────────────────────────────────────────
+  const [slackWebhook, setSlackWebhook] = useState(() => localStorage.getItem('it-slack-webhook') || '');
+  const sendSlackNotif = async (message: string) => {
+    const wh = localStorage.getItem('it-slack-webhook');
+    if (!wh) return;
+    await fetch(`${API_BASE_URL}/api/notify/webhook`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ webhookUrl: wh, message }) }).catch(() => {});
+  };
+
+  // ── Dashboard TV ───────────────────────────────────────────────────────────
+  const [showTVDashboard, setShowTVDashboard] = useState(false);
+
+  // ── Mode kiosque ───────────────────────────────────────────────────────────
+  const [kioskMode, setKioskMode] = useState(false);
+
+  // ── Amortissement ──────────────────────────────────────────────────────────
+  const getDepreciation = (equipment: Equipment) => {
+    if (!equipment.purchaseDate) return null;
+    const years: Record<EquipmentType, number> = { ordinateur: 4, serveur: 5, reseau: 6, imprimante: 5, accessoires: 3, autre: 5 };
+    const lifespan = years[equipment.type] ?? 5;
+    const age = (Date.now() - new Date(equipment.purchaseDate).getTime()) / (365.25 * 86400000);
+    const pct = Math.max(0, Math.min(100, Math.round((1 - age / lifespan) * 100)));
+    return { age: age.toFixed(1), pct, status: pct > 60 ? 'bon' : pct > 30 ? 'moyen' : 'faible' };
+  };
+
+  // ── Inventaire physique ────────────────────────────────────────────────────
+  const [showInventory, setShowInventory] = useState(false);
+  const [inventoryScanned, setInventoryScanned] = useState<Set<number>>(new Set());
+  const [inventoryMissing, setInventoryMissing] = useState<Equipment[]>([]);
+
+  // ── Masquage données sensibles ─────────────────────────────────────────────
+  const [maskSensitive, setMaskSensitive] = useState(() => localStorage.getItem('it-mask-sensitive') === 'true');
+  const maskValue = (val: string) => maskSensitive && val ? '••••••••' : val;
+
+  // ── Settings webhook ───────────────────────────────────────────────────────
+  const [showSettings, setShowSettings] = useState(false);
+
+  // ── Code-barres ────────────────────────────────────────────────────────────
+  const [barcodeEquipment, setBarcodeEquipment] = useState<Equipment | null>(null);
+  const barcodeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const renderBarcode = useCallback((equipment: Equipment | null) => {
+    if (!equipment || !barcodeCanvasRef.current) return;
+    const value = equipment.serialNumber || equipment.name || String(equipment.id);
+    try {
+      JsBarcode(barcodeCanvasRef.current, value, {
+        format: 'CODE128', lineColor: '#000', width: 2, height: 60,
+        displayValue: true, fontSize: 12, margin: 10,
+      });
+    } catch {}
+  }, []);
+
+  // ── Carte des sites (Leaflet) ──────────────────────────────────────────────
+  const [showMap, setShowMap] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<any>(null);
+
   // ── Licences logicielles ───────────────────────────────────────────────────
   interface License {
     id: number; name: string; vendor: string; license_key: string;
@@ -705,6 +843,46 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       setToast({ message: 'Sauvegarde téléchargée', type: 'success' });
     } catch { setToast({ message: 'Erreur lors de la sauvegarde', type: 'error' }); }
+  };
+
+  // ── Fiche technique PDF ────────────────────────────────────────────────────
+  const generateEquipmentSheet = (e: Equipment) => {
+    const doc = new jsPDF();
+    doc.setFontSize(18); doc.setTextColor(26, 111, 166);
+    doc.text(`Fiche technique — ${e.name}`, 14, 20);
+    doc.setFontSize(10); doc.setTextColor(100);
+    doc.text(`Générée le ${new Date().toLocaleDateString('fr-FR')} par ${currentUser.name}`, 14, 28);
+    const deprec = getDepreciation(e);
+    autoTable(doc, {
+      startY: 35,
+      head: [['Champ', 'Valeur']],
+      body: [
+        ['Nom', e.name],
+        ['Type', e.type],
+        ['Marque', e.brand],
+        ['Modèle', e.model],
+        ['Numéro de série', maskValue(e.serialNumber) || '—'],
+        ['Adresse IP', maskValue(e.ipAddress) || '—'],
+        ['Statut', e.status],
+        ['Localisation', e.location],
+        ['Département', e.department],
+        ['Date d\'achat', e.purchaseDate || '—'],
+        ['Fin de garantie', e.warranty || '—'],
+        ['Dernière maintenance', e.lastMaintenance || '—'],
+        ['Technicien', e.technicianName || '—'],
+        ['Quantité', String(e.quantity)],
+        ...(deprec ? [['Amortissement', `${deprec.pct}% (${deprec.age} ans) — état ${deprec.status}`]] : []),
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [26, 111, 166] },
+    });
+    if (e.interventionDetails) {
+      const y = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(11); doc.setTextColor(26, 111, 166); doc.text('Détails intervention', 14, y);
+      doc.setFontSize(10); doc.setTextColor(60);
+      doc.text(doc.splitTextToSize(e.interventionDetails, 180), 14, y + 6);
+    }
+    doc.save(`fiche-${e.name.replace(/\s+/g, '-')}.pdf`);
   };
 
   // ── Template CSV ───────────────────────────────────────────────────────────
@@ -818,6 +996,38 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [sessionCountdown, setSessionCountdown] = useState(300);
   const lastActivityRef = useRef<number>(Date.now());
   const sessionWarningRef = useRef(false);
+
+  // Init Leaflet map when showMap becomes true
+  useEffect(() => {
+    if (!showMap || !mapContainerRef.current) return;
+    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
+    import('leaflet').then(L => {
+      const map = L.map(mapContainerRef.current!, { center: [8.0, 1.0], zoom: 5 });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+      // Fix default icon paths for Leaflet in Vite
+      const icon = L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png', shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+      const bounds: [number, number][] = [];
+      sites.forEach(s => {
+        const lat = (s as any).latitude; const lng = (s as any).longitude;
+        if (lat && lng) {
+          const eqCount = equipments.filter(e => e.siteId === s.id).length;
+          L.marker([lat, lng], { icon }).addTo(map)
+            .bindPopup(`<b>${s.name}</b><br>${s.city}${s.country ? ', ' + s.country : ''}<br>${eqCount} équipement(s)`);
+          bounds.push([lat, lng]);
+        }
+      });
+      if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
+      mapInstanceRef.current = map;
+    }).catch(() => {});
+    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
+  }, [showMap]);
+
+  // Render barcode when equipment changes
+  useEffect(() => {
+    if (barcodeEquipment) setTimeout(() => renderBarcode(barcodeEquipment), 50);
+  }, [barcodeEquipment]);
 
   // Apply dark mode class on html element
   useEffect(() => {
@@ -2411,6 +2621,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowTrends(false);
     setShowUnifiedCalendar(false);
     setShowMonthlyReport(false);
+    setShowContractsModule(false);
+    setShowPurchasesModule(false);
+    setShowRMAModule(false);
+    setShowAnomalies(false);
+    setShowInventory(false);
+    setShowTVDashboard(false);
+    setShowSettings(false);
   };
 
   const openMaintenanceModule = () => {
@@ -2731,6 +2948,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
             <LayoutGrid className="w-3.5 h-3.5 shrink-0" /> Calendrier
           </button>
+          <button type="button" onClick={() => setShowMap(true)}
+            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+            <MapPin className="w-3.5 h-3.5 shrink-0" /> Carte
+          </button>
           {isAdmin && (
             <>
               <button type="button" onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
@@ -2760,6 +2981,40 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
                 <Activity className="w-3.5 h-3.5 shrink-0" /> Tendances
               </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowContractsModule(true); fetchContracts(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" /> Contrats
+                {contracts.filter(c => c.end_date && new Date(c.end_date) < new Date(Date.now() + 30*86400000)).length > 0 && (
+                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-orange-400">{contracts.filter(c => c.end_date && new Date(c.end_date) < new Date(Date.now() + 30*86400000)).length}</span>
+                )}
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowPurchasesModule(true); fetchPurchases(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Plus className="w-3.5 h-3.5 shrink-0" /> Achats
+                {purchases.filter(p => p.status === 'en_attente').length > 0 && (
+                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-blue-400">{purchases.filter(p => p.status === 'en_attente').length}</span>
+                )}
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowRMAModule(true); fetchRMA(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> RMA
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowAnomalies(true); fetchAnomalies(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Anomalies
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowInventory(true); setInventoryScanned(new Set()); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <CheckCircle className="w-3.5 h-3.5 shrink-0" /> Inventaire
+              </button>
+              <button type="button" onClick={() => setShowTVDashboard(true)}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <LayoutList className="w-3.5 h-3.5 shrink-0" /> TV Dashboard
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowSettings(true); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Info className="w-3.5 h-3.5 shrink-0" /> Paramètres
+              </button>
               <button type="button" onClick={() => { closeAllModules(); setShowMonthlyReport(true); }}
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
                 <FileText className="w-3.5 h-3.5 shrink-0" /> Rapport mensuel
@@ -2784,6 +3039,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {(chatUnread.global + Object.values(chatUnread.dms).reduce((a,b)=>a+b,0) + Object.values(chatUnread.groups).reduce((a,b)=>a+b,0)) > 0 && (
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
             )}
+          </button>
+          {/* Ping all */}
+          <button onClick={pingAllEquipments}
+            className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors"
+            title="Vérifier connectivité réseau de tous les équipements">
+            <Wifi className="w-4 h-4" />
+          </button>
+          {/* Masquage données sensibles */}
+          <button onClick={() => { const v = !maskSensitive; setMaskSensitive(v); localStorage.setItem('it-mask-sensitive', String(v)); }}
+            className={`w-9 h-9 flex items-center justify-center rounded transition-colors ${maskSensitive ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/12'}`}
+            title={maskSensitive ? 'Afficher données sensibles' : 'Masquer données sensibles'}>
+            <Ban className="w-4 h-4" />
+          </button>
+          {/* Kiosque */}
+          <button onClick={() => setKioskMode(v => !v)}
+            className={`w-9 h-9 flex items-center justify-center rounded transition-colors ${kioskMode ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/12'}`}
+            title="Mode kiosque tablette">
+            <LayoutGrid className="w-4 h-4" />
           </button>
           {/* Scan QR */}
           <button onClick={startQrScan}
@@ -3460,6 +3733,20 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           >
                             <QrCode className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={() => setBarcodeEquipment(equipment)}
+                            className="text-purple-500 hover:text-purple-700"
+                            title="Code-barres"
+                          >
+                            <LayoutList className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => generateEquipmentSheet(equipment)}
+                            className="text-rose-500 hover:text-rose-700"
+                            title="Fiche technique PDF"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -3769,8 +4056,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       ['Localisation', selectedEquipment.location],
                       ['Département', selectedEquipment.department],
                       ['Statut', selectedEquipment.status],
-                      ['Adresse IP', selectedEquipment.ipAddress || 'N/A'],
-                      ['N° de série', selectedEquipment.serialNumber],
+                      ['Adresse IP', maskValue(selectedEquipment.ipAddress) || 'N/A'],
+                      ['N° de série', maskValue(selectedEquipment.serialNumber) || 'N/A'],
                       ['Date d\'achat', selectedEquipment.purchaseDate || 'N/A'],
                       ['Garantie', selectedEquipment.warranty || 'N/A'],
                       ['Dernière maintenance', selectedEquipment.lastMaintenance || 'N/A'],
@@ -3780,6 +4067,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <span>{value}</span>
                       </div>
                     ))}
+                    {/* Amortissement */}
+                    {(() => {
+                      const d = getDepreciation(selectedEquipment);
+                      if (!d) return null;
+                      const colors = { bon: 'bg-green-100 text-green-700', moyen: 'bg-yellow-100 text-yellow-700', faible: 'bg-red-100 text-red-700' };
+                      return (
+                        <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                          <p className="text-xs font-bold text-gray-600 mb-2">Amortissement ({d.age} ans)</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-2 bg-gray-200 rounded-full"><div className={`h-2 rounded-full ${d.pct > 60 ? 'bg-green-500' : d.pct > 30 ? 'bg-yellow-400' : 'bg-red-500'}`} style={{width:`${d.pct}%`}} /></div>
+                            <span className="text-sm font-bold text-gray-700 w-10 text-right">{d.pct}%</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${colors[d.status as keyof typeof colors]}`}>{d.status}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {/* Ping réseau */}
+                    {selectedEquipment.ipAddress && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <button onClick={() => pingEquipment(selectedEquipment.id, selectedEquipment.ipAddress)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors">
+                          <Wifi className="w-3.5 h-3.5" /> Ping {maskValue(selectedEquipment.ipAddress)}
+                        </button>
+                        {pingResults[selectedEquipment.id] !== undefined && (
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${pingResults[selectedEquipment.id] === null ? 'bg-gray-100 text-gray-500' : pingResults[selectedEquipment.id] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                            {pingResults[selectedEquipment.id] === null ? '⏳ Test…' : pingResults[selectedEquipment.id] ? '✓ En ligne' : '✗ Hors ligne'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {selectedEquipment.visited && (
                       <div className="border-t pt-3 mt-3 space-y-1">
                         <div className="flex gap-2"><span className="font-semibold w-44 shrink-0 text-gray-600">Technicien</span><span>{selectedEquipment.technicianName}</span></div>
@@ -9305,6 +9621,474 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 );
               })()}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Module Contrats de maintenance ══════════════════════════════════ */}
+      {showContractsModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-white" /></div>
+              <div><h2 className="text-base font-bold text-white">Contrats de maintenance</h2><p className="text-white/70 text-xs">{contracts.length} contrat(s) · {contracts.filter(c => c.end_date && new Date(c.end_date) < new Date()).length} expiré(s)</p></div>
+            </div>
+            <div className="flex gap-2">
+              {canWrite && <button onClick={() => { setContractForm(defaultContractForm); setEditingContractId(null); setShowContractForm(true); }} className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Nouveau</button>}
+              <button onClick={() => setShowContractsModule(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            {contractsLoading ? <div className="text-center py-16 text-gray-400">Chargement…</div> : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {contracts.map(c => {
+                  const expired = c.end_date && new Date(c.end_date) < new Date();
+                  const expiringSoon = c.end_date && !expired && (new Date(c.end_date).getTime() - Date.now()) < 30*86400000;
+                  return (
+                    <div key={c.id} className={`bg-white rounded-xl shadow-sm border p-4 ${expired ? 'border-red-200' : expiringSoon ? 'border-orange-200' : 'border-gray-100'}`}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div><p className="font-bold text-gray-900">{c.title}</p><p className="text-xs text-gray-500">{c.vendor} {c.contract_number && `· #${c.contract_number}`}</p></div>
+                        <div className="flex flex-col gap-1 items-end">
+                          {expired && <span className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">Expiré</span>}
+                          {expiringSoon && <span className="text-[10px] bg-orange-100 text-orange-700 font-bold px-1.5 py-0.5 rounded">Bientôt</span>}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${c.status === 'actif' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{c.status}</span>
+                        </div>
+                      </div>
+                      {c.scope && <p className="text-xs text-gray-600 mb-2 line-clamp-2">{c.scope}</p>}
+                      <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+                        {c.start_date && <span>Du {new Date(c.start_date).toLocaleDateString('fr-FR')}</span>}
+                        {c.end_date && <span className={expired ? 'text-red-600 font-bold' : expiringSoon ? 'text-orange-600 font-bold' : ''}>Au {new Date(c.end_date).toLocaleDateString('fr-FR')}</span>}
+                      </div>
+                      {c.amount && <p className="text-sm font-bold text-gray-700 mb-2">{Number(c.amount).toLocaleString('fr-FR')} {c.currency}</p>}
+                      {c.contact_name && <p className="text-xs text-gray-500">{c.contact_name} {c.contact_email && `· ${c.contact_email}`}</p>}
+                      {canModify && (
+                        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-50">
+                          <button onClick={() => { setContractForm({ title: c.title, vendor: c.vendor, contractNumber: c.contract_number, siteId: c.site_id, equipmentIds: c.equipment_ids, startDate: c.start_date || '', endDate: c.end_date || '', amount: c.amount ? String(c.amount) : '', currency: c.currency, scope: c.scope, contactName: c.contact_name, contactEmail: c.contact_email, contactPhone: c.contact_phone, status: c.status, notes: c.notes }); setEditingContractId(c.id); setShowContractForm(true); }}
+                            className="flex-1 text-xs text-[#1a6fa6] hover:text-[#0d4a73] font-medium flex items-center justify-center gap-1 py-1 rounded hover:bg-blue-50"><Edit className="w-3 h-3" /> Modifier</button>
+                          <button onClick={() => deleteContract(c.id)} className="flex-1 text-xs text-red-500 hover:text-red-700 font-medium flex items-center justify-center gap-1 py-1 rounded hover:bg-red-50"><Trash2 className="w-3 h-3" /> Supprimer</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {contracts.length === 0 && !contractsLoading && <div className="col-span-3 text-center py-16 text-gray-400"><ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>Aucun contrat</p></div>}
+              </div>
+            )}
+          </div>
+          {showContractForm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowContractForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto p-6">
+                <h3 className="font-bold text-gray-900 mb-4">{editingContractId ? 'Modifier' : 'Nouveau'} contrat</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {([['Titre *','title','text',true],['Prestataire','vendor','text',false],['N° contrat','contractNumber','text',false],['Montant','amount','number',false],['Devise','currency','text',false],['Début','startDate','date',false],['Fin','endDate','date',false],['Contact','contactName','text',false],['Email contact','contactEmail','email',false],['Tél. contact','contactPhone','text',false]] as const).map(([label, key, type, full]) => (
+                    <div key={key} className={full ? 'col-span-2' : ''}>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+                      <input type={type} value={(contractForm as any)[key]} onChange={e => setContractForm(f => ({ ...f, [key]: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+                    </div>
+                  ))}
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Périmètre / Description</label>
+                    <textarea rows={3} value={contractForm.scope} onChange={e => setContractForm(f => ({ ...f, scope: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] resize-none" />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={() => setShowContractForm(false)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">Annuler</button>
+                  <button onClick={saveContract} disabled={!contractForm.title.trim()} className="flex-1 py-2.5 bg-[#1a6fa6] text-white rounded-xl text-sm font-semibold hover:bg-[#155a8a] disabled:opacity-50">Enregistrer</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Module Demandes d'achat ═══════════════════════════════════════════ */}
+      {showPurchasesModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><Plus className="w-5 h-5 text-white" /></div>
+              <div><h2 className="text-base font-bold text-white">Demandes d'achat</h2><p className="text-white/70 text-xs">{purchases.filter(p => p.status === 'en_attente').length} en attente d'approbation</p></div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setPurchaseForm(defaultPurchaseForm); setShowPurchaseForm(true); }} className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Nouvelle demande</button>
+              <button onClick={() => setShowPurchasesModule(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            {purchasesLoading ? <div className="text-center py-16 text-gray-400">Chargement…</div> : (
+              <div className="space-y-3">
+                {(['en_attente','approuvé','rejeté'] as const).map(st => {
+                  const items = purchases.filter(p => p.status === st);
+                  if (items.length === 0) return null;
+                  const colors: Record<string,string> = { en_attente:'border-blue-200 bg-blue-50', approuvé:'border-green-200 bg-green-50', rejeté:'border-red-200 bg-red-50' };
+                  const labels: Record<string,string> = { en_attente:'En attente', approuvé:'Approuvées', rejeté:'Rejetées' };
+                  return (
+                    <div key={st}>
+                      <h3 className={`text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-lg inline-block mb-3 ${colors[st]}`}>{labels[st]} ({items.length})</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                        {items.map(p => (
+                          <div key={p.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <div><p className="font-bold text-gray-900">{p.title}</p><p className="text-xs text-gray-500">{p.requested_by} · {p.department}</p></div>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${p.priority === 'haute' ? 'bg-red-100 text-red-700' : p.priority === 'normale' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{p.priority}</span>
+                            </div>
+                            <p className="text-xs text-gray-600 mb-2">{p.quantity}× {p.equipment_type} {p.estimated_cost ? `· ${Number(p.estimated_cost).toLocaleString('fr-FR')} ${p.currency}` : ''}</p>
+                            {p.justification && <p className="text-xs text-gray-400 line-clamp-2 mb-2">{p.justification}</p>}
+                            {p.rejection_reason && <p className="text-xs text-red-500 mb-2">Motif : {p.rejection_reason}</p>}
+                            {isAdmin && p.status === 'en_attente' && (
+                              <div className="flex gap-2 pt-2 border-t border-gray-50">
+                                <button onClick={() => approvePurchase(p.id)} className="flex-1 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700"><CheckCircle className="w-3 h-3 inline mr-1" />Approuver</button>
+                                <button onClick={() => { const r = prompt('Motif du rejet :'); if (r !== null) rejectPurchase(p.id, r); }} className="flex-1 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600"><XCircle className="w-3 h-3 inline mr-1" />Rejeter</button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                {purchases.length === 0 && <div className="text-center py-16 text-gray-400"><Plus className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>Aucune demande d'achat</p></div>}
+              </div>
+            )}
+          </div>
+          {showPurchaseForm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowPurchaseForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto p-6">
+                <h3 className="font-bold text-gray-900 mb-4">Nouvelle demande d'achat</h3>
+                <div className="space-y-3">
+                  <div><label className="block text-xs font-semibold text-gray-600 mb-1">Titre *</label><input value={purchaseForm.title} onChange={e => setPurchaseForm(f => ({...f, title: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-xs font-semibold text-gray-600 mb-1">Type</label><select value={purchaseForm.equipmentType} onChange={e => setPurchaseForm(f => ({...f, equipmentType: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">{equipmentTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
+                    <div><label className="block text-xs font-semibold text-gray-600 mb-1">Quantité</label><input type="number" min={1} value={purchaseForm.quantity} onChange={e => setPurchaseForm(f => ({...f, quantity: parseInt(e.target.value)||1}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" /></div>
+                    <div><label className="block text-xs font-semibold text-gray-600 mb-1">Coût estimé</label><input type="number" value={purchaseForm.estimatedCost} onChange={e => setPurchaseForm(f => ({...f, estimatedCost: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" /></div>
+                    <div><label className="block text-xs font-semibold text-gray-600 mb-1">Priorité</label><select value={purchaseForm.priority} onChange={e => setPurchaseForm(f => ({...f, priority: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]"><option value="basse">Basse</option><option value="normale">Normale</option><option value="haute">Haute</option></select></div>
+                  </div>
+                  <div><label className="block text-xs font-semibold text-gray-600 mb-1">Justification</label><textarea rows={3} value={purchaseForm.justification} onChange={e => setPurchaseForm(f => ({...f, justification: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] resize-none" /></div>
+                  <div><label className="block text-xs font-semibold text-gray-600 mb-1">Département</label><input value={purchaseForm.department} onChange={e => setPurchaseForm(f => ({...f, department: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" /></div>
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={() => setShowPurchaseForm(false)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Annuler</button>
+                  <button onClick={savePurchase} disabled={!purchaseForm.title.trim()} className="flex-1 py-2.5 bg-[#1a6fa6] text-white rounded-xl text-sm font-semibold hover:bg-[#155a8a] disabled:opacity-50">Soumettre</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Module RMA ════════════════════════════════════════════════════════ */}
+      {showRMAModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><ArrowRightLeft className="w-5 h-5 text-white" /></div>
+              <div><h2 className="text-base font-bold text-white">Retours garantie (RMA)</h2><p className="text-white/70 text-xs">{rmaRequests.filter(r => r.status === 'ouvert').length} ouvert(s)</p></div>
+            </div>
+            <div className="flex gap-2">
+              {canWrite && <button onClick={() => { setRMAForm(defaultRMAForm); setEditingRMAId(null); setShowRMAForm(true); }} className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Nouveau RMA</button>}
+              <button onClick={() => setShowRMAModule(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            {rmaLoading ? <div className="text-center py-16 text-gray-400">Chargement…</div> : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-gray-100 bg-gray-50"><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Équipement</th><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Prestataire</th><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">N° RMA</th><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Statut</th><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Expédié</th><th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Reçu</th><th className="px-4 py-3" /></tr></thead>
+                  <tbody>
+                    {rmaRequests.map(r => (
+                      <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-4 py-3"><p className="font-medium text-gray-900">{r.equipment_name}</p><p className="text-xs text-gray-400">{maskValue(r.serial_number)}</p></td>
+                        <td className="px-4 py-3 text-gray-600">{r.vendor}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-600">{r.rma_number || '—'}</td>
+                        <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${r.status === 'ouvert' ? 'bg-blue-100 text-blue-700' : r.status === 'expédié' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{r.status}</span></td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{r.shipped_date ? new Date(r.shipped_date).toLocaleDateString('fr-FR') : '—'}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{r.received_date ? new Date(r.received_date).toLocaleDateString('fr-FR') : '—'}</td>
+                        <td className="px-4 py-3">
+                          {canModify && <button onClick={() => { setRMAForm({ equipmentId: r.equipment_id, equipmentName: r.equipment_name, serialNumber: r.serial_number, vendor: r.vendor, rmaNumber: r.rma_number, reason: r.reason, shippedDate: r.shipped_date||'', receivedDate: r.received_date||'', resolution: r.resolution, status: r.status, technician: r.technician, notes: r.notes }); setEditingRMAId(r.id); setShowRMAForm(true); }} className="text-xs text-[#1a6fa6] hover:underline"><Edit className="w-3.5 h-3.5" /></button>}
+                        </td>
+                      </tr>
+                    ))}
+                    {rmaRequests.length === 0 && <tr><td colSpan={7} className="text-center py-16 text-gray-400">Aucun RMA enregistré</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          {showRMAForm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowRMAForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto p-6">
+                <h3 className="font-bold text-gray-900 mb-4">{editingRMAId ? 'Modifier' : 'Nouveau'} RMA</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {[['Équipement','equipmentName','text'],['N° série','serialNumber','text'],['Prestataire','vendor','text'],['N° RMA','rmaNumber','text'],['Technicien','technician','text'],['Expédié le','shippedDate','date'],['Reçu le','receivedDate','date']].map(([l,k,t]) => (
+                    <div key={k}><label className="block text-xs font-semibold text-gray-600 mb-1">{l}</label><input type={t} value={(rmaForm as any)[k]} onChange={e => setRMAForm(f => ({...f, [k]: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" /></div>
+                  ))}
+                  <div><label className="block text-xs font-semibold text-gray-600 mb-1">Statut</label><select value={rmaForm.status} onChange={e => setRMAForm(f => ({...f, status: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]"><option value="ouvert">Ouvert</option><option value="expédié">Expédié</option><option value="résolu">Résolu</option></select></div>
+                  <div className="col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Raison</label><textarea rows={2} value={rmaForm.reason} onChange={e => setRMAForm(f => ({...f, reason: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] resize-none" /></div>
+                  <div className="col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Résolution</label><textarea rows={2} value={rmaForm.resolution} onChange={e => setRMAForm(f => ({...f, resolution: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] resize-none" /></div>
+                </div>
+                <div className="flex gap-3 mt-4"><button onClick={() => setShowRMAForm(false)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Annuler</button><button onClick={saveRMA} className="flex-1 py-2.5 bg-[#1a6fa6] text-white rounded-xl text-sm font-semibold hover:bg-[#155a8a]">Enregistrer</button></div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Module Anomalies ═════════════════════════════════════════════════ */}
+      {showAnomalies && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-white" /></div>
+              <div><h2 className="text-base font-bold text-white">Détection d'anomalies</h2><p className="text-white/70 text-xs">Équipements avec ≥ 3 pannes sur 6 mois</p></div>
+            </div>
+            <button onClick={() => setShowAnomalies(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            {anomalies.length === 0 ? (
+              <div className="text-center py-16">
+                <CheckCircle className="w-16 h-16 mx-auto text-green-400 mb-4" />
+                <p className="text-lg font-bold text-gray-700">Aucune anomalie détectée</p>
+                <p className="text-sm text-gray-400 mt-1">Tous vos équipements semblent normaux.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4">
+                  <p className="text-sm font-bold text-orange-800">{anomalies.length} équipement{anomalies.length > 1 ? 's' : ''} nécessite{anomalies.length === 1 ? '' : 'nt'} une attention particulière</p>
+                  <p className="text-xs text-orange-600 mt-0.5">Ces équipements ont subi ≥ 3 pannes ou maintenances ces 6 derniers mois.</p>
+                </div>
+                {anomalies.map(a => (
+                  <div key={a.id} className="bg-white rounded-xl shadow-sm border border-red-100 p-4 flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                      <span className="text-xl font-black text-red-600">{a.ticket_count}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-900">{a.name}</p>
+                      <p className="text-xs text-gray-500">{a.type} · {a.department} · {a.location}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Dernière panne : {a.last_ticket ? new Date(a.last_ticket).toLocaleDateString('fr-FR') : '—'}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-1 rounded-lg">{a.ticket_count} tickets</span>
+                      <button onClick={() => { setShowAnomalies(false); openMaintenanceModule(); }} className="block text-xs text-[#1a6fa6] hover:underline mt-1">Voir maintenance →</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Module Inventaire physique ════════════════════════════════════════ */}
+      {showInventory && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-white" /></div>
+              <div><h2 className="text-base font-bold text-white">Inventaire physique guidé</h2><p className="text-white/70 text-xs">{inventoryScanned.size}/{equipments.filter(e => e.status !== 'réformé').length} équipements scannés</p></div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setInventoryMissing(equipments.filter(e => e.status !== 'réformé' && !inventoryScanned.has(e.id))); }} className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Voir manquants</button>
+              <button onClick={() => setShowInventory(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="bg-white px-6 py-3 border-b border-gray-200">
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
+              <span>Progression</span>
+              <span className="font-bold">{Math.round(inventoryScanned.size / Math.max(1, equipments.filter(e => e.status !== 'réformé').length) * 100)}%</span>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full"><div className="h-2 bg-green-500 rounded-full transition-all" style={{width: `${Math.round(inventoryScanned.size / Math.max(1, equipments.filter(e => e.status !== 'réformé').length) * 100)}%`}} /></div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            {inventoryMissing.length > 0 && (
+              <div className="p-4 bg-red-50 border-b border-red-100">
+                <p className="text-sm font-bold text-red-700 mb-2">{inventoryMissing.length} équipement(s) non trouvé(s)</p>
+                <div className="flex flex-wrap gap-2">{inventoryMissing.map(e => <span key={e.id} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-lg">{e.name}</span>)}</div>
+              </div>
+            )}
+            <div className="divide-y divide-gray-100">
+              {equipments.filter(e => e.status !== 'réformé').map(e => {
+                const scanned = inventoryScanned.has(e.id);
+                return (
+                  <div key={e.id} className={`flex items-center gap-4 px-6 py-3 transition-colors ${scanned ? 'bg-green-50' : 'bg-white hover:bg-gray-50'}`}>
+                    <button onClick={() => setInventoryScanned(prev => { const next = new Set(prev); scanned ? next.delete(e.id) : next.add(e.id); return next; })}
+                      className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${scanned ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}>
+                      {scanned && <CircleCheck className="w-4 h-4 text-white" />}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-medium ${scanned ? 'text-green-700 line-through' : 'text-gray-900'}`}>{e.name}</p>
+                      <p className="text-xs text-gray-400">{e.location} · {e.department} · {maskValue(e.serialNumber)}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColors[e.status]}`}>{e.status}</span>
+                    {e.ipAddress && pingResults[e.id] !== undefined && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${pingResults[e.id] === null ? 'bg-gray-100 text-gray-500' : pingResults[e.id] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        {pingResults[e.id] === null ? '⏳' : pingResults[e.id] ? 'En ligne' : 'Hors ligne'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Dashboard TV (supervision plein écran) ════════════════════════════ */}
+      {showTVDashboard && (
+        <div className="fixed inset-0 z-[100] bg-[#0d1117] text-white flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-8 py-4 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <Monitor className="w-6 h-6 text-[#1a6fa6]" />
+              <h1 className="text-xl font-bold">Gestion IT — Supervision</h1>
+              <span className="text-xs text-white/40">{new Date().toLocaleString('fr-FR')}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />Live</span>
+              <button onClick={() => setShowTVDashboard(false)} className="text-white/50 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          <div className="flex-1 p-8 grid grid-cols-4 grid-rows-2 gap-6 overflow-hidden">
+            {[
+              { label: 'Total', value: kpiStats.total, color: '#1a6fa6', icon: <Monitor className="w-8 h-8" /> },
+              { label: 'Actifs', value: kpiStats.actifs, color: '#22c55e', icon: <CheckCircle className="w-8 h-8" /> },
+              { label: 'Défaillants', value: kpiStats.defaillants, color: '#ef4444', icon: <AlertTriangle className="w-8 h-8" /> },
+              { label: 'Tickets ouverts', value: kpiStats.ticketsOuverts, color: '#f59e0b', icon: <Wrench className="w-8 h-8" /> },
+              { label: 'Critiques', value: kpiStats.ticketsCritiques, color: '#dc2626', icon: <AlertTriangle className="w-8 h-8" /> },
+              { label: 'Garanties exp.', value: kpiStats.garantiesExpirees, color: '#d97706', icon: <ShieldCheck className="w-8 h-8" /> },
+              { label: 'Visites planif.', value: kpiStats.visitesPlannifiees, color: '#3b82f6', icon: <Calendar className="w-8 h-8" /> },
+              { label: 'Non visités', value: kpiStats.nonVisites, color: '#8b5cf6', icon: <XCircle className="w-8 h-8" /> },
+            ].map(({ label, value, color, icon }) => (
+              <div key={label} className="rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-2 p-6" style={{ backgroundColor: `${color}15`, borderColor: `${color}30` }}>
+                <div style={{ color }}>{icon}</div>
+                <p className="text-5xl font-black" style={{ color }}>{value}</p>
+                <p className="text-sm text-white/60 font-medium text-center">{label}</p>
+              </div>
+            ))}
+          </div>
+          {kpiStats.ticketsCritiques > 0 && (
+            <div className="mx-8 mb-6 bg-red-900/40 border border-red-500/50 rounded-xl px-5 py-3 flex items-center gap-3 animate-pulse">
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+              <p className="text-sm font-bold text-red-300">{kpiStats.ticketsCritiques} ticket(s) critique(s) non résolu(s) — intervention requise</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Paramètres (Slack webhook + masquage) ════════════════════════════ */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSettings(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-gray-900">Paramètres avancés</h2>
+              <button onClick={() => setShowSettings(false)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="space-y-5">
+              {/* Slack/Teams */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-1">Webhook Slack / Teams</label>
+                <p className="text-xs text-gray-400 mb-2">Les alertes critiques seront envoyées sur ce canal.</p>
+                <input type="url" value={slackWebhook} onChange={e => setSlackWebhook(e.target.value)} placeholder="https://hooks.slack.com/..." className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => { localStorage.setItem('it-slack-webhook', slackWebhook); setToast({ message: 'Webhook sauvegardé', type: 'success' }); }} className="text-xs bg-[#1a6fa6] text-white px-3 py-1.5 rounded-lg hover:bg-[#155a8a]">Sauvegarder</button>
+                  <button onClick={() => sendSlackNotif('🔔 Test depuis Gestion IT — connexion opérationnelle')} className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Tester</button>
+                </div>
+              </div>
+              {/* Masquage */}
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                <div>
+                  <p className="text-sm font-bold text-gray-800">Masquer les données sensibles</p>
+                  <p className="text-xs text-gray-400">N° série, IP, clés de licence affichés masqués</p>
+                </div>
+                <button onClick={() => { const v = !maskSensitive; setMaskSensitive(v); localStorage.setItem('it-mask-sensitive', String(v)); }} className={`w-12 h-6 rounded-full transition-colors relative ${maskSensitive ? 'bg-[#1a6fa6]' : 'bg-gray-300'}`}>
+                  <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${maskSensitive ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              {/* RGPD */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-1">Rapport RGPD</label>
+                <p className="text-xs text-gray-400 mb-2">Exporte la liste des données personnelles stockées.</p>
+                <button onClick={() => {
+                  const doc = new jsPDF();
+                  doc.setFontSize(16); doc.setTextColor(26,111,166); doc.text('Rapport RGPD — Données personnelles', 14, 20);
+                  doc.setFontSize(10); doc.setTextColor(100); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} par ${currentUser.name}`, 14, 28);
+                  autoTable(doc, { startY: 35, head: [['Catégorie','Données collectées','Base légale','Conservation']], body: [
+                    ['Comptes utilisateurs','Nom, identifiant, rôle, permissions','Exécution du contrat','Durée du contrat + 1 an'],
+                    ['Équipements IT','Nom, localisation, département, IP, n° série','Intérêt légitime','Durée de vie équipement'],
+                    ['Activité utilisateur','Actions, timestamps, adresse IP','Intérêt légitime','12 mois glissants'],
+                    ['Sessions actives','ID session, IP, dernière activité','Intérêt légitime','Session uniquement'],
+                    ['Messagerie interne','Messages, expéditeur, horodatage','Consentement','90 jours'],
+                  ], theme: 'striped', headStyles: { fillColor: [26,111,166] } });
+                  doc.save('rapport-rgpd.pdf');
+                }}
+                  className="flex items-center gap-2 text-xs bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
+                  <Download className="w-3.5 h-3.5" /> Télécharger rapport RGPD (PDF)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modal Code-barres ════════════════════════════════════════════════ */}
+      {barcodeEquipment && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setBarcodeEquipment(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-gray-900">Code-barres</h2>
+              <button onClick={() => setBarcodeEquipment(null)}><X className="w-5 h-5 text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <p className="text-sm font-semibold text-gray-700 mb-1">{barcodeEquipment.name}</p>
+            <p className="text-xs text-gray-400 mb-4 font-mono">{barcodeEquipment.serialNumber || barcodeEquipment.name}</p>
+            <canvas ref={barcodeCanvasRef} className="mx-auto max-w-full" />
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => {
+                const canvas = barcodeCanvasRef.current;
+                if (!canvas) return;
+                const a = document.createElement('a');
+                a.href = canvas.toDataURL('image/png');
+                a.download = `barcode-${barcodeEquipment.name}.png`;
+                a.click();
+              }} className="flex-1 py-2.5 bg-[#1a6fa6] text-white rounded-xl text-sm font-semibold hover:bg-[#155a8a] flex items-center justify-center gap-1.5">
+                <Download className="w-4 h-4" /> Télécharger PNG
+              </button>
+              <button onClick={() => {
+                const canvas = barcodeCanvasRef.current;
+                if (!canvas) return;
+                const w = window.open('');
+                w?.document.write(`<img src="${canvas.toDataURL()}" />`);
+                w?.print();
+              }} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">
+                Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modal Carte des sites (Leaflet) ══════════════════════════════════ */}
+      {showMap && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowMap(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col" style={{height:'80vh'}}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-[#1a6fa6]" />
+                <h2 className="text-base font-bold text-gray-900">Carte des sites</h2>
+                <span className="text-xs text-gray-400">{sites.filter(s => (s as any).latitude).length}/{sites.length} sites géolocalisés</span>
+              </div>
+              <button onClick={() => setShowMap(false)}><X className="w-5 h-5 text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            {sites.filter(s => (s as any).latitude).length === 0 && (
+              <div className="px-5 py-2 bg-yellow-50 border-b border-yellow-100 text-xs text-yellow-700">
+                Aucun site géolocalisé. Ajoutez les coordonnées GPS via l'API : <code className="font-mono">PATCH /api/sites/:id/coords</code> avec <code className="font-mono">latitude</code> et <code className="font-mono">longitude</code>.
+              </div>
+            )}
+            <div ref={mapContainerRef} className="flex-1 rounded-b-2xl" />
           </div>
         </div>
       )}
