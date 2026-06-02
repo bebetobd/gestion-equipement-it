@@ -320,6 +320,24 @@ async function initDB() {
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS visit_id INTEGER REFERENCES site_visits(id) ON DELETE SET NULL`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS site_name VARCHAR(200) NOT NULL DEFAULT ''`);
 
+  // Licences logicielles
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS licenses (
+      id            SERIAL PRIMARY KEY,
+      name          VARCHAR(200) NOT NULL DEFAULT '',
+      vendor        VARCHAR(200) NOT NULL DEFAULT '',
+      license_key   TEXT         NOT NULL DEFAULT '',
+      seats         INTEGER      NOT NULL DEFAULT 1,
+      used_seats    INTEGER      NOT NULL DEFAULT 0,
+      equipment_id  INTEGER      REFERENCES equipments(id) ON DELETE SET NULL,
+      purchase_date DATE,
+      expiry_date   DATE,
+      notes         TEXT         NOT NULL DEFAULT '',
+      created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_licenses_expiry ON licenses(expiry_date)`);
+
   initialized = true;
 }
 

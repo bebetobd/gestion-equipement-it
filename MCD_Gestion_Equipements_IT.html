@@ -1,824 +1,959 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MCD – Gestion Équipements IT</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f4f8; color: #1e293b; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCD — Gestion IT · SEDANA TG</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Roboto,system-ui,sans-serif;font-size:13px;background:#f8f9fa;color:#212529;overflow:hidden;height:100vh}
 
-    /* ── Cover ── */
-    .cover {
-      background: linear-gradient(135deg, #0f2744 0%, #1d4ed8 100%);
-      color: white; padding: 56px 80px 44px;
-    }
-    .cover h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
-    .cover .sub { font-size: 1.1rem; opacity: .8; margin-bottom: 28px; }
-    .cover .pills { display: flex; flex-wrap: wrap; gap: 10px; }
-    .pill {
-      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
-      padding: 4px 14px; border-radius: 999px; font-size: .82rem; backdrop-filter: blur(4px);
-    }
+/* ─── TOP NAV ─────────────────────────────────────────────────── */
+.nav{position:fixed;top:0;left:0;right:0;height:44px;background:#1a6fa6;display:flex;align-items:center;z-index:1000;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.nav-grid{width:44px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,.85);font-size:18px;border-right:1px solid rgba(255,255,255,.15)}
+.nav-grid:hover{background:rgba(255,255,255,.12)}
+.nav-brand{padding:0 14px;font-size:14px;font-weight:700;color:#fff;border-right:1px solid rgba(255,255,255,.15);height:44px;display:flex;align-items:center;white-space:nowrap;letter-spacing:.2px}
+.nav-items{display:flex;height:44px;flex:1;overflow:hidden}
+.nav-item{height:44px;padding:0 14px;display:flex;align-items:center;color:rgba(255,255,255,.85);font-size:13px;cursor:pointer;white-space:nowrap;border-right:1px solid rgba(255,255,255,.08)}
+.nav-item:hover,.nav-item.active{background:rgba(255,255,255,.15);color:#fff}
+.nav-item.active{font-weight:600}
+.nav-right{display:flex;align-items:center;gap:2px;padding:0 8px}
+.nav-icon{width:34px;height:34px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,.85);font-size:15px}
+.nav-icon:hover{background:rgba(255,255,255,.15);color:#fff}
+.nav-avatar{width:28px;height:28px;border-radius:50%;background:#e67e22;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin:0 4px}
+.nav-user{padding:0 6px;cursor:pointer}
+.nav-user .u-name{color:#fff;font-size:12px;font-weight:600;line-height:1.3}
+.nav-user .u-role{color:rgba(255,255,255,.7);font-size:11px}
 
-    /* ── Action bar ── */
-    .action-bar {
-      background: white; padding: 10px 40px; display: flex; gap: 10px; align-items: center;
-      border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 200;
-      box-shadow: 0 2px 12px rgba(0,0,0,.08);
-    }
-    .btn {
-      padding: 7px 18px; border-radius: 6px; border: none; cursor: pointer;
-      font-size: .88rem; font-weight: 600; transition: opacity .15s;
-    }
-    .btn:hover { opacity: .85; }
-    .btn-blue { background: #1d4ed8; color: white; }
-    .btn-gray { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+/* ─── MAIN ─────────────────────────────────────────────────────── */
+.main{margin-top:44px;height:calc(100vh - 44px);display:flex;flex-direction:column;overflow:hidden}
 
-    /* ── Main content ── */
-    .content { max-width: 1550px; margin: 0 auto; padding: 44px 40px; }
-    .section { margin-bottom: 56px; }
-    .section-title {
-      font-size: 1.25rem; font-weight: 800; color: #0f2744; margin-bottom: 20px;
-      padding-bottom: 8px; border-bottom: 3px solid #1d4ed8; display: inline-block;
-    }
+/* ─── CONTROL PANEL ────────────────────────────────────────────── */
+.cp{background:#fff;border-bottom:1px solid #dee2e6;flex-shrink:0}
+.cp-top{padding:10px 16px 6px;display:flex;align-items:center;gap:10px}
+.cp-title{font-size:20px;font-weight:300;color:#212529;flex-shrink:0;margin-right:6px}
+.cp-actions{display:flex;gap:6px}
+.btn{border:none;border-radius:3px;cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;padding:5px 14px;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-p{background:#1a6fa6;color:#fff}
+.btn-s{background:#fff;color:#555;border:1px solid #ced4da}
+.btn-icon{background:#fff;border:1px solid #ced4da;padding:5px 9px;border-radius:3px;cursor:pointer;color:#555;font-size:14px;line-height:1}
+.btn-icon:hover{background:#f5f5f5}
+.search-input{border:1px solid #ced4da;border-radius:20px;padding:5px 14px;font-size:13px;outline:none;width:100%;max-width:380px;background:#f8f9fa;color:#333;transition:all .2s;margin-left:auto}
+.search-input:focus{background:#fff;border-color:#1a6fa6;box-shadow:0 0 0 2px rgba(26,111,166,.15)}
+.cp-bot{padding:4px 16px 7px;display:flex;align-items:center;gap:6px}
+.filter-btn{display:flex;align-items:center;gap:4px;border:1px solid #ced4da;background:#fff;padding:3px 10px;border-radius:3px;font-size:12px;color:#555;cursor:pointer}
+.filter-btn:hover{background:#f5f5f5}
+.pager{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#6c757d}
+.pager-btn{width:22px;height:22px;border:1px solid #dee2e6;background:#fff;border-radius:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:#555}
+.pager-btn:hover:not([disabled]){background:#f5f5f5}
+.pager-btn[disabled]{opacity:.4;cursor:default}
 
-    /* ── Diagram ── */
-    .diagram-wrap {
-      background: white; border-radius: 12px; padding: 24px;
-      box-shadow: 0 4px 24px rgba(0,0,0,.08); overflow-x: auto;
-    }
-    svg text { font-family: 'Segoe UI', Tahoma, sans-serif; }
+/* ─── TABS ──────────────────────────────────────────────────────── */
+.tabs{display:flex;border-bottom:1px solid #dee2e6;background:#fff;overflow-x:auto;flex-shrink:0}
+.tab{padding:9px 16px;font-size:13px;cursor:pointer;color:#6c757d;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
+.tab:hover{color:#1a6fa6}
+.tab.on{color:#1a6fa6;border-bottom-color:#1a6fa6;font-weight:600}
 
-    /* ── Entity cards ── */
-    .entity-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 18px;
-    }
-    .ecard { background: white; border-radius: 10px; overflow: hidden;
-      box-shadow: 0 2px 12px rgba(0,0,0,.07); border: 1px solid #e2e8f0; }
-    .ecard-head {
-      background: #0f2744; color: white; padding: 10px 16px;
-      font-weight: 700; font-size: .95rem; display: flex; align-items: center; gap: 8px;
-    }
-    .ecard-head .icon { font-size: 1rem; }
-    .etable { width: 100%; border-collapse: collapse; font-size: .83rem; }
-    .etable th {
-      background: #f8fafc; padding: 6px 12px; text-align: left; font-weight: 600;
-      color: #64748b; font-size: .75rem; text-transform: uppercase; letter-spacing: .5px;
-    }
-    .etable td { padding: 5px 12px; border-top: 1px solid #f1f5f9; color: #334155; }
-    .etable tr:hover td { background: #f8fafc; }
-    .bpk { background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 4px;
-      font-size: .7rem; font-weight: 700; }
-    .bfk { background: #dbeafe; color: #1e40af; padding: 1px 6px; border-radius: 4px;
-      font-size: .7rem; font-weight: 700; }
-    .btype { background: #f1f5f9; color: #475569; padding: 1px 6px; border-radius: 4px;
-      font-size: .7rem; }
-    .benum { background: #fce7f3; color: #9d174d; padding: 1px 6px; border-radius: 4px;
-      font-size: .7rem; }
+/* ─── CONTENT ────────────────────────────────────────────────────── */
+.content{flex:1;overflow-y:auto;background:#fff}
 
-    /* ── Relations table ── */
-    .rtable { width: 100%; border-collapse: collapse; background: white; border-radius: 10px;
-      overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.07); font-size: .87rem; }
-    .rtable th { background: #0f2744; color: white; padding: 12px 16px; text-align: left; }
-    .rtable td { padding: 9px 16px; border-bottom: 1px solid #f1f5f9; }
-    .rtable tr:last-child td { border-bottom: none; }
-    .rtable tr:hover td { background: #f8fafc; }
-    .card { font-weight: 700; }
-    .card-1 { color: #1d4ed8; }
-    .card-n { color: #dc2626; }
-    .rel-name { font-style: italic; color: #0f2744; font-weight: 600; }
+/* ─── LIST TABLE ────────────────────────────────────────────────── */
+.list-table{width:100%;border-collapse:collapse;font-size:13px}
+.list-table thead tr{border-bottom:1px solid #dee2e6}
+.list-table th{padding:8px 12px;font-weight:700;font-size:11px;color:#6c757d;text-transform:uppercase;letter-spacing:.5px;background:#fff;text-align:left;cursor:pointer;white-space:nowrap;border-right:1px solid #f0f0f0;user-select:none}
+.list-table th:last-child{border-right:none}
+.list-table th:hover{color:#333}
+.list-table td{padding:8px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle;border-right:1px solid #f9f9f9}
+.list-table td:last-child{border-right:none}
+.list-table tbody tr:hover td{background:#f5f9fc;cursor:pointer}
+.list-table tbody tr.sel td{background:#e8f3fc}
+.check{width:14px;height:14px;cursor:pointer;accent-color:#1a6fa6}
+.f-link{color:#1a6fa6;font-weight:500;cursor:pointer}
+.f-link:hover{text-decoration:underline}
+.f-muted{color:#6c757d}
+.f-mono{font-family:'Consolas',monospace;font-size:12px}
+.f-code{font-family:'Consolas',monospace;font-size:11px;background:#f1f3f5;padding:1px 6px;border-radius:3px;color:#495057}
 
-    /* ── Legend ── */
-    .legend { display: flex; flex-wrap: wrap; gap: 20px; background: white;
-      padding: 16px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.06);
-      margin-bottom: 20px; }
-    .legend-item { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #475569; }
+/* ─── BADGES ─────────────────────────────────────────────────────── */
+.badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.b-auth{background:#cfe2ff;color:#084298}
+.b-equip{background:#d1e7dd;color:#0f5132}
+.b-ops{background:#fff3cd;color:#664d03}
+.b-chat{background:#e2d9f3;color:#432874}
+.b-pk{background:#fff3cd;color:#856404}
+.b-fk{background:#cfe2ff;color:#084298}
+.b-idx{background:#f3e8ff;color:#6f2da8}
+.b-nn{background:#d1e7dd;color:#0f5132}
+.b-arr{background:#fce4ec;color:#880e4f}
+.b-1n{background:#e0f7fa;color:#006064}
+.b-nm{background:#fce4ec;color:#880e4f}
+.b-11{background:#f3e8ff;color:#4a148c}
+.b-self{background:#fff8e1;color:#f57f17}
 
-    @media print {
-      .action-bar { display: none; }
-      body { background: white; }
-      .content { padding: 20px; max-width: none; }
-      .diagram-wrap { box-shadow: none; border: 1px solid #e2e8f0; }
-      .section { break-inside: avoid; }
-    }
-  </style>
+/* ─── DIALOG ─────────────────────────────────────────────────────── */
+.overlay{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center}
+.overlay.show{display:flex}
+.dialog{background:#fff;border-radius:4px;width:92%;max-width:960px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.25)}
+.dlg-hdr{background:#f8f9fa;border-bottom:1px solid #dee2e6;padding:10px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.dlg-crumb{font-size:12px;color:#6c757d}
+.dlg-crumb a{color:#1a6fa6;cursor:pointer}
+.dlg-crumb a:hover{text-decoration:underline}
+.dlg-title{font-size:15px;font-weight:700;color:#212529}
+.dlg-close{margin-left:auto;cursor:pointer;font-size:20px;color:#6c757d;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:4px}
+.dlg-close:hover{background:#e9ecef;color:#333}
+.dlg-body{flex:1;overflow-y:auto;padding:0}
+.dlg-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#dee2e6;border-bottom:1px solid #dee2e6}
+.dlg-meta-cell{background:#fff;padding:10px 16px}
+.dlg-meta-lbl{font-size:11px;font-weight:600;color:#6c757d;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.dlg-meta-val{font-size:13px;color:#212529}
+
+/* ─── NOTES ──────────────────────────────────────────────────────── */
+.notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;padding:20px}
+.note-card{background:#fff;border:1px solid #dee2e6;border-left:4px solid #1a6fa6;border-radius:3px;padding:16px}
+.note-title{font-weight:700;font-size:13px;color:#212529;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.note-body{font-size:12px;color:#555;line-height:1.7}
+.note-body code{background:#f1f3f5;padding:1px 5px;border-radius:3px;font-size:11px;color:#495057}
+
+/* ─── DIAGRAM ────────────────────────────────────────────────────── */
+.diagram-wrap{padding:20px;background:#f8f9fa;overflow:auto}
+.diagram-card{background:#fff;border:1px solid #dee2e6;border-radius:4px;overflow:hidden}
+.diagram-toolbar{padding:8px 16px;border-bottom:1px solid #dee2e6;display:flex;gap:8px;align-items:center;background:#fff}
+.diagram-legend{display:flex;flex-wrap:wrap;gap:16px;padding:12px 20px;border-top:1px solid #f0f0f0;background:#fafafa;font-size:12px;color:#6c757d}
+.leg-dot{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px}
+
+/* ─── SCROLLBAR ──────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:#f1f1f1}
+::-webkit-scrollbar-thumb{background:#bbb;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#999}
+
+/* ─── PRINT ──────────────────────────────────────────────────────── */
+@media print{
+  .nav,.btn-icon,.filter-btn,.pager,.overlay{display:none!important}
+  .main{margin-top:0!important;height:auto!important;overflow:visible!important}
+  .content{overflow:visible!important}
+}
+</style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════ COVER ═══════════════════════════════════ -->
-<div class="cover">
-  <h1>Modèle Conceptuel de Données</h1>
-  <p class="sub">Système de Gestion des Équipements Informatiques</p>
-  <div class="pills">
-    <span class="pill">Méthode Merise</span>
-    <span class="pill">Version 1.0</span>
-    <span class="pill">Mai 2026</span>
-    <span class="pill">PostgreSQL · Neon</span>
-    <span class="pill">12 entités · 15 associations</span>
+<!-- ═══════════════ TOP NAV ═══════════════ -->
+<div class="nav">
+  <div class="nav-grid" title="Menu applications">⊞</div>
+  <div class="nav-brand">Gestion IT</div>
+  <div class="nav-items">
+    <div class="nav-item active" onclick="switchTab('entities')">Entités</div>
+    <div class="nav-item" onclick="switchTab('diagram')">Diagramme ERD</div>
+    <div class="nav-item" onclick="switchTab('relations')">Relations</div>
+    <div class="nav-item" onclick="switchTab('indexes')">Index</div>
+    <div class="nav-item" onclick="switchTab('notes')">Notes de conception</div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-icon" title="Recherche globale">🔍</div>
+    <div class="nav-icon" title="Imprimer" onclick="window.print()">🖨️</div>
+    <div class="nav-avatar">A</div>
+    <div class="nav-user">
+      <div class="u-name">SEDANA TG</div>
+      <div class="u-role">Administrateur</div>
+    </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════ ACTION BAR ══════════════════════════════════ -->
-<div class="action-bar">
-  <button class="btn btn-blue" onclick="window.print()">🖨️ Imprimer / PDF</button>
-  <button class="btn btn-gray" onclick="downloadHtml()">⬇️ Télécharger HTML</button>
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+
+  <!-- CONTROL PANEL -->
+  <div class="cp">
+    <div class="cp-top">
+      <div class="cp-title" id="cp-title">Entités / Tables</div>
+      <div class="cp-actions">
+        <button class="btn btn-p" onclick="window.print()">⬇ Exporter</button>
+        <button class="btn-icon" title="Imprimer" onclick="window.print()">🖨</button>
+      </div>
+      <input class="search-input" id="search-input" type="text" placeholder="Recherche..." oninput="onSearch(this.value)">
+    </div>
+    <div class="cp-bot">
+      <button class="filter-btn">▼ FILTRES</button>
+      <button class="filter-btn" onclick="toggleGroupBy()">⊞ REGROUPER PAR</button>
+      <button class="filter-btn">★ FAVORIS</button>
+      <div class="pager">
+        <span id="pager-count">13 entités</span>
+        <div class="pager-nav">
+          <button class="pager-btn" disabled>‹</button>
+          <button class="pager-btn" disabled>›</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab on" id="tab-entities" onclick="switchTab('entities')">Vue liste</div>
+    <div class="tab" id="tab-cols" onclick="switchTab('cols')">Toutes les colonnes</div>
+    <div class="tab" id="tab-diagram" onclick="switchTab('diagram')">Diagramme</div>
+    <div class="tab" id="tab-relations" onclick="switchTab('relations')">Relations (22)</div>
+    <div class="tab" id="tab-indexes" onclick="switchTab('indexes')">Index (14)</div>
+    <div class="tab" id="tab-notes" onclick="switchTab('notes')">Notes</div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content" id="content-area"></div>
 </div>
 
-<!-- ══════════════════════════════ CONTENT ════════════════════════════════════ -->
-<div class="content">
-
-  <!-- ── Section 1 : Diagramme ── -->
-  <div class="section">
-    <div class="section-title">Diagramme MCD</div>
-
-    <div class="legend">
-      <div class="legend-item">
-        <svg width="32" height="18"><rect x="0" y="0" width="32" height="18" rx="3" fill="#0f2744"/></svg>
-        Entité
-      </div>
-      <div class="legend-item">
-        <svg width="60" height="18"><ellipse cx="30" cy="9" rx="28" ry="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/></svg>
-        Association
-      </div>
-      <div class="legend-item">
-        <svg width="40" height="18"><line x1="0" y1="9" x2="40" y2="9" stroke="#94a3b8" stroke-width="1.5"/></svg>
-        Lien
-      </div>
-      <div class="legend-item">
-        <span style="font-size:.82rem;color:#1d4ed8;font-weight:700">(0,1) (1,1) (0,N) (1,N)</span>&nbsp;Cardinalités
-      </div>
-      <div class="legend-item">
-        <span class="bpk">PK</span> Clé primaire &nbsp;
-        <span class="bfk">FK</span> Clé étrangère
-      </div>
+<!-- ═══════════════ DETAIL DIALOG ═══════════════ -->
+<div class="overlay" id="overlay" onclick="closeDialog(event)">
+  <div class="dialog" onclick="event.stopPropagation()">
+    <div class="dlg-hdr">
+      <div class="dlg-crumb"><a onclick="closeDialog()">Entités</a> › <span id="dlg-crumb-name"></span></div>
+      <div class="dlg-title" id="dlg-title"></div>
+      <div class="dlg-close" onclick="closeDialog()">×</div>
     </div>
-
-    <div class="diagram-wrap">
-      <svg width="1460" height="900" xmlns="http://www.w3.org/2000/svg">
-
-        <!-- ── Background ── -->
-        <rect width="1460" height="900" fill="#f8fafc" rx="8"/>
-
-        <!-- ── Subtle grid ── -->
-        <g stroke="#e2e8f0" stroke-width="0.5" opacity="0.6">
-          <line x1="0" y1="200" x2="1460" y2="200"/>
-          <line x1="0" y1="400" x2="1460" y2="400"/>
-          <line x1="0" y1="600" x2="1460" y2="600"/>
-          <line x1="0" y1="800" x2="1460" y2="800"/>
-          <line x1="340" y1="0" x2="340" y2="900"/>
-          <line x1="680" y1="0" x2="680" y2="900"/>
-          <line x1="1020" y1="0" x2="1020" y2="900"/>
-          <line x1="1360" y1="0" x2="1360" y2="900"/>
-        </g>
-
-        <!-- ═══════════════════════════════════════
-             LINES  (drawn first, under entities)
-        ════════════════════════════════════════ -->
-
-        <!-- 1. UTILISATEUR ↔ JOURNAL_ACTIVITE (vertical) -->
-        <line x1="170" y1="278" x2="170" y2="100" stroke="#94a3b8" stroke-width="1.5"/>
-        <!-- cardinalities -->
-        <text x="178" y="272" font-size="10" fill="#374151">(1,1)</text>
-        <text x="178" y="118" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 2. UTILISATEUR ↔ SESSION (vertical) -->
-        <line x1="155" y1="308" x2="155" y2="502" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="162" y="323" font-size="10" fill="#374151">(1,1)</text>
-        <text x="162" y="494" font-size="10" fill="#374151">(0,1)</text>
-
-        <!-- 3. UTILISATEUR ↔ GROUPE_CHAT (left-side, goes around) -->
-        <polyline points="80,295 40,295 40,750 85,750" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3"/>
-        <text x="44" y="288" font-size="10" fill="#374151">(0,N)</text>
-        <text x="44" y="765" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 4. UTILISATEUR ↔ SITE (diagonal) -->
-        <line x1="240" y1="287" x2="425" y2="92" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="248" y="283" font-size="10" fill="#374151">(0,N)</text>
-        <text x="405" y="108" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 5. UTILISATEUR ↔ VISITE (diagonal) -->
-        <line x1="240" y1="298" x2="418" y2="488" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="248" y="312" font-size="10" fill="#374151">(0,N)</text>
-        <text x="398" y="480" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 6. UTILISATEUR ↔ MESSAGE_CHAT (diagonal) -->
-        <line x1="240" y1="303" x2="422" y2="742" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="246" y="320" font-size="10" fill="#374151">(1,1)</text>
-        <text x="404" y="738" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 7. SITE ↔ EQUIPEMENT (diagonal) -->
-        <line x1="572" y1="88" x2="748" y2="284" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="555" y="105" font-size="10" fill="#374151">(1,1)</text>
-        <text x="728" y="278" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 8. SITE ↔ VISITE (vertical) -->
-        <line x1="500" y1="100" x2="500" y2="478" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="507" y="115" font-size="10" fill="#374151">(1,1)</text>
-        <text x="507" y="470" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 9. EQUIPEMENT ↔ MAINTENANCE (diagonal up-right) -->
-        <line x1="912" y1="286" x2="1108" y2="168" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="892" y="280" font-size="10" fill="#374151">(1,1)</text>
-        <text x="1090" y="182" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 10. EQUIPEMENT ↔ EVENEMENT (diagonal right) -->
-        <line x1="912" y1="295" x2="1108" y2="395" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="892" y="308" font-size="10" fill="#374151">(1,1)</text>
-        <text x="1092" y="382" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 11. EQUIPEMENT ↔ DOCUMENT (diagonal down-right) -->
-        <line x1="912" y1="302" x2="1108" y2="638" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="894" y="315" font-size="10" fill="#374151">(1,1)</text>
-        <text x="1092" y="628" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 12. EQUIPEMENT ↔ VISITE (diagonal left-down) -->
-        <line x1="750" y1="300" x2="582" y2="483" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="730" y="316" font-size="10" fill="#374151">(0,N)</text>
-        <text x="566" y="476" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 13. VISITE ↔ MAINTENANCE (long diagonal) -->
-        <line x1="582" y1="484" x2="1108" y2="170" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="596" y="478" font-size="10" fill="#374151">(0,1)</text>
-        <text x="1090" y="190" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 14. GROUPE_CHAT ↔ MESSAGE_CHAT (horizontal) -->
-        <line x1="245" y1="750" x2="418" y2="750" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="248" y="743" font-size="10" fill="#374151">(1,1)</text>
-        <text x="386" y="743" font-size="10" fill="#374151">(0,N)</text>
-
-        <!-- 15. EQUIPEMENT self-ref REMPLACE (arc above) -->
-        <path d="M 830,278 Q 830,218 905,218 Q 980,218 980,278" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
-        <text x="838" y="272" font-size="10" fill="#374151">(0,1)</text>
-        <text x="960" y="272" font-size="10" fill="#374151">(0,1)</text>
-
-        <!-- ═══════════════════════════════════════
-             ASSOCIATIONS (ovals)
-        ════════════════════════════════════════ -->
-
-        <!-- 1. génère (UTILISATEUR → JOURNAL) -->
-        <ellipse cx="170" cy="188" rx="46" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="170" y="192" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">génère</text>
-
-        <!-- 2. a (UTILISATEUR → SESSION) -->
-        <ellipse cx="155" cy="403" rx="32" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="155" y="407" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">a</text>
-
-        <!-- 3. appartient (UTILISATEUR → GROUPE) -->
-        <ellipse cx="40" cy="523" rx="32" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="40" y="527" font-size="9" fill="#1d4ed8" text-anchor="middle" font-style="italic">appartient</text>
-
-        <!-- 4. accède à (UTILISATEUR → SITE) -->
-        <ellipse cx="330" cy="188" rx="40" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="330" y="192" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">accède à</text>
-
-        <!-- 5. planifie (UTILISATEUR → VISITE) -->
-        <ellipse cx="328" cy="393" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="328" y="397" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">planifie</text>
-
-        <!-- 6. envoie (UTILISATEUR → MESSAGE) -->
-        <ellipse cx="330" cy="522" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="330" y="526" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">envoie</text>
-
-        <!-- 7. héberge (SITE → EQUIPEMENT) -->
-        <ellipse cx="660" cy="186" rx="40" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="660" y="190" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">héberge</text>
-
-        <!-- 8. reçoit (SITE → VISITE) -->
-        <ellipse cx="500" cy="288" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="500" y="292" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">reçoit</text>
-
-        <!-- 9. fait l'objet de (EQUIPEMENT → MAINTENANCE) -->
-        <ellipse cx="1010" cy="227" rx="55" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="1010" y="231" font-size="9" fill="#1d4ed8" text-anchor="middle" font-style="italic">fait l'objet de</text>
-
-        <!-- 10. génère (EQUIPEMENT → EVENEMENT) -->
-        <ellipse cx="1010" cy="345" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="1010" y="349" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">génère</text>
-
-        <!-- 11. possède (EQUIPEMENT → DOCUMENT) -->
-        <ellipse cx="1010" cy="470" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="1010" y="474" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">possède</text>
-
-        <!-- 12. implique (EQUIPEMENT ↔ VISITE) -->
-        <ellipse cx="666" cy="391" rx="38" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="666" y="395" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">implique</text>
-
-        <!-- 13. déclenche (VISITE → MAINTENANCE) -->
-        <ellipse cx="845" cy="327" rx="44" ry="16" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
-        <text x="845" y="331" font-size="10" fill="#9d174d" text-anchor="middle" font-style="italic">déclenche</text>
-
-        <!-- 14. inclut (GROUPE → MESSAGE) -->
-        <ellipse cx="332" cy="750" rx="36" ry="16" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="332" y="754" font-size="10" fill="#1d4ed8" text-anchor="middle" font-style="italic">inclut</text>
-
-        <!-- 15. remplace (EQUIPEMENT self) -->
-        <ellipse cx="905" cy="218" rx="40" ry="16" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
-        <text x="905" y="222" font-size="10" fill="#15803d" text-anchor="middle" font-style="italic">remplace</text>
-
-        <!-- ═══════════════════════════════════════
-             ENTITIES (drawn last, on top)
-        ════════════════════════════════════════ -->
-
-        <!-- JOURNAL_ACTIVITE (left top) -->
-        <g>
-          <rect x="80" y="65" width="180" height="30" rx="4" fill="#0f2744"/>
-          <text x="170" y="85" font-size="12" fill="white" text-anchor="middle" font-weight="700">JOURNAL_ACTIVITE</text>
-        </g>
-
-        <!-- UTILISATEUR (left center) -->
-        <g>
-          <rect x="80" y="278" width="160" height="30" rx="4" fill="#0f2744"/>
-          <text x="160" y="298" font-size="12" fill="white" text-anchor="middle" font-weight="700">UTILISATEUR</text>
-        </g>
-
-        <!-- SESSION (left lower) -->
-        <g>
-          <rect x="80" y="502" width="150" height="30" rx="4" fill="#0f2744"/>
-          <text x="155" y="522" font-size="12" fill="white" text-anchor="middle" font-weight="700">SESSION</text>
-        </g>
-
-        <!-- GROUPE_CHAT (left bottom) -->
-        <g>
-          <rect x="85" y="735" width="160" height="30" rx="4" fill="#0f2744"/>
-          <text x="165" y="755" font-size="12" fill="white" text-anchor="middle" font-weight="700">GROUPE_CHAT</text>
-        </g>
-
-        <!-- SITE (center-left top) -->
-        <g>
-          <rect x="420" y="65" width="160" height="30" rx="4" fill="#1d4ed8"/>
-          <text x="500" y="85" font-size="12" fill="white" text-anchor="middle" font-weight="700">SITE</text>
-        </g>
-
-        <!-- VISITE_SITE (center-left lower) -->
-        <g>
-          <rect x="418" y="478" width="164" height="30" rx="4" fill="#1d4ed8"/>
-          <text x="500" y="498" font-size="12" fill="white" text-anchor="middle" font-weight="700">VISITE_SITE</text>
-        </g>
-
-        <!-- MESSAGE_CHAT (center-left bottom) -->
-        <g>
-          <rect x="418" y="735" width="164" height="30" rx="4" fill="#0f2744"/>
-          <text x="500" y="755" font-size="12" fill="white" text-anchor="middle" font-weight="700">MESSAGE_CHAT</text>
-        </g>
-
-        <!-- EQUIPEMENT (center) -->
-        <g>
-          <rect x="750" y="278" width="162" height="30" rx="4" fill="#7c3aed"/>
-          <text x="831" y="298" font-size="12" fill="white" text-anchor="middle" font-weight="700">EQUIPEMENT</text>
-        </g>
-
-        <!-- MAINTENANCE (right top) -->
-        <g>
-          <rect x="1108" y="152" width="164" height="30" rx="4" fill="#b45309"/>
-          <text x="1190" y="172" font-size="12" fill="white" text-anchor="middle" font-weight="700">MAINTENANCE</text>
-        </g>
-
-        <!-- EVENEMENT (right center) -->
-        <g>
-          <rect x="1108" y="382" width="164" height="30" rx="4" fill="#0f2744"/>
-          <text x="1190" y="402" font-size="12" fill="white" text-anchor="middle" font-weight="700">EVENEMENT_EQ</text>
-        </g>
-
-        <!-- DOCUMENT (right lower) -->
-        <g>
-          <rect x="1108" y="632" width="164" height="30" rx="4" fill="#0f2744"/>
-          <text x="1190" y="652" font-size="12" fill="white" text-anchor="middle" font-weight="700">DOCUMENT_EQ</text>
-        </g>
-
-        <!-- ── Column labels ── -->
-        <text x="170" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Utilisateurs &amp; Accès</text>
-        <text x="500" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Sites &amp; Visites</text>
-        <text x="831" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Équipements</text>
-        <text x="1190" y="30" font-size="11" fill="#94a3b8" text-anchor="middle" font-weight="600">Tickets &amp; Historique</text>
-
-        <!-- ── Chat cluster label ── -->
-        <rect x="55" y="715" width="465" height="170" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="70" y="710" font-size="10" fill="#94a3b8" font-weight="600">Module Chat</text>
-
-      </svg>
-    </div>
+    <div class="dlg-body" id="dlg-body"></div>
   </div>
-
-  <!-- ── Section 2 : Entités détaillées ── -->
-  <div class="section">
-    <div class="section-title">Détail des Entités</div>
-    <div class="entity-grid">
-
-      <!-- UTILISATEUR -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">👤</span> UTILISATEUR</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>username</td><td><span class="btype">VARCHAR(100)</span></td><td>Identifiant unique</td></tr>
-            <tr><td>password</td><td><span class="btype">TEXT</span></td><td>Haché (bcrypt)</td></tr>
-            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom complet</td></tr>
-            <tr><td>role</td><td><span class="benum">admin | user</span></td><td>Rôle global</td></tr>
-            <tr><td>permissions</td><td><span class="btype">TEXT[]</span></td><td>lecture | écriture | admin</td></tr>
-            <tr><td>allowed_site_ids</td><td><span class="btype">INTEGER[]</span></td><td>Sites autorisés</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- SITE -->
-      <div class="ecard">
-        <div class="ecard-head" style="background:#1d4ed8"><span class="icon">🏢</span> SITE</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom du site</td></tr>
-            <tr><td>city</td><td><span class="btype">VARCHAR(100)</span></td><td>Ville</td></tr>
-            <tr><td>country</td><td><span class="btype">VARCHAR(100)</span></td><td>Pays</td></tr>
-            <tr><td>address</td><td><span class="btype">TEXT</span></td><td>Adresse complète</td></tr>
-            <tr><td>description</td><td><span class="btype">TEXT</span></td><td>Notes</td></tr>
-            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de création</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- EQUIPEMENT -->
-      <div class="ecard">
-        <div class="ecard-head" style="background:#7c3aed"><span class="icon">💻</span> EQUIPEMENT</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>site_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → SITE</span></td></tr>
-            <tr><td>replaced_by_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
-            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom de l'équipement</td></tr>
-            <tr><td>type</td><td><span class="benum">ordinateur | serveur | switch | ...</span></td><td>Catégorie</td></tr>
-            <tr><td>brand / model</td><td><span class="btype">VARCHAR(100)</span></td><td>Marque / Modèle</td></tr>
-            <tr><td>serial_number</td><td><span class="btype">VARCHAR(100)</span></td><td>N° de série</td></tr>
-            <tr><td>ip_address</td><td><span class="btype">VARCHAR(50)</span></td><td>Adresse IP</td></tr>
-            <tr><td>location / department</td><td><span class="btype">VARCHAR(200)</span></td><td>Emplacement / Service</td></tr>
-            <tr><td>status</td><td><span class="benum">actif | inactif | panne | retraité</span></td><td>État</td></tr>
-            <tr><td>purchase_date / warranty</td><td><span class="btype">VARCHAR(20)</span></td><td>Achat / Garantie</td></tr>
-            <tr><td>quantity</td><td><span class="btype">INTEGER</span></td><td>Quantité</td></tr>
-            <tr><td>visited</td><td><span class="btype">BOOLEAN</span></td><td>Visité</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- MAINTENANCE -->
-      <div class="ecard">
-        <div class="ecard-head" style="background:#b45309"><span class="icon">🔧</span> MAINTENANCE</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
-            <tr><td>visit_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → VISITE_SITE</span></td></tr>
-            <tr><td>status</td><td><span class="benum">en_attente | ouvert | en_cours | résolu</span></td><td>État du ticket</td></tr>
-            <tr><td>priority</td><td><span class="benum">basse | normale | haute | critique</span></td><td>Priorité</td></tr>
-            <tr><td>failure_desc</td><td><span class="btype">TEXT</span></td><td>Description de la panne</td></tr>
-            <tr><td>diagnosis</td><td><span class="btype">TEXT</span></td><td>Diagnostic</td></tr>
-            <tr><td>solution</td><td><span class="btype">TEXT</span></td><td>Solution appliquée</td></tr>
-            <tr><td>parts_replaced</td><td><span class="btype">TEXT</span></td><td>Pièces remplacées</td></tr>
-            <tr><td>technician / opened_by</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien / Créé par</td></tr>
-            <tr><td>opened_at / started_at / closed_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatages</td></tr>
-            <tr><td>notes</td><td><span class="btype">TEXT</span></td><td>Journal interne</td></tr>
-            <tr><td>site_name</td><td><span class="btype">VARCHAR(200)</span></td><td>Dénormalisation site</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- VISITE_SITE -->
-      <div class="ecard">
-        <div class="ecard-head" style="background:#1d4ed8"><span class="icon">📅</span> VISITE_SITE</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>site_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → SITE</span></td></tr>
-            <tr><td>equipment_ids</td><td><span class="btype">INTEGER[]</span></td><td><span class="bfk">Réf. → EQUIPEMENT[]</span></td></tr>
-            <tr><td>scheduled_date / scheduled_time</td><td><span class="btype">DATE / VARCHAR</span></td><td>Date planifiée</td></tr>
-            <tr><td>technician</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien assigné</td></tr>
-            <tr><td>purpose</td><td><span class="btype">TEXT</span></td><td>Objectif de la visite</td></tr>
-            <tr><td>status</td><td><span class="benum">planifié | en_cours | terminé | reporté | annulé</span></td><td>État</td></tr>
-            <tr><td>with_maintenance</td><td><span class="btype">BOOLEAN</span></td><td>Inclut maintenance</td></tr>
-            <tr><td>maintenance_desc</td><td><span class="btype">TEXT</span></td><td>Description maintenance</td></tr>
-            <tr><td>validation_comment</td><td><span class="btype">TEXT</span></td><td>Commentaire de clôture</td></tr>
-            <tr><td>validated_at / validated_by</td><td><span class="btype">TIMESTAMPTZ / VARCHAR</span></td><td>Validation</td></tr>
-            <tr><td>rescheduled_date</td><td><span class="btype">DATE</span></td><td>Nouvelle date si reporté</td></tr>
-            <tr><td>created_by / created_at</td><td><span class="btype">VARCHAR / TIMESTAMPTZ</span></td><td>Création</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- EVENEMENT_EQUIPEMENT -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">📋</span> EVENEMENT_EQUIPEMENT</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
-            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>action</td><td><span class="benum">Création | Modification | Intervention | Transfert | Suppression</span></td><td>Type d'action</td></tr>
-            <tr><td>details</td><td><span class="btype">TEXT</span></td><td>Description</td></tr>
-            <tr><td>changes</td><td><span class="btype">JSON</span></td><td>Diff avant/après</td></tr>
-            <tr><td>technician</td><td><span class="btype">VARCHAR(200)</span></td><td>Technicien</td></tr>
-            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>IP de l'auteur</td></tr>
-            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- DOCUMENT_EQUIPEMENT -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">📄</span> DOCUMENT_EQUIPEMENT</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>equipment_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → EQUIPEMENT</span></td></tr>
-            <tr><td>filename</td><td><span class="btype">VARCHAR(500)</span></td><td>Nom du fichier</td></tr>
-            <tr><td>file_type</td><td><span class="btype">VARCHAR(100)</span></td><td>MIME type</td></tr>
-            <tr><td>file_size</td><td><span class="btype">INTEGER</span></td><td>Taille en octets</td></tr>
-            <tr><td>file_data</td><td><span class="btype">TEXT (Base64)</span></td><td>Contenu du fichier</td></tr>
-            <tr><td>description</td><td><span class="btype">TEXT</span></td><td>Description</td></tr>
-            <tr><td>uploaded_by</td><td><span class="btype">VARCHAR(200)</span></td><td>Auteur du dépôt</td></tr>
-            <tr><td>uploaded_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de dépôt</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- SESSION -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">🖥️</span> SESSION</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bpk">PK</span> <span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>username</td><td><span class="btype">VARCHAR(100)</span></td><td>Dénormalisé</td></tr>
-            <tr><td>name</td><td><span class="btype">VARCHAR(200)</span></td><td>Nom complet</td></tr>
-            <tr><td>role</td><td><span class="benum">admin | user</span></td><td>Rôle</td></tr>
-            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>IP de connexion</td></tr>
-            <tr><td>login_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Heure de connexion</td></tr>
-            <tr><td>last_seen</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Dernier heartbeat</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- JOURNAL_ACTIVITE -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">📝</span> JOURNAL_ACTIVITE</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>username / user_name</td><td><span class="btype">VARCHAR</span></td><td>Dénormalisé</td></tr>
-            <tr><td>action</td><td><span class="btype">VARCHAR(200)</span></td><td>Type d'action</td></tr>
-            <tr><td>details</td><td><span class="btype">TEXT</span></td><td>Détails</td></tr>
-            <tr><td>ip</td><td><span class="btype">VARCHAR(50)</span></td><td>Adresse IP</td></tr>
-            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- GROUPE_CHAT -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">👥</span> GROUPE_CHAT</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>name</td><td><span class="btype">VARCHAR(255)</span></td><td>Nom du groupe</td></tr>
-            <tr><td>created_by</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Date de création</td></tr>
-          </tbody>
-        </table>
-        <div style="padding:6px 12px;font-size:.78rem;color:#64748b;background:#f8fafc;border-top:1px solid #f1f5f9">
-          Table de jointure : <strong>CHAT_GROUP_MEMBERS</strong> (group_id PK FK, user_id PK FK)
-        </div>
-      </div>
-
-      <!-- MESSAGE_CHAT -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">💬</span> MESSAGE_CHAT</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>id</td><td><span class="btype">SERIAL</span></td><td><span class="bpk">PK</span></td></tr>
-            <tr><td>sender_id</td><td><span class="btype">INTEGER</span></td><td><span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>recipient_id</td><td><span class="btype">INTEGER (nullable)</span></td><td><span class="bfk">FK → UTILISATEUR</span> (DM)</td></tr>
-            <tr><td>group_id</td><td><span class="btype">INTEGER (nullable)</span></td><td><span class="bfk">FK → GROUPE_CHAT</span></td></tr>
-            <tr><td>content</td><td><span class="btype">TEXT</span></td><td>Contenu du message</td></tr>
-            <tr><td>created_at</td><td><span class="btype">TIMESTAMPTZ</span></td><td>Horodatage</td></tr>
-          </tbody>
-        </table>
-        <div style="padding:6px 12px;font-size:.78rem;color:#64748b;background:#f8fafc;border-top:1px solid #f1f5f9">
-          Si <code>recipient_id</code> = NULL et <code>group_id</code> = NULL → message global
-        </div>
-      </div>
-
-      <!-- MARQUEUR_LECTURE -->
-      <div class="ecard">
-        <div class="ecard-head"><span class="icon">✅</span> MARQUEUR_LECTURE</div>
-        <table class="etable">
-          <thead><tr><th>Attribut</th><th>Type</th><th>Rôle</th></tr></thead>
-          <tbody>
-            <tr><td>user_id</td><td><span class="btype">INTEGER</span></td><td><span class="bpk">PK</span> <span class="bfk">FK → UTILISATEUR</span></td></tr>
-            <tr><td>conversation_key</td><td><span class="btype">VARCHAR(100)</span></td><td><span class="bpk">PK</span> ex: "global", "dm:1:2", "group:5"</td></tr>
-            <tr><td>last_read_id</td><td><span class="btype">INTEGER</span></td><td>ID du dernier message lu</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-    </div><!-- /entity-grid -->
-  </div>
-
-  <!-- ── Section 3 : Associations ── -->
-  <div class="section">
-    <div class="section-title">Table des Associations</div>
-    <table class="rtable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Association</th>
-          <th>Entité A</th>
-          <th>Card. A</th>
-          <th>Card. B</th>
-          <th>Entité B</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>1</td>
-          <td class="rel-name">GENERE (activité)</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>JOURNAL_ACTIVITE</td>
-          <td>Chaque action utilisateur crée une entrée de journal</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td class="rel-name">A</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-1">(0,1)</span></td>
-          <td>SESSION</td>
-          <td>Un utilisateur a au plus une session active (monitoring)</td>
-        </tr>
-        <tr>
-          <td>3</td>
-          <td class="rel-name">APPARTIENT À</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>GROUPE_CHAT</td>
-          <td>Association N:N via CHAT_GROUP_MEMBERS</td>
-        </tr>
-        <tr>
-          <td>4</td>
-          <td class="rel-name">ACCÈDE À</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>SITE</td>
-          <td>Contrôle d'accès via allowed_site_ids[] dans UTILISATEUR</td>
-        </tr>
-        <tr>
-          <td>5</td>
-          <td class="rel-name">PLANIFIE</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>VISITE_SITE</td>
-          <td>Un utilisateur peut créer et/ou effectuer plusieurs visites</td>
-        </tr>
-        <tr>
-          <td>6</td>
-          <td class="rel-name">ENVOIE</td>
-          <td>UTILISATEUR</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>MESSAGE_CHAT</td>
-          <td>Un message appartient toujours à un expéditeur</td>
-        </tr>
-        <tr>
-          <td>7</td>
-          <td class="rel-name">HÉBERGE</td>
-          <td>SITE</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>EQUIPEMENT</td>
-          <td>Un équipement est rattaché à un site (site_id)</td>
-        </tr>
-        <tr>
-          <td>8</td>
-          <td class="rel-name">REÇOIT</td>
-          <td>SITE</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>VISITE_SITE</td>
-          <td>Un site peut faire l'objet de plusieurs visites</td>
-        </tr>
-        <tr>
-          <td>9</td>
-          <td class="rel-name">FAIT L'OBJET DE</td>
-          <td>EQUIPEMENT</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>MAINTENANCE</td>
-          <td>Un ticket de maintenance référence l'équipement concerné</td>
-        </tr>
-        <tr>
-          <td>10</td>
-          <td class="rel-name">GENERE (événement)</td>
-          <td>EQUIPEMENT</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>EVENEMENT_EQUIPEMENT</td>
-          <td>Toute modification d'équipement génère un événement (audit trail)</td>
-        </tr>
-        <tr>
-          <td>11</td>
-          <td class="rel-name">POSSÈDE</td>
-          <td>EQUIPEMENT</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>DOCUMENT_EQUIPEMENT</td>
-          <td>Documents (PDF, images…) attachés à un équipement</td>
-        </tr>
-        <tr>
-          <td>12</td>
-          <td class="rel-name">IMPLIQUE</td>
-          <td>EQUIPEMENT</td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>VISITE_SITE</td>
-          <td>Stocké via equipment_ids[] dans VISITE_SITE</td>
-        </tr>
-        <tr>
-          <td>13</td>
-          <td class="rel-name">DÉCLENCHE</td>
-          <td>VISITE_SITE</td>
-          <td><span class="card card-1">(0,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>MAINTENANCE</td>
-          <td>Une visite avec maintenance crée des tickets en_attente (visit_id)</td>
-        </tr>
-        <tr>
-          <td>14</td>
-          <td class="rel-name">INCLUT</td>
-          <td>GROUPE_CHAT</td>
-          <td><span class="card card-1">(1,1)</span></td>
-          <td><span class="card card-n">(0,N)</span></td>
-          <td>MESSAGE_CHAT</td>
-          <td>Les messages d'un groupe sont liés via group_id</td>
-        </tr>
-        <tr>
-          <td>15</td>
-          <td class="rel-name">REMPLACE</td>
-          <td>EQUIPEMENT</td>
-          <td><span class="card card-1">(0,1)</span></td>
-          <td><span class="card card-1">(0,1)</span></td>
-          <td>EQUIPEMENT</td>
-          <td>Auto-référence : replaced_by_id → id (traçabilité du remplacement)</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- ── Section 4 : Règles de gestion ── -->
-  <div class="section">
-    <div class="section-title">Règles de Gestion Principales</div>
-    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.07);">
-      <ol style="padding-left:20px;line-height:2;font-size:.9rem;color:#334155;">
-        <li>Un <strong>utilisateur</strong> ne peut accéder qu'aux sites de sa liste <code>allowed_site_ids</code> (sauf rôle admin).</li>
-        <li>Un <strong>équipement</strong> appartient à exactement un site ; il peut en être détaché (site_id = NULL) temporairement.</li>
-        <li>Un <strong>ticket de maintenance</strong> est créé automatiquement à l'état <em>en_attente</em> lorsqu'une visite est planifiée avec <code>with_maintenance = true</code>.</li>
-        <li>À la <strong>clôture d'une visite</strong>, chaque ticket lié peut être : résolu (traité sur place), rouvert (à programmer) ou conservé en attente.</li>
-        <li>Un <strong>ticket résolu</strong> ne peut plus être modifié ni supprimé.</li>
-        <li>Un <strong>site</strong> ne peut être supprimé que s'il ne possède plus d'équipements.</li>
-        <li>Chaque modification d'équipement génère un <strong>événement</strong> horodaté avec le diff avant/après (audit trail non modifiable).</li>
-        <li>La <strong>présence en ligne</strong> d'un utilisateur est déterminée si son <code>last_seen</code> date de moins de 5 minutes (heartbeat toutes les 60 s).</li>
-        <li>Un <strong>message chat</strong> est global si <code>recipient_id</code> et <code>group_id</code> sont NULL, privé si <code>recipient_id</code> est défini, de groupe si <code>group_id</code> est défini.</li>
-        <li>Un équipement peut être <strong>remplacé</strong> par un autre via <code>replaced_by_id</code> ; la chaîne de remplacement est traçable.</li>
-      </ol>
-    </div>
-  </div>
-
-</div><!-- /content -->
+</div>
 
 <script>
-  function downloadHtml() {
-    const blob = new Blob([document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'MCD_Gestion_Equipements_IT.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
+/* ═══════════════════════════════════════════════════════
+   DATA
+═══════════════════════════════════════════════════════ */
+const MODULES = {
+  auth:'auth', equip:'equip', ops:'ops', chat:'chat'
+};
+const MOD_LABELS = {auth:'Auth & Utilisateurs', equip:'Équipements', ops:'Opérations', chat:'Messagerie'};
+const MOD_CLS = {auth:'b-auth', equip:'b-equip', ops:'b-ops', chat:'b-chat'};
+
+const ENTITIES = [
+  {
+    id:'users', name:'Utilisateurs', table:'users', module:'auth',
+    desc:'Comptes utilisateurs de l\'application', cols:8, rels:9,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'username',type:'VARCHAR(100)',constraints:['UNIQUE','NOT NULL'],desc:'Login unique de connexion'},
+      {name:'password',type:'TEXT',constraints:['NOT NULL'],desc:'Hash bcrypt du mot de passe'},
+      {name:'name',type:'VARCHAR(200)',constraints:['NOT NULL'],desc:'Nom complet affiché'},
+      {name:'role',type:'VARCHAR(50)',constraints:['NOT NULL'],desc:'admin | technicien | user'},
+      {name:'permissions',type:'TEXT[]',constraints:['ARRAY'],desc:'lecture | ecriture | modification'},
+      {name:'allowed_site_ids',type:'INTEGER[]',constraints:['ARRAY'],desc:'Sites accessibles (vide = tous)'},
+      {name:'blocked',type:'BOOLEAN',constraints:['DEFAULT FALSE'],desc:'Compte verrouillé'},
+    ]
+  },
+  {
+    id:'user_sessions', name:'Sessions actives', table:'user_sessions', module:'auth',
+    desc:'Sessions utilisateurs en temps réel (monitoring)', cols:7, rels:1,
+    fields:[
+      {name:'user_id',type:'INTEGER',constraints:['PK','FK→users'],desc:'Un enregistrement par utilisateur'},
+      {name:'username',type:'VARCHAR(100)',constraints:[],desc:'Login dénormalisé'},
+      {name:'name',type:'VARCHAR(200)',constraints:[],desc:'Nom dénormalisé'},
+      {name:'role',type:'VARCHAR(50)',constraints:[],desc:'Rôle au moment de la session'},
+      {name:'ip',type:'VARCHAR(50)',constraints:[],desc:'Adresse IP de connexion'},
+      {name:'login_at',type:'TIMESTAMPTZ',constraints:['NOT NULL'],desc:'Heure de connexion'},
+      {name:'last_seen',type:'TIMESTAMPTZ',constraints:['NOT NULL'],desc:'Dernière activité (heartbeat)'},
+    ]
+  },
+  {
+    id:'user_activity_log', name:'Journal activité', table:'user_activity_log', module:'auth',
+    desc:'Audit complet de toutes les actions utilisateurs', cols:7, rels:1,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'user_id',type:'INTEGER',constraints:['FK→users'],desc:'Auteur de l\'action'},
+      {name:'username',type:'VARCHAR(100)',constraints:['IDX'],desc:'Login (dénormalisé, indexé)'},
+      {name:'user_name',type:'VARCHAR(200)',constraints:[],desc:'Nom complet dénormalisé'},
+      {name:'action',type:'VARCHAR(200)',constraints:['IDX'],desc:'Type : login, création, modif, suppression…'},
+      {name:'details',type:'TEXT',constraints:[],desc:'Description textuelle'},
+      {name:'ip',type:'VARCHAR(50)',constraints:[],desc:'Adresse IP'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:['IDX'],desc:'Horodatage de l\'action'},
+    ]
+  },
+  {
+    id:'sites', name:'Sites', table:'sites', module:'equip',
+    desc:'Sites géographiques hébergeant les équipements', cols:7, rels:2,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'name',type:'VARCHAR(200)',constraints:['NOT NULL'],desc:'Nom du site (ex: Siège Lomé)'},
+      {name:'city',type:'VARCHAR(100)',constraints:[],desc:'Ville'},
+      {name:'country',type:'VARCHAR(100)',constraints:[],desc:'Pays'},
+      {name:'address',type:'TEXT',constraints:[],desc:'Adresse physique complète'},
+      {name:'description',type:'TEXT',constraints:[],desc:'Informations complémentaires'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date de création'},
+    ]
+  },
+  {
+    id:'equipments', name:'Équipements', table:'equipments', module:'equip',
+    desc:'Entité centrale — inventaire du parc informatique', cols:19, rels:5,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'name',type:'VARCHAR(200)',constraints:['NOT NULL'],desc:'Nom de l\'équipement'},
+      {name:'type',type:'VARCHAR(50)',constraints:['NOT NULL'],desc:'ordinateur | réseau | serveur | imprimante | accessoires | autre'},
+      {name:'brand',type:'VARCHAR(100)',constraints:[],desc:'Marque'},
+      {name:'model',type:'VARCHAR(100)',constraints:[],desc:'Modèle'},
+      {name:'serial_number',type:'VARCHAR(100)',constraints:[],desc:'Numéro de série'},
+      {name:'ip_address',type:'VARCHAR(50)',constraints:[],desc:'Adresse IP réseau'},
+      {name:'location',type:'VARCHAR(200)',constraints:[],desc:'Localisation physique (salle, bureau)'},
+      {name:'department',type:'VARCHAR(200)',constraints:[],desc:'Service / département affectataire'},
+      {name:'status',type:'VARCHAR(50)',constraints:[],desc:'actif | inactif | maintenance | defaillant | réformé'},
+      {name:'purchase_date',type:'VARCHAR(20)',constraints:[],desc:'Date d\'achat'},
+      {name:'warranty',type:'VARCHAR(20)',constraints:[],desc:'Date d\'expiration de la garantie'},
+      {name:'last_maintenance',type:'VARCHAR(20)',constraints:[],desc:'Date de la dernière maintenance'},
+      {name:'visited',type:'BOOLEAN',constraints:['DEFAULT FALSE'],desc:'A reçu un passage technicien'},
+      {name:'technician_name',type:'VARCHAR(200)',constraints:[],desc:'Technicien de la dernière visite'},
+      {name:'visit_date',type:'VARCHAR(50)',constraints:[],desc:'Date/heure de la visite'},
+      {name:'intervention_details',type:'TEXT',constraints:[],desc:'Notes d\'intervention'},
+      {name:'quantity',type:'INTEGER',constraints:['DEFAULT 1'],desc:'Nombre d\'unités identiques'},
+      {name:'site_id',type:'INTEGER',constraints:['FK→sites'],desc:'Site hébergeant l\'équipement'},
+      {name:'replaced_by_id',type:'INTEGER',constraints:['FK→self'],desc:'Équipement de remplacement (auto-référence)'},
+    ]
+  },
+  {
+    id:'equipment_events', name:'Événements équipements', table:'equipment_events', module:'equip',
+    desc:'Historique complet de toutes les modifications', cols:13, rels:2,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'equipment_id',type:'INTEGER',constraints:['FK→equipments','IDX'],desc:'Équipement concerné'},
+      {name:'equipment_name',type:'VARCHAR(200)',constraints:[],desc:'Nom dénormalisé (historique figé)'},
+      {name:'equipment_type',type:'VARCHAR(50)',constraints:[],desc:'Type dénormalisé'},
+      {name:'department',type:'VARCHAR(200)',constraints:['IDX'],desc:'Service au moment de l\'événement'},
+      {name:'action',type:'VARCHAR(100)',constraints:[],desc:'Création | Modification | Transfert | Intervention…'},
+      {name:'details',type:'TEXT',constraints:[],desc:'Description textuelle'},
+      {name:'changes',type:'TEXT (JSON)',constraints:[],desc:'Diff avant/après sérialisé JSON'},
+      {name:'technician',type:'VARCHAR(200)',constraints:[],desc:'Technicien assigné'},
+      {name:'user_id',type:'INTEGER',constraints:['FK→users'],desc:'Auteur de l\'action'},
+      {name:'username',type:'VARCHAR(100)',constraints:[],desc:'Login dénormalisé'},
+      {name:'user_name',type:'VARCHAR(200)',constraints:[],desc:'Nom dénormalisé'},
+      {name:'ip',type:'VARCHAR(50)',constraints:[],desc:'Adresse IP de l\'action'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:['IDX'],desc:'Horodatage précis'},
+    ]
+  },
+  {
+    id:'equipment_documents', name:'Documents équipements', table:'equipment_documents', module:'equip',
+    desc:'Fichiers joints à chaque équipement (base64)', cols:9, rels:1,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'equipment_id',type:'INTEGER',constraints:['FK→equipments','IDX'],desc:'Équipement propriétaire'},
+      {name:'filename',type:'VARCHAR(500)',constraints:['NOT NULL'],desc:'Nom du fichier original'},
+      {name:'file_type',type:'VARCHAR(100)',constraints:[],desc:'MIME type (pdf, png, jpg…)'},
+      {name:'file_size',type:'INTEGER',constraints:[],desc:'Taille en octets (max 3 Mo)'},
+      {name:'file_data',type:'TEXT',constraints:[],desc:'Contenu encodé en base64'},
+      {name:'description',type:'TEXT',constraints:[],desc:'Note libre sur le document'},
+      {name:'uploaded_by',type:'VARCHAR(200)',constraints:[],desc:'Nom de l\'auteur de l\'upload'},
+      {name:'uploaded_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date d\'upload'},
+    ]
+  },
+  {
+    id:'maintenance_records', name:'Tickets maintenance', table:'maintenance_records', module:'ops',
+    desc:'Incidents, pannes et interventions techniques', cols:19, rels:3,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'equipment_id',type:'INTEGER',constraints:['FK→equipments','IDX'],desc:'Équipement en panne'},
+      {name:'equipment_name',type:'VARCHAR(200)',constraints:[],desc:'Nom dénormalisé'},
+      {name:'equipment_type',type:'VARCHAR(50)',constraints:[],desc:'Type dénormalisé'},
+      {name:'department',type:'VARCHAR(200)',constraints:[],desc:'Service dénormalisé'},
+      {name:'failure_desc',type:'TEXT',constraints:[],desc:'Description de la panne signalée'},
+      {name:'diagnosis',type:'TEXT',constraints:[],desc:'Diagnostic technique posé'},
+      {name:'solution',type:'TEXT',constraints:[],desc:'Solution appliquée'},
+      {name:'parts_replaced',type:'TEXT',constraints:[],desc:'Pièces remplacées'},
+      {name:'technician',type:'VARCHAR(200)',constraints:[],desc:'Technicien assigné'},
+      {name:'opened_by',type:'VARCHAR(200)',constraints:[],desc:'Auteur de la déclaration'},
+      {name:'status',type:'VARCHAR(20)',constraints:['IDX'],desc:'en_attente | ouvert | en_cours | résolu'},
+      {name:'priority',type:'VARCHAR(20)',constraints:[],desc:'basse | normale | haute | critique'},
+      {name:'opened_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date d\'ouverture du ticket'},
+      {name:'started_at',type:'TIMESTAMPTZ',constraints:[],desc:'Début de la prise en charge'},
+      {name:'closed_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date de résolution'},
+      {name:'notes',type:'TEXT',constraints:[],desc:'Notes libres du technicien'},
+      {name:'visit_id',type:'INTEGER',constraints:['FK→site_visits'],desc:'Visite associée si maintenance sur site'},
+      {name:'site_name',type:'VARCHAR(200)',constraints:[],desc:'Nom du site dénormalisé'},
+    ]
+  },
+  {
+    id:'site_visits', name:'Visites de site', table:'site_visits', module:'ops',
+    desc:'Planification et suivi des interventions terrain', cols:18, rels:3,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'site_id',type:'INTEGER',constraints:['FK→sites','IDX'],desc:'Site visité'},
+      {name:'site_name',type:'VARCHAR(200)',constraints:[],desc:'Nom du site dénormalisé'},
+      {name:'scheduled_date',type:'DATE',constraints:['NOT NULL','IDX'],desc:'Date prévue de la visite'},
+      {name:'scheduled_time',type:'VARCHAR(10)',constraints:[],desc:'Heure prévue (HH:MM)'},
+      {name:'technician',type:'VARCHAR(200)',constraints:[],desc:'Technicien responsable'},
+      {name:'purpose',type:'TEXT',constraints:[],desc:'Objet de la visite'},
+      {name:'status',type:'VARCHAR(20)',constraints:[],desc:'planifié | en_cours | terminé | annulé | reporté'},
+      {name:'notes',type:'TEXT',constraints:[],desc:'Notes du technicien'},
+      {name:'created_by',type:'VARCHAR(200)',constraints:[],desc:'Créateur de la visite'},
+      {name:'with_maintenance',type:'BOOLEAN',constraints:[],desc:'Inclut une intervention de maintenance'},
+      {name:'equipment_ids',type:'INTEGER[]',constraints:['ARRAY'],desc:'Équipements concernés — relation N:M via tableau'},
+      {name:'maintenance_desc',type:'TEXT',constraints:[],desc:'Description des travaux prévus'},
+      {name:'validation_comment',type:'TEXT',constraints:[],desc:'Commentaire de clôture/annulation'},
+      {name:'validated_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date de validation (terminé/annulé)'},
+      {name:'validated_by',type:'VARCHAR(200)',constraints:[],desc:'Utilisateur ayant clôturé'},
+      {name:'rescheduled_date',type:'DATE',constraints:[],desc:'Nouvelle date si reportée'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:[],desc:'Horodatage de création'},
+    ]
+  },
+  {
+    id:'chat_messages', name:'Messages', table:'chat_messages', module:'chat',
+    desc:'Messages de la messagerie interne (privés et groupes)', cols:8, rels:3,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'sender_id',type:'INTEGER',constraints:['FK→users'],desc:'Expéditeur du message'},
+      {name:'sender_name',type:'VARCHAR(255)',constraints:[],desc:'Nom dénormalisé'},
+      {name:'sender_username',type:'VARCHAR(255)',constraints:[],desc:'Login dénormalisé'},
+      {name:'recipient_id',type:'INTEGER',constraints:['FK→users','IDX'],desc:'Destinataire (NULL si message de groupe)'},
+      {name:'group_id',type:'INTEGER',constraints:['FK→chat_groups','IDX'],desc:'Groupe cible (NULL si message privé)'},
+      {name:'content',type:'TEXT',constraints:['NOT NULL'],desc:'Corps du message'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:['IDX'],desc:'Horodatage d\'envoi'},
+    ]
+  },
+  {
+    id:'chat_read_markers', name:'Marqueurs de lecture', table:'chat_read_markers', module:'chat',
+    desc:'Suivi du dernier message lu par conversation et par utilisateur', cols:3, rels:1,
+    fields:[
+      {name:'user_id',type:'INTEGER',constraints:['PK','FK→users'],desc:'Utilisateur (partie PK composite)'},
+      {name:'conversation_key',type:'VARCHAR(100)',constraints:['PK'],desc:'Clé de conv. : global | dm_X | group_Y'},
+      {name:'last_read_id',type:'INTEGER',constraints:[],desc:'ID du dernier message lu'},
+    ]
+  },
+  {
+    id:'chat_groups', name:'Groupes de discussion', table:'chat_groups', module:'chat',
+    desc:'Canaux de discussion multi-utilisateurs', cols:4, rels:2,
+    fields:[
+      {name:'id',type:'SERIAL',constraints:['PK'],desc:'Identifiant auto-incrémenté'},
+      {name:'name',type:'VARCHAR(255)',constraints:['NOT NULL'],desc:'Nom du groupe'},
+      {name:'created_by',type:'INTEGER',constraints:['FK→users'],desc:'Créateur du groupe'},
+      {name:'created_at',type:'TIMESTAMPTZ',constraints:[],desc:'Date de création'},
+    ]
+  },
+  {
+    id:'chat_group_members', name:'Membres des groupes', table:'chat_group_members', module:'chat',
+    desc:'Table pivot N:M — utilisateurs ↔ groupes de discussion', cols:2, rels:2,
+    fields:[
+      {name:'group_id',type:'INTEGER',constraints:['PK','FK→chat_groups'],desc:'Groupe (partie PK composite)'},
+      {name:'user_id',type:'INTEGER',constraints:['PK','FK→users'],desc:'Membre (partie PK composite)'},
+    ]
+  },
+];
+
+const RELATIONS = [
+  {id:'R01',src:'users',card_src:'1,1',verb:'possède (session active)',card_tgt:'0,1',tgt:'user_sessions',key:'user_sessions.user_id',type:'11'},
+  {id:'R02',src:'users',card_src:'1,1',verb:'génère (journal d\'activité)',card_tgt:'0,N',tgt:'user_activity_log',key:'user_activity_log.user_id',type:'1n'},
+  {id:'R03',src:'users',card_src:'1,1',verb:'réalise (modifications équipements)',card_tgt:'0,N',tgt:'equipment_events',key:'equipment_events.user_id',type:'1n'},
+  {id:'R04',src:'users',card_src:'0,N',verb:'est autorisé sur (sites)',card_tgt:'0,N',tgt:'sites',key:'users.allowed_site_ids[]',type:'nm'},
+  {id:'R05',src:'users',card_src:'1,1',verb:'envoie (messages privés)',card_tgt:'0,N',tgt:'chat_messages',key:'chat_messages.sender_id',type:'1n'},
+  {id:'R06',src:'users',card_src:'1,1',verb:'reçoit (messages privés)',card_tgt:'0,N',tgt:'chat_messages',key:'chat_messages.recipient_id',type:'1n'},
+  {id:'R07',src:'users',card_src:'1,1',verb:'crée (groupes)',card_tgt:'0,N',tgt:'chat_groups',key:'chat_groups.created_by',type:'1n'},
+  {id:'R08',src:'users',card_src:'0,N',verb:'est membre de (groupes)',card_tgt:'0,N',tgt:'chat_groups',key:'chat_group_members (pivot)',type:'nm'},
+  {id:'R09',src:'users',card_src:'1,1',verb:'marque comme lu',card_tgt:'0,N',tgt:'chat_read_markers',key:'chat_read_markers.user_id',type:'1n'},
+  {id:'R10',src:'sites',card_src:'1,1',verb:'héberge (équipements)',card_tgt:'0,N',tgt:'equipments',key:'equipments.site_id',type:'1n'},
+  {id:'R11',src:'sites',card_src:'1,1',verb:'fait l\'objet de (visites)',card_tgt:'0,N',tgt:'site_visits',key:'site_visits.site_id',type:'1n'},
+  {id:'R12',src:'equipments',card_src:'0,1',verb:'est remplacé par (réforme)',card_tgt:'0,1',tgt:'equipments',key:'equipments.replaced_by_id (self)',type:'self'},
+  {id:'R13',src:'equipments',card_src:'1,1',verb:'génère (événements/historique)',card_tgt:'0,N',tgt:'equipment_events',key:'equipment_events.equipment_id',type:'1n'},
+  {id:'R14',src:'equipments',card_src:'1,1',verb:'possède (documents joints)',card_tgt:'0,N',tgt:'equipment_documents',key:'equipment_documents.equipment_id',type:'1n'},
+  {id:'R15',src:'equipments',card_src:'1,1',verb:'fait l\'objet de (tickets)',card_tgt:'0,N',tgt:'maintenance_records',key:'maintenance_records.equipment_id',type:'1n'},
+  {id:'R16',src:'equipments',card_src:'0,N',verb:'est inclus dans (visites)',card_tgt:'0,N',tgt:'site_visits',key:'site_visits.equipment_ids[] (Array)',type:'nm'},
+  {id:'R17',src:'site_visits',card_src:'1,1',verb:'déclenche (tickets maintenance)',card_tgt:'0,N',tgt:'maintenance_records',key:'maintenance_records.visit_id',type:'1n'},
+  {id:'R18',src:'chat_groups',card_src:'1,1',verb:'reçoit (messages)',card_tgt:'0,N',tgt:'chat_messages',key:'chat_messages.group_id',type:'1n'},
+  {id:'R19',src:'chat_groups',card_src:'1,1',verb:'contient (membres)',card_tgt:'0,N',tgt:'chat_group_members',key:'chat_group_members.group_id',type:'1n'},
+  {id:'R20',src:'maintenance_records',card_src:'0,N',verb:'est lié à (visite de site)',card_tgt:'0,1',tgt:'site_visits',key:'maintenance_records.visit_id',type:'1n'},
+  {id:'R21',src:'users',card_src:'0,N',verb:'participe en tant que membre',card_tgt:'0,N',tgt:'chat_group_members',key:'chat_group_members.user_id',type:'nm'},
+  {id:'R22',src:'equipment_events',card_src:'0,N',verb:'trace les actions utilisateur',card_tgt:'1,1',tgt:'users',key:'equipment_events.user_id',type:'1n'},
+];
+
+const INDEXES = [
+  {table:'equipment_events',name:'idx_equipment_events_equipment_id',cols:'equipment_id',goal:'Récupération de l\'historique d\'un équipement'},
+  {table:'equipment_events',name:'idx_equipment_events_created_at',cols:'created_at',goal:'Rapports et filtres par période'},
+  {table:'equipment_events',name:'idx_equipment_events_department',cols:'department',goal:'Rapports par service'},
+  {table:'equipment_documents',name:'idx_equipment_documents_equipment_id',cols:'equipment_id',goal:'Chargement des documents d\'un équipement'},
+  {table:'maintenance_records',name:'idx_maintenance_equipment_id',cols:'equipment_id',goal:'Tickets liés à un équipement'},
+  {table:'maintenance_records',name:'idx_maintenance_status',cols:'status',goal:'Filtrage par statut (ouvert/résolu)'},
+  {table:'user_activity_log',name:'idx_ual_username',cols:'username',goal:'Journal filtré par utilisateur'},
+  {table:'user_activity_log',name:'idx_ual_created_at',cols:'created_at',goal:'Journal filtré par période'},
+  {table:'user_activity_log',name:'idx_ual_action',cols:'action',goal:'Journal filtré par type d\'action'},
+  {table:'chat_messages',name:'idx_chat_messages_created',cols:'created_at',goal:'Chargement chronologique des messages'},
+  {table:'chat_messages',name:'idx_chat_messages_recipient',cols:'recipient_id',goal:'Messages privés d\'un utilisateur'},
+  {table:'chat_messages',name:'idx_chat_messages_group',cols:'group_id',goal:'Messages d\'un groupe de discussion'},
+  {table:'site_visits',name:'idx_site_visits_site_id',cols:'site_id',goal:'Visites d\'un site donné'},
+  {table:'site_visits',name:'idx_site_visits_date',cols:'scheduled_date',goal:'Visites par date (vue calendrier/agenda)'},
+];
+
+/* ═══════════════════════════════════════════════════════
+   CURRENT STATE
+═══════════════════════════════════════════════════════ */
+let currentTab = 'entities';
+let searchQ = '';
+let groupByModule = false;
+let selectedRow = null;
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+function badge(label, cls) {
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+function constraintBadges(arr) {
+  return arr.map(c => {
+    if(c==='PK') return badge(c,'b-pk');
+    if(c.startsWith('FK')) return badge(c,'b-fk');
+    if(c==='IDX') return badge(c,'b-idx');
+    if(c==='NOT NULL') return badge(c,'b-nn');
+    if(c==='ARRAY') return badge(c,'b-arr');
+    if(c==='UNIQUE') return badge('UNIQUE','b-1n');
+    return badge(c,'badge' in c ? 'b-nn':'b-nn');
+  }).join(' ');
+}
+function typeBadge(type) {
+  const cls = {auth:'b-auth',equip:'b-equip',ops:'b-ops',chat:'b-chat'};
+  return badge(MOD_LABELS[type]||type, cls[type]||'b-nn');
+}
+function relTypeBadge(type) {
+  const map = {'1n':['1:N','b-1n'],'11':['1:1','b-11'],'nm':['N:M','b-nm'],'self':['Auto-ref','b-self']};
+  const [l,c] = map[type]||[type,'b-nn'];
+  return badge(l,c);
+}
+function hl(text, q) {
+  if(!q) return text;
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  return String(text).replace(re, '<mark style="background:#fff3cd;padding:0 2px;border-radius:2px">$1</mark>');
+}
+
+/* ═══════════════════════════════════════════════════════
+   TAB SWITCH
+═══════════════════════════════════════════════════════ */
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('on'));
+  const tabEl = document.getElementById('tab-'+tab);
+  if(tabEl) tabEl.classList.add('on');
+  // Nav item
+  const navLabels = {entities:'Entités', diagram:'Diagramme ERD', relations:'Relations', indexes:'Index', notes:'Notes de conception', cols:'Toutes les colonnes'};
+  document.querySelectorAll('.nav-item').forEach(el => {
+    if(el.textContent.trim().startsWith(navLabels[tab]?.split(' ')[0]||'__')) el.classList.add('active');
+  });
+  const titles = {entities:'Entités / Tables', cols:'Colonnes — toutes les tables', diagram:'Diagramme Entité-Association', relations:'Relations & Cardinalités', indexes:'Index de performance', notes:'Notes de conception'};
+  document.getElementById('cp-title').textContent = titles[tab]||tab;
+  render();
+}
+function onSearch(q) { searchQ = q; render(); }
+function toggleGroupBy() { groupByModule = !groupByModule; render(); }
+
+/* ═══════════════════════════════════════════════════════
+   RENDER
+═══════════════════════════════════════════════════════ */
+function render() {
+  const area = document.getElementById('content-area');
+  if(currentTab==='entities') renderEntities(area);
+  else if(currentTab==='cols') renderCols(area);
+  else if(currentTab==='diagram') renderDiagram(area);
+  else if(currentTab==='relations') renderRelations(area);
+  else if(currentTab==='indexes') renderIndexes(area);
+  else if(currentTab==='notes') renderNotes(area);
+}
+
+/* ─── ENTITIES ─────────────────────────────────────────── */
+function renderEntities(area) {
+  const q = searchQ.toLowerCase();
+  let data = ENTITIES.filter(e =>
+    !q || e.name.toLowerCase().includes(q) || e.table.toLowerCase().includes(q) ||
+    MOD_LABELS[e.module].toLowerCase().includes(q) || e.desc.toLowerCase().includes(q)
+  );
+  document.getElementById('pager-count').textContent = data.length + ' entité(s)';
+
+  if(groupByModule) {
+    let html = '';
+    const groups = ['auth','equip','ops','chat'];
+    groups.forEach(mod => {
+      const grp = data.filter(e => e.module===mod);
+      if(!grp.length) return;
+      html += `<div style="padding:6px 12px 2px;background:#f8f9fa;border-bottom:1px solid #dee2e6;font-size:11px;font-weight:700;color:#6c757d;text-transform:uppercase;letter-spacing:.5px">
+        ${typeBadge(mod)} &nbsp;${MOD_LABELS[mod]} — ${grp.length} table(s)
+      </div>`;
+      html += rowsHTML(grp, q);
+    });
+    area.innerHTML = `<div class="list-view"><table class="list-table"><thead>${thead()}</thead><tbody>${html}</tbody></table></div>`;
+  } else {
+    area.innerHTML = `<div class="list-view"><table class="list-table"><thead>${thead()}</thead><tbody>${rowsHTML(data,q)}</tbody></table></div>`;
   }
+}
+
+function thead() {
+  return `<tr>
+    <th style="width:32px"><input type="checkbox" class="check" onclick="toggleAll(this)"></th>
+    <th>MODULE</th>
+    <th>NOM</th>
+    <th>TABLE (SQL)</th>
+    <th>DESCRIPTION</th>
+    <th style="text-align:center">COLONNES</th>
+    <th style="text-align:center">RELATIONS</th>
+    <th>TYPE CLÉS</th>
+  </tr>`;
+}
+
+function rowsHTML(data, q) {
+  return data.map((e,i) => {
+    const hasPK = e.fields.some(f => f.constraints.includes('PK'));
+    const fks = e.fields.filter(f => f.constraints.some(c => c.startsWith('FK'))).length;
+    const hasArr = e.fields.some(f => f.constraints.includes('ARRAY'));
+    return `<tr onclick="openDetail('${e.id}')" id="row-${e.id}">
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="check" onchange="selectRow('${e.id}',this.checked)"></td>
+      <td>${typeBadge(e.module)}</td>
+      <td class="f-link">${hl(e.name, searchQ)}</td>
+      <td class="f-mono f-code">${hl(e.table, searchQ)}</td>
+      <td class="f-muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hl(e.desc, searchQ)}</td>
+      <td style="text-align:center;color:#555">${e.fields.length}</td>
+      <td style="text-align:center;color:#555">${e.rels}</td>
+      <td>
+        ${hasPK ? badge('PK','b-pk') : ''}
+        ${fks ? badge(fks+' FK','b-fk') : ''}
+        ${hasArr ? badge('ARRAY','b-arr') : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleAll(cb) {
+  document.querySelectorAll('.list-table .check').forEach(c => c.checked = cb.checked);
+}
+function selectRow(id, checked) {
+  const row = document.getElementById('row-'+id);
+  if(row) row.classList.toggle('sel', checked);
+}
+
+/* ─── ALL COLUMNS ──────────────────────────────────────── */
+function renderCols(area) {
+  const q = searchQ.toLowerCase();
+  let rows = '';
+  let count = 0;
+  ENTITIES.forEach(e => {
+    e.fields.forEach(f => {
+      if(q && !f.name.toLowerCase().includes(q) && !f.type.toLowerCase().includes(q) &&
+         !e.table.toLowerCase().includes(q) && !f.desc.toLowerCase().includes(q)) return;
+      count++;
+      rows += `<tr>
+        <td><input type="checkbox" class="check"></td>
+        <td>${typeBadge(e.module)}</td>
+        <td class="f-link" onclick="openDetail('${e.id}')">${hl(e.name, searchQ)}</td>
+        <td class="f-mono f-code">${hl(f.name, searchQ)}</td>
+        <td style="color:#7c3aed;font-family:'Consolas',monospace;font-size:12px">${hl(f.type, searchQ)}</td>
+        <td>${constraintBadges(f.constraints)}</td>
+        <td class="f-muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hl(f.desc, searchQ)}</td>
+      </tr>`;
+    });
+  });
+  document.getElementById('pager-count').textContent = count + ' colonnes';
+  area.innerHTML = `<table class="list-table">
+    <thead><tr>
+      <th style="width:32px"></th>
+      <th>MODULE</th><th>TABLE</th><th>COLONNE</th><th>TYPE SQL</th><th>CONTRAINTES</th><th>DESCRIPTION</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+/* ─── RELATIONS ────────────────────────────────────────── */
+function renderRelations(area) {
+  const q = searchQ.toLowerCase();
+  const data = RELATIONS.filter(r =>
+    !q || r.src.includes(q) || r.tgt.includes(q) || r.verb.toLowerCase().includes(q) || r.key.toLowerCase().includes(q)
+  );
+  document.getElementById('pager-count').textContent = data.length + ' relation(s)';
+  const rows = data.map(r => `<tr>
+    <td><input type="checkbox" class="check"></td>
+    <td class="f-mono" style="color:#6c757d;font-size:11px">${r.id}</td>
+    <td class="f-link" onclick="openDetail('${r.src}')">${hl(r.src, searchQ)}</td>
+    <td style="text-align:center"><span style="font-family:monospace;font-weight:700;color:#495057;background:#f1f3f5;padding:2px 8px;border-radius:3px">${r.card_src}</span></td>
+    <td style="color:#555;font-style:italic">${hl(r.verb, searchQ)}</td>
+    <td style="text-align:center"><span style="font-family:monospace;font-weight:700;color:#495057;background:#f1f3f5;padding:2px 8px;border-radius:3px">${r.card_tgt}</span></td>
+    <td class="f-link" onclick="openDetail('${r.tgt}')">${hl(r.tgt, searchQ)}</td>
+    <td class="f-mono f-code" style="font-size:11px">${hl(r.key, searchQ)}</td>
+    <td>${relTypeBadge(r.type)}</td>
+  </tr>`).join('');
+  area.innerHTML = `<table class="list-table">
+    <thead><tr>
+      <th style="width:32px"></th>
+      <th>#</th><th>ENTITÉ SOURCE</th><th style="text-align:center">CARD.</th><th>ASSOCIATION</th>
+      <th style="text-align:center">CARD.</th><th>ENTITÉ CIBLE</th><th>MÉCANISME</th><th>TYPE</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+/* ─── INDEXES ──────────────────────────────────────────── */
+function renderIndexes(area) {
+  const q = searchQ.toLowerCase();
+  const data = INDEXES.filter(i =>
+    !q || i.table.includes(q) || i.name.includes(q) || i.cols.includes(q) || i.goal.toLowerCase().includes(q)
+  );
+  document.getElementById('pager-count').textContent = data.length + ' index';
+  const rows = data.map((idx,i) => {
+    const entity = ENTITIES.find(e => e.table===idx.table);
+    const mod = entity?.module || 'equip';
+    return `<tr>
+      <td><input type="checkbox" class="check"></td>
+      <td style="color:#6c757d;font-size:11px;font-family:monospace">${String(i+1).padStart(2,'0')}</td>
+      <td>${typeBadge(mod)}</td>
+      <td class="f-link" onclick="openDetail('${entity?.id||''}')">${hl(idx.table, searchQ)}</td>
+      <td class="f-mono f-code" style="font-size:11px">${hl(idx.name, searchQ)}</td>
+      <td style="color:#7c3aed;font-family:'Consolas',monospace;font-size:12px">${hl(idx.cols, searchQ)}</td>
+      <td class="f-muted">${hl(idx.goal, searchQ)}</td>
+    </tr>`;
+  }).join('');
+  area.innerHTML = `<table class="list-table">
+    <thead><tr>
+      <th style="width:32px"></th>
+      <th>#</th><th>MODULE</th><th>TABLE</th><th>NOM DE L'INDEX</th><th>COLONNE(S)</th><th>OBJECTIF</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+/* ─── NOTES ────────────────────────────────────────────── */
+function renderNotes(area) {
+  document.getElementById('pager-count').textContent = '6 notes';
+  const notes = [
+    {color:'#1a6fa6',icon:'🔑',title:'Stratégie des clés primaires',body:'Toutes les entités principales utilisent des <code>SERIAL PRIMARY KEY</code> auto-incrémentés. Les tables pivot (<code>chat_group_members</code>, <code>chat_read_markers</code>) utilisent des clés primaires composites sur deux colonnes. La relation N:M entre <em>equipments</em> et <em>site_visits</em> est gérée par un tableau PostgreSQL (<code>INTEGER[]</code>) côté site_visits, simplifiant les requêtes de lecture fréquentes.'},
+    {color:'#059669',icon:'📊',title:'Dénormalisation intentionnelle',body:'Plusieurs tables (<code>equipment_events</code>, <code>maintenance_records</code>, <code>chat_messages</code>) dupliquent des champs texte comme <code>equipment_name</code>, <code>sender_name</code>. C\'est une dénormalisation volontaire pour <strong>préserver l\'historique</strong> même si l\'entité source est modifiée ou supprimée ultérieurement.'},
+    {color:'#d97706',icon:'🔐',title:'Gestion des permissions (RBAC)',body:'Les droits d\'accès sont gérés en double : via le <strong>role</strong> (admin / technicien / user) et via le tableau <code>permissions[]</code> (lecture / ecriture / modification). La restriction aux sites se fait via <code>allowed_site_ids[]</code>. Ce choix permet une granularité fine sans table RBAC dédiée supplémentaire.'},
+    {color:'#7c3aed',icon:'💬',title:'Messagerie — 3 types de conversations',body:'La messagerie gère : <strong>Global</strong> (tous, recipient_id=NULL et group_id=NULL), <strong>Privée 1:1</strong> (recipient_id ≠ NULL, group_id=NULL), <strong>Groupe</strong> (group_id ≠ NULL, recipient_id=NULL). Les messages non lus sont calculés dynamiquement via <code>chat_read_markers</code> (marqueur de dernier message lu).'},
+    {color:'#0891b2',icon:'🔄',title:'Cycle de vie des tickets maintenance',body:'Un ticket passe par : <code>en_attente → ouvert → en_cours → résolu</code>. Il peut être lié à une visite de site (<code>visit_id</code>). À la clôture d\'une visite, les tickets liés peuvent être automatiquement résolus, basculés en ouvert, ou laissés inchangés selon le choix du technicien.'},
+    {color:'#b45309',icon:'📁',title:'Stockage des fichiers joints',body:'Les documents attachés aux équipements (<code>equipment_documents</code>) sont stockés en <strong>Base64 dans la colonne <code>file_data</code></strong> (TEXT). Taille limite : 3 Mo par fichier. Cette approche simplifie le déploiement (pas de stockage objet S3/MinIO) au détriment des performances pour de très gros volumes de fichiers.'},
+  ];
+  area.innerHTML = `<div class="notes-grid">
+    ${notes.map(n => `<div class="note-card" style="border-left-color:${n.color}">
+      <div class="note-title">${n.icon} ${n.title}</div>
+      <div class="note-body">${n.body}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+/* ─── DIAGRAM ──────────────────────────────────────────── */
+function renderDiagram(area) {
+  document.getElementById('pager-count').textContent = '13 entités · 22 relations';
+  area.innerHTML = `
+  <div class="diagram-wrap">
+    <div class="diagram-card">
+      <div class="diagram-toolbar">
+        <button class="btn-icon" title="Zoom in" onclick="zoomDiagram(1.15)">＋</button>
+        <button class="btn-icon" title="Zoom out" onclick="zoomDiagram(0.87)">－</button>
+        <button class="btn-icon" title="Reset" onclick="resetZoom()">⊙</button>
+        <span style="margin-left:8px;font-size:12px;color:#6c757d">Cliquez sur une entité pour voir ses colonnes</span>
+      </div>
+      <div id="svg-wrap" style="overflow:auto;padding:24px">
+        <div id="svg-scale" style="transform-origin:top left;transition:transform .2s">
+        <svg id="erd" viewBox="0 0 1480 920" width="1480" height="920"
+          font-family="'Segoe UI',system-ui,sans-serif"
+          xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="a0" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#94a3b8"/></marker>
+            <marker id="a1" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#1a6fa6"/></marker>
+            <marker id="a2" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#059669"/></marker>
+            <marker id="a3" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#d97706"/></marker>
+            <marker id="a4" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#7c3aed"/></marker>
+            <filter id="sh"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,.1)"/></filter>
+          </defs>
+
+          <!-- ZONES -->
+          <rect x="18" y="18" width="420" height="380" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5" stroke-dasharray="5,3"/>
+          <text x="30" y="36" font-size="10" font-weight="700" fill="#93c5fd" letter-spacing=".6">AUTH &amp; UTILISATEURS</text>
+          <rect x="455" y="18" width="580" height="440" rx="8" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5" stroke-dasharray="5,3"/>
+          <text x="467" y="36" font-size="10" font-weight="700" fill="#86efac" letter-spacing=".6">ÉQUIPEMENTS</text>
+          <rect x="1055" y="18" width="410" height="480" rx="8" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5" stroke-dasharray="5,3"/>
+          <text x="1067" y="36" font-size="10" font-weight="700" fill="#fb923c" letter-spacing=".6">OPÉRATIONS</text>
+          <rect x="18" y="660" width="1060" height="240" rx="8" fill="#faf5ff" stroke="#ddd6fe" stroke-width="1.5" stroke-dasharray="5,3"/>
+          <text x="30" y="678" font-size="10" font-weight="700" fill="#c4b5fd" letter-spacing=".6">MESSAGERIE</text>
+
+          <!-- ══ CONNECTORS ══ -->
+          <!-- users→user_sessions -->
+          <line x1="222" y1="124" x2="258" y2="124" stroke="#1a6fa6" stroke-width="1.5" marker-end="url(#a1)"/>
+          <!-- users→user_activity_log -->
+          <line x1="140" y1="186" x2="140" y2="222" stroke="#0891b2" stroke-width="1.5" marker-end="url(#a0)"/>
+          <!-- users→equipment_events (dashed) -->
+          <path d="M222 145 C340 145 420 345 555 360" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#a0)"/>
+          <!-- users→chat_messages -->
+          <line x1="100" y1="186" x2="80" y2="694" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#a4)"/>
+          <!-- users→chat_groups -->
+          <line x1="180" y1="186" x2="555" y2="694" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#a4)"/>
+          <!-- users→chat_group_members -->
+          <line x1="222" y1="160" x2="800" y2="694" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#a4)"/>
+          <!-- sites→equipments -->
+          <line x1="636" y1="124" x2="672" y2="124" stroke="#059669" stroke-width="2" marker-end="url(#a2)"/>
+          <!-- sites→site_visits -->
+          <line x1="570" y1="186" x2="1100" y2="260" stroke="#d97706" stroke-width="1.5" marker-end="url(#a3)"/>
+          <!-- equipments→equipment_events -->
+          <line x1="780" y1="240" x2="660" y2="340" stroke="#10b981" stroke-width="1.5" marker-end="url(#a2)"/>
+          <!-- equipments→equipment_documents -->
+          <line x1="870" y1="240" x2="880" y2="340" stroke="#34d399" stroke-width="1.5" marker-end="url(#a2)"/>
+          <!-- equipments→maintenance_records -->
+          <line x1="880" y1="140" x2="1060" y2="140" stroke="#d97706" stroke-width="1.5" marker-end="url(#a3)"/>
+          <!-- equipments→site_visits (N:M dashed) -->
+          <path d="M880 170 C980 230 1060 290 1100 310" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#a4)"/>
+          <!-- maintenance→site_visits -->
+          <line x1="1180" y1="260" x2="1180" y2="290" stroke="#d97706" stroke-width="1.5" marker-end="url(#a3)"/>
+          <!-- equipments self-ref -->
+          <path d="M870 120 C930 100 930 75 900 65 C870 55 855 80 860 110" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,2" fill="none" marker-end="url(#a0)"/>
+          <!-- chat_messages→chat_groups -->
+          <line x1="270" y1="762" x2="505" y2="762" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#a4)"/>
+          <!-- chat_groups→chat_group_members -->
+          <line x1="670" y1="762" x2="720" y2="762" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#a4)"/>
+
+          <!-- CARDINALITÉS -->
+          <text x="234" y="119" font-size="9" fill="#1a6fa6" font-weight="700">1,1</text>
+          <text x="234" y="133" font-size="9" fill="#1a6fa6" font-weight="700">0,1</text>
+          <text x="646" y="119" font-size="9" fill="#059669" font-weight="700">1,1</text>
+          <text x="646" y="133" font-size="9" fill="#059669" font-weight="700">0,N</text>
+          <text x="1083" y="135" font-size="9" fill="#d97706" font-weight="700">0,N</text>
+          <text x="1070" y="295" font-size="9" fill="#d97706" font-weight="700">0,N</text>
+          <text x="950" y="215" font-size="9" fill="#7c3aed" font-weight="600">N:M</text>
+
+          <!-- ══ ENTITY BOXES ══ -->
+          ${entityBox(50,50,180,130,'👤 users','auth','#1a6fa6','users')}
+          ${entityBox(258,50,190,130,'🖥️ user_sessions','auth','#3b82f6','user_sessions')}
+          ${entityBox(50,222,180,120,'📋 user_activity_log','auth','#0891b2','user_activity_log')}
+          ${entityBox(475,50,180,130,'🌐 sites','equip','#059669','sites')}
+          ${entityBox(672,50,200,190,'💻 equipments','equip','#065f46','equipments')}
+          ${entityBox(540,340,200,130,'📝 equipment_events','equip','#10b981','equipment_events')}
+          ${entityBox(760,340,200,130,'📎 equipment_documents','equip','#34d399','equipment_documents')}
+          ${entityBox(1060,50,200,200,'🔧 maintenance_records','ops','#d97706','maintenance_records')}
+          ${entityBox(1060,290,200,175,'📅 site_visits','ops','#f59e0b','site_visits')}
+          ${entityBox(30,694,210,135,'💬 chat_messages','chat','#7c3aed','chat_messages')}
+          ${entityBox(275,694,190,115,'👁️ chat_read_markers','chat','#8b5cf6','chat_read_markers')}
+          ${entityBox(505,694,180,115,'👥 chat_groups','chat','#a78bfa','chat_groups')}
+          ${entityBox(720,694,195,110,'🔗 chat_group_members','chat','#c4b5fd','chat_group_members')}
+        </svg>
+        </div>
+      </div>
+      <div class="diagram-legend">
+        <span><span class="leg-dot" style="background:#1a6fa6"></span> Auth &amp; Utilisateurs</span>
+        <span><span class="leg-dot" style="background:#059669"></span> Équipements</span>
+        <span><span class="leg-dot" style="background:#d97706"></span> Opérations</span>
+        <span><span class="leg-dot" style="background:#7c3aed"></span> Messagerie</span>
+        <span>── Relation FK directe</span>
+        <span>╌╌ Relation via tableau/indirect</span>
+        <span>🔑 PK &nbsp; ↗ FK</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function entityBox(x,y,w,h,label,mod,color,entityId) {
+  const modCols = {auth:'#dbeafe',equip:'#d1fae5',ops:'#fef3c7',chat:'#ede9fe'};
+  const bg = modCols[mod]||'#f1f5f9';
+  const entity = ENTITIES.find(e=>e.id===entityId);
+  if(!entity) return '';
+  const preview = entity.fields.slice(0,4);
+  const more = entity.fields.length - preview.length;
+  let rows = preview.map(f => {
+    const isPK = f.constraints.includes('PK');
+    const isFK = f.constraints.some(c=>c.startsWith('FK'));
+    const isArr = f.constraints.includes('ARRAY');
+    const pre = isPK?'🔑 ':isFK?'↗ ':isArr?'≡ ':'  ';
+    return `<text x="${x+10}" y="0" font-size="9" fill="${isPK?'#92400e':isFK?'#1d4ed8':isArr?'#9d174d':'#374151'}">${pre}${f.name}</text>`;
+  });
+  const rowH = 14;
+  const textRows = preview.map((f,i) => {
+    const isPK = f.constraints.includes('PK');
+    const isFK = f.constraints.some(c=>c.startsWith('FK'));
+    const isArr = f.constraints.includes('ARRAY');
+    const pre = isPK?'🔑 ':isFK?'↗ ':isArr?'≡ ':'   ';
+    return `<text x="${x+10}" y="${y+50+i*rowH}" font-size="9" fill="${isPK?'#92400e':isFK?'#1d4ed8':isArr?'#9d174d':'#374151'}" font-family="Consolas,monospace">${pre}${f.name}</text>`;
+  }).join('');
+  const moreText = more>0?`<text x="${x+10}" y="${y+50+preview.length*rowH}" font-size="9" fill="#9ca3af">   +${more} autres colonnes…</text>`:'';
+  return `
+    <g style="cursor:pointer" onclick="openDetail('${entityId}')">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="white" stroke="${color}" stroke-width="1.5" filter="url(#sh)"/>
+      <rect x="${x}" y="${y}" width="${w}" height="32" rx="6" fill="${color}"/>
+      <rect x="${x}" y="${y+22}" width="${w}" height="10" fill="${color}"/>
+      <text x="${x+w/2}" y="${y+21}" text-anchor="middle" font-size="11" font-weight="700" fill="white">${label}</text>
+      ${textRows}
+      ${moreText}
+    </g>`;
+}
+
+let zoomLevel = 1;
+function zoomDiagram(factor) {
+  zoomLevel = Math.min(2.5, Math.max(0.4, zoomLevel * factor));
+  document.getElementById('svg-scale').style.transform = `scale(${zoomLevel})`;
+}
+function resetZoom() {
+  zoomLevel = 1;
+  document.getElementById('svg-scale').style.transform = 'scale(1)';
+}
+
+/* ═══════════════════════════════════════════════════════
+   DETAIL DIALOG
+═══════════════════════════════════════════════════════ */
+function openDetail(id) {
+  const entity = ENTITIES.find(e => e.id===id);
+  if(!entity) return;
+  document.getElementById('dlg-crumb-name').textContent = entity.name;
+  document.getElementById('dlg-title').textContent = entity.name;
+  const rels = RELATIONS.filter(r => r.src===entity.table||r.tgt===entity.table);
+  const body = document.getElementById('dlg-body');
+  body.innerHTML = `
+    <div class="dlg-meta">
+      <div class="dlg-meta-cell">
+        <div class="dlg-meta-lbl">Module</div>
+        <div class="dlg-meta-val">${typeBadge(entity.module)}</div>
+      </div>
+      <div class="dlg-meta-cell">
+        <div class="dlg-meta-lbl">Table SQL</div>
+        <div class="dlg-meta-val f-code">${entity.table}</div>
+      </div>
+      <div class="dlg-meta-cell">
+        <div class="dlg-meta-lbl">Colonnes</div>
+        <div class="dlg-meta-val">${entity.fields.length}</div>
+      </div>
+      <div class="dlg-meta-cell">
+        <div class="dlg-meta-lbl">Relations</div>
+        <div class="dlg-meta-val">${rels.length}</div>
+      </div>
+    </div>
+    <div style="padding:16px 20px 6px;font-size:12px;color:#6c757d;border-bottom:1px solid #f0f0f0">
+      ${entity.desc}
+    </div>
+    <table class="list-table">
+      <thead><tr>
+        <th>#</th><th>COLONNE</th><th>TYPE SQL</th><th>CONTRAINTES</th><th>DESCRIPTION</th>
+      </tr></thead>
+      <tbody>
+        ${entity.fields.map((f,i) => `<tr>
+          <td class="f-muted" style="font-size:11px;font-family:monospace">${String(i+1).padStart(2,'0')}</td>
+          <td class="f-mono" style="font-weight:700;color:#1a6fa6">${f.name}</td>
+          <td style="color:#7c3aed;font-family:'Consolas',monospace;font-size:12px">${f.type}</td>
+          <td>${constraintBadges(f.constraints)||'<span class="f-muted">—</span>'}</td>
+          <td class="f-muted">${f.desc}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    ${rels.length ? `
+    <div style="padding:12px 20px 4px;font-size:11px;font-weight:700;color:#6c757d;text-transform:uppercase;letter-spacing:.5px;border-top:2px solid #f0f0f0">
+      Relations impliquant cette table
+    </div>
+    <table class="list-table">
+      <thead><tr><th>#</th><th>SOURCE</th><th>CARD.</th><th>ASSOCIATION</th><th>CARD.</th><th>CIBLE</th><th>TYPE</th></tr></thead>
+      <tbody>
+        ${rels.map(r => `<tr>
+          <td class="f-muted" style="font-size:11px;font-family:monospace">${r.id}</td>
+          <td class="f-link" onclick="switchDetail('${r.src}')">${r.src}</td>
+          <td style="font-family:monospace;font-weight:700;color:#495057">${r.card_src}</td>
+          <td style="color:#555;font-style:italic">${r.verb}</td>
+          <td style="font-family:monospace;font-weight:700;color:#495057">${r.card_tgt}</td>
+          <td class="f-link" onclick="switchDetail('${r.tgt}')">${r.tgt}</td>
+          <td>${relTypeBadge(r.type)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+  `;
+  document.getElementById('overlay').classList.add('show');
+}
+
+function switchDetail(id) { openDetail(id); }
+function closeDialog(e) {
+  if(!e || e.target===document.getElementById('overlay'))
+    document.getElementById('overlay').classList.remove('show');
+}
+
+/* ═══════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════ */
+render();
 </script>
 </body>
 </html>

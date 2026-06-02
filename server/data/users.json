@@ -2,64 +2,22 @@
   {
     "id": 1,
     "username": "admin",
-    "password": "$2b$10$bPgxnQv2Rr2HtO2mNyJVLuzGP2YXzVYw9bjFkpn3VcUlQnekeI6hG",
+    "password": "$2b$10$/SrivDmNqjgjV7THKt4jT.YTlOMuLjxts2ls7HxWr3yvoeG9D9da.",
     "role": "admin",
-    "name": "Administrateur",
-    "permissions": [
-      "lecture",
-      "ecriture",
-      "modification"
-    ]
+    "name": "Administrateur"
   },
   {
     "id": 2,
     "username": "technicien",
-    "password": "$2b$10$rCk4nkJsHM5gFoEyr6S9A.iuCkMkhWnhCV/05NODOZ5mDGLeJ1DA6",
+    "password": "$2b$10$QFOgcO/77wefUMIsfx6BQOO/O54s661baZapYd35sH/yR1nY2YDeq",
     "role": "technicien",
-    "name": "Technicien IT",
-    "permissions": [
-      "lecture",
-      "ecriture",
-      "modification"
-    ]
+    "name": "Technicien IT"
   },
   {
     "id": 3,
     "username": "utilisateur",
-    "password": "$2b$10$bLZc5aPurOrXeN3tx.zpseg5R3tQNqrCqcblO.PNyMDOR2lcyueFy",
+    "password": "$2b$10$VkDPbB.nGd2TGfRWi28za.aEevNH4cM/VIfojWf.G2QKX5wCGUAbi",
     "role": "user",
-    "name": "Utilisateur",
-    "permissions": [
-      "lecture"
-    ]
-  },
-  {
-    "id": 4,
-    "username": "edem",
-    "name": "HATOR EDEM",
-    "role": "technicien",
-    "password": "$2b$10$TSex4KWxh0.VqlVytTh1UemYK.ApMfBed1pApaM85uz9JDbQ6n41S",
-    "permissions": [
-      "lecture",
-      "ecriture",
-      "modification"
-    ]
-  },
-  {
-    "id": 5,
-    "username": "pasca",
-    "name": "PASCALINE BESSAN",
-    "role": "user",
-    "password": "$2b$10$JtzA0AuDr87tiEm33vfJueLXdLkJXgvsuRpWWlxSP8j04QiHhBlye",
-    "permissions": [
-      "lecture"
-    ]
-  },
-  {
-    "id": 6,
-    "username": "piteur",
-    "name": "PITEUR AFANOU",
-    "role": "user",
-    "password": "$2b$10$pizehq3FNj81FcA0k39cM.tX.5.sxN5H67HIcmjyAbAtMOa9WsdLq"
+    "name": "Utilisateur"
   }
 ]

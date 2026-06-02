@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { sendAlertCriticalTicket, sendAlertWarrantyExpiry, sendMonthlyReport } from './mailer.js';
 import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen } from './db.js';
 import {
   authenticate,
@@ -1604,6 +1605,134 @@ app.post('/api/heartbeat', authenticate, asyncHandler(async (req, res) => {
   const session = activeSessions.get(req.user.id);
   if (session) session.lastSeen = new Date().toISOString();
   res.json({ ok: true, ts: new Date().toISOString() });
+}));
+
+// ─── Tendances 12 mois ───────────────────────────────────────────────────────
+
+app.get('/api/reports/trends', authenticate, asyncHandler(async (req, res) => {
+  const months = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+  }
+  const results = await Promise.all(months.map(async ({ year, month }) => {
+    const from = `${year}-${String(month).padStart(2,'0')}-01`;
+    const to = new Date(year, month, 0).toISOString().slice(0, 10);
+    const [events, maint] = await Promise.all([
+      query(`SELECT COUNT(*) as cnt FROM equipment_events WHERE created_at >= $1 AND created_at <= $2 AND action ILIKE '%panne%' OR action ILIKE '%maintenance%'`, [from, to + ' 23:59:59']).catch(() => ({ rows: [{ cnt: '0' }] })),
+      query(`SELECT COUNT(*) as cnt, AVG(EXTRACT(EPOCH FROM (closed_at - opened_at))/3600)::numeric(10,1) as avg_hours FROM maintenance_records WHERE opened_at >= $1 AND opened_at <= $2`, [from, to + ' 23:59:59']).catch(() => ({ rows: [{ cnt: '0', avg_hours: null }] })),
+    ]);
+    return {
+      label: `${String(month).padStart(2,'0')}/${year}`,
+      month, year,
+      pannes: parseInt(events.rows[0].cnt) || 0,
+      tickets: parseInt(maint.rows[0].cnt) || 0,
+      mttr: parseFloat(maint.rows[0].avg_hours) || 0,
+    };
+  }));
+  res.json(results);
+}));
+
+// ─── Sauvegarde complète (export JSON) ────────────────────────────────────────
+
+app.get('/api/backup', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const [equip, users, sites, maint, visits, events] = await Promise.all([
+    query('SELECT * FROM equipments ORDER BY id'),
+    query('SELECT id, username, name, role, permissions, allowed_site_ids, blocked FROM users ORDER BY id'),
+    query('SELECT * FROM sites ORDER BY id'),
+    query('SELECT * FROM maintenance_records ORDER BY id'),
+    query('SELECT * FROM site_visits ORDER BY id'),
+    query('SELECT id, equipment_id, equipment_name, action, details, username, user_name, created_at FROM equipment_events ORDER BY id LIMIT 10000'),
+  ]);
+  res.setHeader('Content-Disposition', `attachment; filename="backup-gestion-it-${new Date().toISOString().slice(0,10)}.json"`);
+  res.json({
+    exportedAt: new Date().toISOString(),
+    version: '1.0',
+    equipments: equip.rows,
+    users: users.rows,
+    sites: sites.rows,
+    maintenance: maint.rows,
+    visits: visits.rows,
+    events: events.rows,
+  });
+}));
+
+// ─── Import CSV template ──────────────────────────────────────────────────────
+
+app.get('/api/equipments/csv-template', authenticate, (req, res) => {
+  const headers = ['name','type','brand','model','serialNumber','ipAddress','location','department','status','purchaseDate','warranty','quantity'];
+  const example = ['PC-Bureau-001','ordinateur','Dell','OptiPlex 7090','SN12345','192.168.1.101','Bureau 101','Informatique','actif','2024-01-15','2027-01-15','1'];
+  const csv = [headers.join(','), example.join(',')].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="template-import-equipements.csv"');
+  res.send(csv);
+});
+
+// ─── Licences logicielles ─────────────────────────────────────────────────────
+
+app.get('/api/licenses', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM licenses ORDER BY expiry_date ASC NULLS LAST');
+  res.json(rows);
+}));
+
+app.post('/api/licenses', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const { name, vendor, licenseKey, seats, usedSeats, equipmentId, purchaseDate, expiryDate, notes } = req.body;
+  const { rows } = await query(
+    `INSERT INTO licenses (name, vendor, license_key, seats, used_seats, equipment_id, purchase_date, expiry_date, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '']
+  );
+  res.status(201).json(rows[0]);
+}));
+
+app.put('/api/licenses/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, vendor, licenseKey, seats, usedSeats, equipmentId, purchaseDate, expiryDate, notes } = req.body;
+  const { rows } = await query(
+    `UPDATE licenses SET name=$1, vendor=$2, license_key=$3, seats=$4, used_seats=$5, equipment_id=$6, purchase_date=$7, expiry_date=$8, notes=$9 WHERE id=$10 RETURNING *`,
+    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '', id]
+  );
+  if (rows.length === 0) return res.status(404).json({ message: 'Licence introuvable' });
+  res.json(rows[0]);
+}));
+
+app.delete('/api/licenses/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  await query('DELETE FROM licenses WHERE id = $1', [req.params.id]);
+  res.status(204).end();
+}));
+
+// ─── Email — test + rapport mensuel manuel ─────────────────────────────────────
+
+app.post('/api/email/test', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ message: 'Destinataire requis' });
+  const ok = await sendMail?.({ to, subject: '✅ Test Gestion IT', html: '<p>Connexion SMTP opérationnelle.</p>' }).catch(() => false);
+  if (ok === undefined) return res.status(503).json({ message: 'SMTP non configuré (variables SMTP_HOST, SMTP_USER, SMTP_PASS manquantes)' });
+  res.json({ sent: ok });
+}));
+
+import { sendMail } from './mailer.js';
+
+app.post('/api/email/monthly-report', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ message: 'Destinataire requis' });
+  const [equip, maint, visits] = await Promise.all([
+    query('SELECT status FROM equipments'),
+    query("SELECT status, priority FROM maintenance_records WHERE status != 'résolu'"),
+    query("SELECT status FROM site_visits WHERE status = 'planifié'"),
+  ]);
+  const stats = {
+    total: equip.rows.length,
+    actifs: equip.rows.filter(e => e.status === 'actif').length,
+    defaillants: equip.rows.filter(e => e.status === 'defaillant' || e.status === 'maintenance').length,
+    ticketsOuverts: maint.rows.length,
+    ticketsCritiques: maint.rows.filter(m => m.priority === 'critique').length,
+    garantiesExpirees: 0,
+    visitesPlannifiees: visits.rows.length,
+  };
+  const ok = await sendMonthlyReport(stats, [to]);
+  res.json({ sent: ok });
 }));
 
 // ─── Health check ─────────────────────────────────────────────────────────────

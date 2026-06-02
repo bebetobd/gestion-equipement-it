@@ -1,0 +1,38 @@
+{
+  "name": "Gestion Équipements IT",
+  "short_name": "GestionIT",
+  "description": "Gestion du parc informatique — équipements, maintenance, visites, garanties",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a6fa6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "utilities"],
+  "lang": "fr",
+  "shortcuts": [
+    {
+      "name": "Équipements",
+      "url": "/",
+      "description": "Liste des équipements"
+    },
+    {
+      "name": "Maintenance",
+      "url": "/?module=maintenance",
+      "description": "Tickets de maintenance"
+    }
+  ]
+}

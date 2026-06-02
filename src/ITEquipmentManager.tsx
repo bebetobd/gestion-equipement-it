@@ -636,6 +636,121 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // ── QR Code ────────────────────────────────────────────────────────────────
   const [qrEquipment, setQrEquipment] = useState<Equipment | null>(null);
 
+  // ── Licences logicielles ───────────────────────────────────────────────────
+  interface License {
+    id: number; name: string; vendor: string; license_key: string;
+    seats: number; used_seats: number; equipment_id: number | null;
+    purchase_date: string | null; expiry_date: string | null; notes: string; created_at: string;
+  }
+  const [showLicenseModule, setShowLicenseModule] = useState(false);
+  const [licenses, setLicenses] = useState<License[]>([]);
+  const [licensesLoading, setLicensesLoading] = useState(false);
+  const [showLicenseForm, setShowLicenseForm] = useState(false);
+  const [editingLicenseId, setEditingLicenseId] = useState<number | null>(null);
+  const defaultLicenseForm = { name: '', vendor: '', license_key: '', seats: 1, used_seats: 0, equipment_id: null as number | null, purchase_date: '', expiry_date: '', notes: '' };
+  const [licenseForm, setLicenseForm] = useState(defaultLicenseForm);
+  const [licenseFilter, setLicenseFilter] = useState('');
+
+  const fetchLicenses = async () => {
+    setLicensesLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/licenses`, { headers: authHeaders() });
+      if (r.ok) setLicenses(await r.json());
+    } finally { setLicensesLoading(false); }
+  };
+
+  const saveLicense = async () => {
+    const method = editingLicenseId ? 'PUT' : 'POST';
+    const url = editingLicenseId ? `${API_BASE_URL}/api/licenses/${editingLicenseId}` : `${API_BASE_URL}/api/licenses`;
+    const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(licenseForm) });
+    if (r.ok) {
+      const saved = await r.json();
+      if (editingLicenseId) setLicenses(prev => prev.map(l => l.id === saved.id ? saved : l));
+      else setLicenses(prev => [saved, ...prev]);
+      setShowLicenseForm(false); setEditingLicenseId(null); setLicenseForm(defaultLicenseForm);
+    }
+  };
+
+  const deleteLicense = (id: number) => {
+    setConfirmModal({ message: 'Supprimer cette licence ?', onConfirm: async () => {
+      setConfirmModal(null);
+      await fetch(`${API_BASE_URL}/api/licenses/${id}`, { method: 'DELETE', headers: authHeaders() });
+      setLicenses(prev => prev.filter(l => l.id !== id));
+    }});
+  };
+
+  // ── Tendances 12 mois ──────────────────────────────────────────────────────
+  interface TrendPoint { label: string; month: number; year: number; pannes: number; tickets: number; mttr: number; }
+  const [showTrends, setShowTrends] = useState(false);
+  const [trendsData, setTrendsData] = useState<TrendPoint[]>([]);
+  const [trendsLoading, setTrendsLoading] = useState(false);
+
+  const fetchTrends = async () => {
+    setTrendsLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/reports/trends`, { headers: authHeaders() });
+      if (r.ok) setTrendsData(await r.json());
+    } finally { setTrendsLoading(false); }
+  };
+
+  // ── Sauvegarde ─────────────────────────────────────────────────────────────
+  const downloadBackup = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/backup`, { headers: authHeaders() });
+      if (!r.ok) { setToast({ message: 'Erreur lors de la sauvegarde', type: 'error' }); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `backup-gestion-it-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      setToast({ message: 'Sauvegarde téléchargée', type: 'success' });
+    } catch { setToast({ message: 'Erreur lors de la sauvegarde', type: 'error' }); }
+  };
+
+  // ── Template CSV ───────────────────────────────────────────────────────────
+  const downloadCsvTemplate = () => {
+    const a = document.createElement('a');
+    a.href = `${API_BASE_URL}/api/equipments/csv-template`;
+    a.download = 'template-import-equipements.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  // ── Comparaison d'équipements ──────────────────────────────────────────────
+  const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
+  const [showCompareModal, setShowCompareModal] = useState(false);
+
+  const toggleCompare = (id: number) => {
+    setCompareIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); }
+      else if (next.size < 3) { next.add(id); }
+      return next;
+    });
+  };
+
+  // ── Scan QR caméra ─────────────────────────────────────────────────────────
+  const [showQrScan, setShowQrScan] = useState(false);
+  const qrVideoRef = useRef<HTMLVideoElement>(null);
+  const qrStreamRef = useRef<MediaStream | null>(null);
+
+  const startQrScan = async () => {
+    setShowQrScan(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      qrStreamRef.current = stream;
+      if (qrVideoRef.current) {
+        qrVideoRef.current.srcObject = stream;
+        qrVideoRef.current.play();
+      }
+    } catch { setToast({ message: 'Caméra non disponible', type: 'error' }); setShowQrScan(false); }
+  };
+
+  const stopQrScan = () => {
+    qrStreamRef.current?.getTracks().forEach(t => t.stop());
+    qrStreamRef.current = null;
+    setShowQrScan(false);
+  };
+
   // ── Kanban maintenance ─────────────────────────────────────────────────────
   const [showKanban, setShowKanban] = useState(false);
 
@@ -643,6 +758,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+
+  // ── Calendrier unifié ──────────────────────────────────────────────────────
+  const [showUnifiedCalendar, setShowUnifiedCalendar] = useState(false);
+  const [unifiedCalYear, setUnifiedCalYear] = useState(new Date().getFullYear());
+  const [unifiedCalMonth, setUnifiedCalMonth] = useState(new Date().getMonth());
+
+  // ── Rapport mensuel ────────────────────────────────────────────────────────
+  const [showMonthlyReport, setShowMonthlyReport] = useState(false);
+  const [emailReportTo, setEmailReportTo] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
 
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
@@ -1473,6 +1598,69 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return () => clearInterval(id);
   }, []);
 
+  // Browser notifications — request permission once, then alert on critical events
+  const notifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  const sendBrowserNotif = (title: string, body: string, tag: string) => {
+    if (Notification.permission !== 'granted') return;
+    if (notifiedRef.current.has(tag)) return;
+    notifiedRef.current.add(tag);
+    try {
+      new Notification(title, { body, icon: '/icon-192.svg', tag });
+    } catch {}
+  };
+
+  // Check and fire notifications every 60 s
+  useEffect(() => {
+    const check = () => {
+      // Critical maintenance tickets
+      maintenanceRecords
+        .filter(m => m.priority === 'critique' && m.status !== 'résolu')
+        .forEach(m => sendBrowserNotif(
+          '🔴 Ticket critique',
+          `${m.failureDesc || m.equipmentName} — ${m.technician || 'Non assigné'}`,
+          `maint-crit-${m.id}`
+        ));
+
+      // Expired warranties
+      equipments
+        .filter(e => getWarrantyInfo(e.warranty)?.status === 'expired')
+        .forEach(e => sendBrowserNotif(
+          '⚠️ Garantie expirée',
+          `${e.name} (${e.brand} ${e.model}) — garantie échue`,
+          `warranty-exp-${e.id}`
+        ));
+
+      // Visits today
+      const today = new Date().toISOString().slice(0, 10);
+      visits
+        .filter(v => v.scheduledDate === today && v.status === 'planifié')
+        .forEach(v => sendBrowserNotif(
+          '📅 Visite planifiée aujourd\'hui',
+          `${v.siteName} — ${v.scheduledTime || ''} · ${v.technician}`,
+          `visit-today-${v.id}`
+        ));
+
+      // Low stock accessories
+      equipments
+        .filter(e => e.type === 'accessoires' && (e.minQuantity ?? 0) > 0 && e.quantity <= (e.minQuantity ?? 0))
+        .forEach(e => sendBrowserNotif(
+          '📦 Stock bas',
+          `${e.name} : ${e.quantity} restant(s) (seuil : ${e.minQuantity})`,
+          `stock-low-${e.id}`
+        ));
+    };
+    const id = setInterval(check, 60000);
+    check();
+    return () => clearInterval(id);
+  }, [maintenanceRecords, equipments, visits]);
+
   // Monitoring: auto-refresh every 30s when module is open
   useEffect(() => {
     if (!showMonitoringModal) return;
@@ -2219,6 +2407,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowMonitoringModal(false);
     setShowActivityLog(false);
     setShowVisitModule(false);
+    setShowLicenseModule(false);
+    setShowTrends(false);
+    setShowUnifiedCalendar(false);
+    setShowMonthlyReport(false);
   };
 
   const openMaintenanceModule = () => {
@@ -2535,6 +2727,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
             <Calendar className="w-3.5 h-3.5 shrink-0" /> Rapports
           </button>
+          <button type="button" onClick={() => { closeAllModules(); setShowUnifiedCalendar(true); }}
+            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+            <LayoutGrid className="w-3.5 h-3.5 shrink-0" /> Calendrier
+          </button>
           {isAdmin && (
             <>
               <button type="button" onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
@@ -2553,6 +2749,26 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
                 <Globe className="w-3.5 h-3.5 shrink-0" /> Sites
               </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowLicenseModule(true); fetchLicenses(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <File className="w-3.5 h-3.5 shrink-0" /> Licences
+                {licenses.filter(l => l.expiry_date && new Date(l.expiry_date) < new Date()).length > 0 && (
+                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-red-500">{licenses.filter(l => l.expiry_date && new Date(l.expiry_date) < new Date()).length}</span>
+                )}
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowTrends(true); fetchTrends(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Activity className="w-3.5 h-3.5 shrink-0" /> Tendances
+              </button>
+              <button type="button" onClick={() => { closeAllModules(); setShowMonthlyReport(true); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <FileText className="w-3.5 h-3.5 shrink-0" /> Rapport mensuel
+              </button>
+              <button type="button" onClick={downloadBackup}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors"
+                title="Télécharger une sauvegarde complète JSON">
+                <Download className="w-3.5 h-3.5 shrink-0" /> Sauvegarde
+              </button>
             </>
           )}
         </div>
@@ -2568,6 +2784,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {(chatUnread.global + Object.values(chatUnread.dms).reduce((a,b)=>a+b,0) + Object.values(chatUnread.groups).reduce((a,b)=>a+b,0)) > 0 && (
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
             )}
+          </button>
+          {/* Scan QR */}
+          <button onClick={startQrScan}
+            className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors"
+            title="Scanner un QR code">
+            <QrCode className="w-4 h-4" />
           </button>
           {/* Dark mode toggle */}
           <button onClick={() => setDarkMode(v => !v)}
@@ -3132,7 +3354,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {pagedEquipments.map((equipment) => (
                     <tr key={equipment.id} className="hover:bg-[#f5f9fc] border-b border-[#f0f0f0] cursor-pointer">
                       <td className="w-8 px-3 py-2" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" className="w-3.5 h-3.5 accent-[#1a6fa6]" />
+                        <input
+                          type="checkbox"
+                          className="w-3.5 h-3.5 accent-[#1a6fa6]"
+                          checked={compareIds.has(equipment.id)}
+                          onChange={() => toggleCompare(equipment.id)}
+                          title="Sélectionner pour comparer (max 3)"
+                        />
                       </td>
                       <td className="px-3 py-2" onClick={() => openDetailsModal(equipment)}>
                         <div className="flex items-center gap-2">
@@ -4414,6 +4642,440 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               )}
             </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Module Licences logicielles ══════════════════════════════════ */}
+      {showLicenseModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <File className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Licences logicielles</h2>
+                <p className="text-white/70 text-xs">{licenses.length} licence(s) · {licenses.filter(l => l.expiry_date && new Date(l.expiry_date) < new Date()).length} expirée(s)</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {canWrite && <button onClick={() => { setLicenseForm(defaultLicenseForm); setEditingLicenseId(null); setShowLicenseForm(true); }}
+                className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" /> Nouvelle licence
+              </button>}
+              <button onClick={() => setShowLicenseModule(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          {/* Filtre */}
+          <div className="px-6 py-3 bg-white border-b border-gray-200 flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input type="text" placeholder="Rechercher…" value={licenseFilter} onChange={e => setLicenseFilter(e.target.value)}
+                className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-full text-sm w-full focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            {licensesLoading ? (
+              <div className="text-center py-16 text-gray-400">Chargement…</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {licenses.filter(l => !licenseFilter || l.name.toLowerCase().includes(licenseFilter.toLowerCase()) || l.vendor.toLowerCase().includes(licenseFilter.toLowerCase())).map(l => {
+                  const expired = l.expiry_date && new Date(l.expiry_date) < new Date();
+                  const expiringSoon = l.expiry_date && !expired && (new Date(l.expiry_date).getTime() - Date.now()) < 30 * 86400000;
+                  const usagePct = l.seats > 0 ? Math.round(l.used_seats / l.seats * 100) : 0;
+                  return (
+                    <div key={l.id} className={`bg-white rounded-xl shadow-sm border p-4 ${expired ? 'border-red-200' : expiringSoon ? 'border-orange-200' : 'border-gray-100'}`}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-900 truncate">{l.name}</p>
+                          <p className="text-xs text-gray-500">{l.vendor}</p>
+                        </div>
+                        <div className="flex gap-1 shrink-0 ml-2">
+                          {expired && <span className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">Expirée</span>}
+                          {expiringSoon && <span className="text-[10px] bg-orange-100 text-orange-700 font-bold px-1.5 py-0.5 rounded">Bientôt</span>}
+                        </div>
+                      </div>
+                      {l.license_key && <p className="text-xs text-gray-400 font-mono truncate mb-2">{l.license_key}</p>}
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                          <span>Sièges utilisés</span>
+                          <span className="font-semibold">{l.used_seats}/{l.seats}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full">
+                          <div className={`h-1.5 rounded-full ${usagePct >= 100 ? 'bg-red-500' : usagePct >= 80 ? 'bg-orange-400' : 'bg-green-500'}`} style={{width: `${Math.min(100,usagePct)}%`}} />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-gray-400">
+                        {l.expiry_date && <span>Expire: {new Date(l.expiry_date).toLocaleDateString('fr-FR')}</span>}
+                        {l.equipment_id && <span>#{l.equipment_id}</span>}
+                      </div>
+                      {canModify && (
+                        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-50">
+                          <button onClick={() => { setLicenseForm({ name: l.name, vendor: l.vendor, license_key: l.license_key, seats: l.seats, used_seats: l.used_seats, equipment_id: l.equipment_id, purchase_date: l.purchase_date || '', expiry_date: l.expiry_date || '', notes: l.notes }); setEditingLicenseId(l.id); setShowLicenseForm(true); }}
+                            className="flex-1 text-xs text-[#1a6fa6] hover:text-[#0d4a73] font-medium flex items-center justify-center gap-1 py-1 rounded hover:bg-blue-50 transition-colors">
+                            <Edit className="w-3 h-3" /> Modifier
+                          </button>
+                          <button onClick={() => deleteLicense(l.id)} className="flex-1 text-xs text-red-500 hover:text-red-700 font-medium flex items-center justify-center gap-1 py-1 rounded hover:bg-red-50 transition-colors">
+                            <Trash2 className="w-3 h-3" /> Supprimer
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {licenses.length === 0 && !licensesLoading && (
+                  <div className="col-span-3 text-center py-16 text-gray-400">
+                    <File className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">Aucune licence enregistrée</p>
+                    {canWrite && <button onClick={() => { setLicenseForm(defaultLicenseForm); setEditingLicenseId(null); setShowLicenseForm(true); }} className="mt-3 text-sm text-[#1a6fa6] hover:underline">+ Ajouter une licence</button>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Form modal */}
+          {showLicenseForm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowLicenseForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+                <h3 className="font-bold text-gray-900 mb-4">{editingLicenseId ? 'Modifier' : 'Nouvelle'} licence</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {[['Nom *', 'name', 'text'], ['Éditeur', 'vendor', 'text'], ['Clé de licence', 'license_key', 'text'], ['Sièges total', 'seats', 'number'], ['Sièges utilisés', 'used_seats', 'number']].map(([label, key, type]) => (
+                    <div key={key} className={key === 'license_key' ? 'col-span-2' : ''}>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+                      <input type={type} value={(licenseForm as any)[key]} onChange={e => setLicenseForm(f => ({ ...f, [key]: type === 'number' ? parseInt(e.target.value) || 0 : e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Date d'achat</label>
+                    <input type="date" value={licenseForm.purchase_date} onChange={e => setLicenseForm(f => ({ ...f, purchase_date: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Date d'expiration</label>
+                    <input type="date" value={licenseForm.expiry_date} onChange={e => setLicenseForm(f => ({ ...f, expiry_date: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+                    <textarea rows={2} value={licenseForm.notes} onChange={e => setLicenseForm(f => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none resize-none" />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={() => setShowLicenseForm(false)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">Annuler</button>
+                  <button onClick={saveLicense} disabled={!licenseForm.name.trim()} className="flex-1 py-2.5 bg-[#1a6fa6] text-white rounded-xl text-sm font-semibold hover:bg-[#155a8a] disabled:opacity-50">Enregistrer</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Module Tendances 12 mois ══════════════════════════════════════ */}
+      {showTrends && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50 overflow-auto">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <Activity className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Tendances — 12 derniers mois</h2>
+                <p className="text-white/70 text-xs">Évolution des pannes, tickets et MTTR</p>
+              </div>
+            </div>
+            <button onClick={() => setShowTrends(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="p-6">
+            {trendsLoading ? (
+              <div className="text-center py-16 text-gray-400">Chargement des tendances…</div>
+            ) : trendsData.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">Aucune donnée disponible</div>
+            ) : (() => {
+              const maxTickets = Math.max(...trendsData.map(d => d.tickets), 1);
+              const maxMttr = Math.max(...trendsData.map(d => d.mttr), 1);
+              const barW = 36; const gap = 8;
+              const chartW = trendsData.length * (barW + gap);
+              const chartH = 140;
+              return (
+                <div className="space-y-6">
+                  {/* Tickets bar chart */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-1">Tickets de maintenance ouverts</h3>
+                    <p className="text-xs text-gray-400 mb-4">Nombre de tickets créés par mois</p>
+                    <div className="overflow-x-auto">
+                      <svg width={Math.max(chartW + 20, 400)} height={chartH + 40} style={{display:'block'}}>
+                        {trendsData.map((d, i) => {
+                          const bh = Math.max(4, Math.round((d.tickets / maxTickets) * chartH));
+                          const x = 10 + i * (barW + gap);
+                          const y = chartH - bh;
+                          return (
+                            <g key={i}>
+                              <rect x={x} y={y} width={barW} height={bh} rx="4" fill="#1a6fa6" opacity={0.8} />
+                              {d.tickets > 0 && <text x={x + barW/2} y={y - 4} textAnchor="middle" fill="#374151" fontSize="11" fontWeight="bold">{d.tickets}</text>}
+                              <text x={x + barW/2} y={chartH + 16} textAnchor="middle" fill="#9ca3af" fontSize="9">{d.label}</text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+                  {/* MTTR chart */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-1">MTTR — Temps moyen de résolution</h3>
+                    <p className="text-xs text-gray-400 mb-4">Heures moyennes par ticket résolu</p>
+                    <div className="overflow-x-auto">
+                      <svg width={Math.max(chartW + 20, 400)} height={chartH + 40} style={{display:'block'}}>
+                        {trendsData.map((d, i) => {
+                          const bh = maxMttr > 0 ? Math.max(4, Math.round((d.mttr / maxMttr) * chartH)) : 4;
+                          const x = 10 + i * (barW + gap);
+                          const y = chartH - bh;
+                          const color = d.mttr === 0 ? '#e5e7eb' : d.mttr > maxMttr * 0.7 ? '#ef4444' : d.mttr > maxMttr * 0.4 ? '#f59e0b' : '#22c55e';
+                          return (
+                            <g key={i}>
+                              <rect x={x} y={y} width={barW} height={bh} rx="4" fill={color} opacity={0.85} />
+                              {d.mttr > 0 && <text x={x + barW/2} y={y - 4} textAnchor="middle" fill="#374151" fontSize="10" fontWeight="bold">{d.mttr}h</text>}
+                              <text x={x + barW/2} y={chartH + 16} textAnchor="middle" fill="#9ca3af" fontSize="9">{d.label}</text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                    <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block" /> Bon (&lt; 40%)</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-400 inline-block" /> Moyen</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> Élevé (&gt; 70%)</span>
+                    </div>
+                  </div>
+                  {/* Summary table */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-3">Résumé mensuel</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="text-left py-2 text-xs font-bold text-gray-500 uppercase">Mois</th>
+                            <th className="text-right py-2 text-xs font-bold text-gray-500 uppercase">Tickets</th>
+                            <th className="text-right py-2 text-xs font-bold text-gray-500 uppercase">MTTR (h)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...trendsData].reverse().map((d, i) => (
+                            <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="py-2 text-gray-700 font-mono">{d.label}</td>
+                              <td className="py-2 text-right font-bold text-gray-900">{d.tickets}</td>
+                              <td className="py-2 text-right text-gray-600">{d.mttr > 0 ? `${d.mttr}h` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Calendrier unifié ════════════════════════════════════════════ */}
+      {showUnifiedCalendar && (() => {
+        const firstDay = new Date(unifiedCalYear, unifiedCalMonth, 1).getDay();
+        const daysInMonth = new Date(unifiedCalYear, unifiedCalMonth + 1, 0).getDate();
+        const monthName = new Date(unifiedCalYear, unifiedCalMonth).toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const toDateStr = (y: number, m: number, d: number) => `${y}-${pad(m+1)}-${pad(d)}`;
+
+        const cells: { day: number | null; events: { type: 'visit'|'maint'|'task'; label: string; color: string }[] }[] = [];
+        const offset = (firstDay + 6) % 7;
+        for (let i = 0; i < offset; i++) cells.push({ day: null, events: [] });
+        for (let d = 1; d <= daysInMonth; d++) {
+          const ds = toDateStr(unifiedCalYear, unifiedCalMonth, d);
+          const dayEvents: { type: 'visit'|'maint'|'task'; label: string; color: string }[] = [];
+          visits.filter(v => v.scheduledDate === ds && v.status !== 'annulé').forEach(v =>
+            dayEvents.push({ type: 'visit', label: v.siteName, color: 'bg-blue-500' }));
+          maintenanceRecords.filter(m => m.openedAt && m.openedAt.slice(0,10) === ds && m.status !== 'résolu').forEach(m =>
+            dayEvents.push({ type: 'maint', label: m.equipmentName || m.failureDesc || 'Maintenance', color: m.priority === 'critique' ? 'bg-red-500' : 'bg-amber-400' }));
+          tasks.filter(t => t.dueDate === ds && !t.done).forEach(t =>
+            dayEvents.push({ type: 'task', label: t.title, color: t.priority === 'haute' ? 'bg-red-400' : 'bg-indigo-400' }));
+          cells.push({ day: d, events: dayEvents });
+        }
+
+        const today = new Date(); const isToday = (d: number) => d === today.getDate() && unifiedCalMonth === today.getMonth() && unifiedCalYear === today.getFullYear();
+        return (
+          <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><LayoutGrid className="w-5 h-5 text-white" /></div>
+                <h2 className="text-base font-bold text-white capitalize">Calendrier unifié — {monthName}</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { const d = new Date(unifiedCalYear, unifiedCalMonth - 1); setUnifiedCalYear(d.getFullYear()); setUnifiedCalMonth(d.getMonth()); }} className="text-white/80 hover:text-white px-2 py-1 rounded hover:bg-white/10"><ChevronLeft className="w-4 h-4" /></button>
+                <button onClick={() => { setUnifiedCalYear(today.getFullYear()); setUnifiedCalMonth(today.getMonth()); }} className="text-white/80 hover:text-white text-xs px-3 py-1 rounded hover:bg-white/10 border border-white/20">Aujourd'hui</button>
+                <button onClick={() => { const d = new Date(unifiedCalYear, unifiedCalMonth + 1); setUnifiedCalYear(d.getFullYear()); setUnifiedCalMonth(d.getMonth()); }} className="text-white/80 hover:text-white px-2 py-1 rounded hover:bg-white/10"><ChevronRight className="w-4 h-4" /></button>
+                <button onClick={() => setShowUnifiedCalendar(false)} className="text-white/70 hover:text-white ml-2"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            {/* Legend */}
+            <div className="flex items-center gap-4 px-6 py-2 bg-white border-b border-gray-200 text-xs">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-500 inline-block" />Visites</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-400 inline-block" />Maintenance</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" />Critique</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-indigo-400 inline-block" />Tâches</span>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(d => (
+                  <div key={d} className="text-center text-xs font-bold text-gray-500 py-1">{d}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {cells.map((cell, i) => (
+                  <div key={i} className={`min-h-[80px] rounded-xl p-1.5 border ${cell.day ? (isToday(cell.day) ? 'border-[#1a6fa6] bg-[#e8f3fc]' : 'border-gray-100 bg-white hover:border-gray-200') : 'border-transparent bg-transparent'}`}>
+                    {cell.day && (
+                      <>
+                        <p className={`text-xs font-bold mb-1 ${isToday(cell.day) ? 'text-[#1a6fa6]' : 'text-gray-700'}`}>{cell.day}</p>
+                        <div className="space-y-0.5">
+                          {cell.events.slice(0, 3).map((ev, j) => (
+                            <div key={j} className={`${ev.color} text-white text-[10px] font-medium px-1 py-0.5 rounded truncate`}>{ev.label}</div>
+                          ))}
+                          {cell.events.length > 3 && <div className="text-[10px] text-gray-400 pl-1">+{cell.events.length - 3}</div>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ Rapport mensuel ══════════════════════════════════════════════ */}
+      {showMonthlyReport && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMonthlyReport(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center"><FileText className="w-5 h-5 text-purple-600" /></div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900">Rapport mensuel</h2>
+                  <p className="text-xs text-gray-400">{new Date().toLocaleString('fr-FR', { month: 'long', year: 'numeric' })}</p>
+                </div>
+              </div>
+              <button onClick={() => setShowMonthlyReport(false)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* KPI Summary */}
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 mb-3">Synthèse du parc</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Total équipements', value: kpiStats.total, color: 'text-[#1a6fa6]' },
+                    { label: 'Actifs', value: kpiStats.actifs, color: 'text-green-600' },
+                    { label: 'Défaillants', value: kpiStats.defaillants, color: 'text-red-600' },
+                    { label: 'Tickets ouverts', value: kpiStats.ticketsOuverts, color: 'text-amber-600' },
+                    { label: 'Critiques', value: kpiStats.ticketsCritiques, color: 'text-red-700' },
+                    { label: 'Garanties exp.', value: kpiStats.garantiesExpirees, color: 'text-orange-600' },
+                    { label: 'Visites planif.', value: kpiStats.visitesPlannifiees, color: 'text-blue-600' },
+                    { label: 'Non visités', value: kpiStats.nonVisites, color: 'text-gray-600' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Tickets critiques */}
+              {maintenanceRecords.filter(m => m.priority === 'critique' && m.status !== 'résolu').length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 mb-2">Tickets critiques non résolus</h3>
+                  <div className="space-y-2">
+                    {maintenanceRecords.filter(m => m.priority === 'critique' && m.status !== 'résolu').slice(0,5).map(m => (
+                      <div key={m.id} className="flex items-center gap-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                        <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{m.equipmentName}</p>
+                          <p className="text-xs text-gray-500 truncate">{m.failureDesc}</p>
+                        </div>
+                        <span className="text-xs text-gray-400">{m.technician || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* PDF Download */}
+              <div>
+                <button onClick={() => {
+                  const doc = new jsPDF();
+                  const month = new Date().toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
+                  doc.setFontSize(18); doc.setTextColor(26, 111, 166);
+                  doc.text(`Rapport mensuel — ${month}`, 14, 20);
+                  doc.setFontSize(10); doc.setTextColor(100);
+                  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, 14, 28);
+                  autoTable(doc, {
+                    startY: 35,
+                    head: [['Indicateur', 'Valeur']],
+                    body: [
+                      ['Total équipements', String(kpiStats.total)],
+                      ['Actifs', String(kpiStats.actifs)],
+                      ['Défaillants / Maintenance', String(kpiStats.defaillants)],
+                      ['Réformés', String(kpiStats.reformes)],
+                      ['Tickets ouverts', String(kpiStats.ticketsOuverts)],
+                      ['Tickets critiques', String(kpiStats.ticketsCritiques)],
+                      ['Garanties expirées', String(kpiStats.garantiesExpirees)],
+                      ['Garanties critiques (<30j)', String(kpiStats.garantiesCritiques)],
+                      ['Visites planifiées', String(kpiStats.visitesPlannifiees)],
+                      ['Non visités', String(kpiStats.nonVisites)],
+                    ],
+                    theme: 'striped',
+                    headStyles: { fillColor: [26, 111, 166] },
+                  });
+                  const critiques = maintenanceRecords.filter(m => m.priority === 'critique' && m.status !== 'résolu');
+                  if (critiques.length > 0) {
+                    autoTable(doc, {
+                      startY: (doc as any).lastAutoTable.finalY + 10,
+                      head: [['Tickets critiques non résolus', 'Équipement', 'Technicien', 'Ouvert le']],
+                      body: critiques.map(m => [m.failureDesc || '—', m.equipmentName, m.technician || '—', new Date(m.openedAt).toLocaleDateString('fr-FR')]),
+                      theme: 'striped',
+                      headStyles: { fillColor: [220, 38, 38] },
+                    });
+                  }
+                  doc.save(`rapport-mensuel-${new Date().toISOString().slice(0,7)}.pdf`);
+                }}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-[#1a6fa6] text-white rounded-xl font-semibold hover:bg-[#155a8a] transition-colors">
+                  <Download className="w-4 h-4" /> Télécharger PDF
+                </button>
+              </div>
+              {/* Email */}
+              {isAdmin && (
+                <div className="border-t border-gray-100 pt-4">
+                  <h3 className="text-sm font-bold text-gray-900 mb-2">Envoyer par email</h3>
+                  <div className="flex gap-2">
+                    <input type="email" value={emailReportTo} onChange={e => setEmailReportTo(e.target.value)}
+                      placeholder="destinataire@email.com"
+                      className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+                    <button
+                      disabled={!emailReportTo || emailSending}
+                      onClick={async () => {
+                        setEmailSending(true);
+                        try {
+                          const r = await fetch(`${API_BASE_URL}/api/email/monthly-report`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ to: emailReportTo }) });
+                          const d = await r.json();
+                          if (d.sent) setToast({ message: 'Rapport envoyé par email', type: 'success' });
+                          else setToast({ message: d.message || 'Erreur envoi email', type: 'error' });
+                        } catch { setToast({ message: 'Erreur envoi email', type: 'error' }); }
+                        setEmailSending(false);
+                      }}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
+                      {emailSending ? <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Envoi…</> : <><Send className="w-3.5 h-3.5" />Envoyer</>}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -8305,6 +8967,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <h3 className="text-base font-bold text-gray-900">Importer des équipements</h3>
                 <p className="text-xs text-gray-400">Fichier Excel (.xlsx) ou CSV — colonnes : nom, type, marque, modèle, n° série, IP, localisation, service, statut, date achat</p>
               </div>
+              <button onClick={downloadCsvTemplate}
+                className="flex items-center gap-1.5 text-xs font-semibold text-[#1a6fa6] border border-[#1a6fa6]/30 px-3 py-1.5 rounded-lg hover:bg-[#e8f3fc] transition-colors mr-1" title="Télécharger le modèle CSV">
+                <Download className="w-3.5 h-3.5" /> Template CSV
+              </button>
               <button onClick={() => setShowImportModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><XCircle className="w-5 h-5" /></button>
             </div>
             {/* Drop zone */}
@@ -8408,6 +9074,113 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 {importLoading ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Import en cours…</> : <><Upload className="w-4 h-4" />Importer {importRows.length > 0 ? `${importRows.length} ligne(s)` : ''}</>}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Barre flottante comparaison ═══════════════════════════════════════ */}
+      {compareIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-3 bg-[#1a6fa6] text-white rounded-2xl shadow-2xl px-5 py-3">
+          <span className="text-sm font-semibold">{compareIds.size} équipement{compareIds.size > 1 ? 's' : ''} sélectionné{compareIds.size > 1 ? 's' : ''}</span>
+          {compareIds.size >= 2 && (
+            <button onClick={() => setShowCompareModal(true)}
+              className="bg-white text-[#1a6fa6] text-sm font-bold px-4 py-1.5 rounded-xl hover:bg-blue-50 transition-colors">
+              Comparer
+            </button>
+          )}
+          <button onClick={() => setCompareIds(new Set())} className="text-white/70 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* ══ Modal comparaison équipements ═════════════════════════════════════ */}
+      {showCompareModal && (() => {
+        const items = equipments.filter(e => compareIds.has(e.id));
+        const fields: { key: keyof Equipment; label: string }[] = [
+          { key: 'type',        label: 'Type' },
+          { key: 'brand',       label: 'Marque' },
+          { key: 'model',       label: 'Modèle' },
+          { key: 'serialNumber',label: 'Numéro de série' },
+          { key: 'status',      label: 'Statut' },
+          { key: 'location',    label: 'Localisation' },
+          { key: 'department',  label: 'Département' },
+          { key: 'purchaseDate',label: 'Achat' },
+          { key: 'warranty',    label: 'Garantie' },
+          { key: 'lastMaintenance', label: 'Dernière maintenance' },
+          { key: 'ipAddress',   label: 'Adresse IP' },
+          { key: 'quantity',    label: 'Quantité' },
+        ];
+        return (
+          <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setShowCompareModal(false)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h2 className="text-lg font-bold text-gray-900">Comparaison d'équipements</h2>
+                <button onClick={() => setShowCompareModal(false)}><X className="w-5 h-5 text-gray-400 hover:text-gray-600" /></button>
+              </div>
+              <div className="overflow-auto flex-1">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50">
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-32">Champ</th>
+                      {items.map(e => (
+                        <th key={e.id} className="px-4 py-3 text-left">
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-400">{getTypeIcon(e.type)}</span>
+                            <div>
+                              <p className="font-bold text-gray-900">{e.name}</p>
+                              <p className="text-xs text-gray-400 font-normal">{e.brand} {e.model}</p>
+                            </div>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fields.map(({ key, label }) => {
+                      const vals = items.map(e => String(e[key] ?? '—'));
+                      const allSame = vals.every(v => v === vals[0]);
+                      return (
+                        <tr key={key} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</td>
+                          {items.map((e, i) => (
+                            <td key={e.id} className={`px-4 py-2.5 font-medium ${!allSame ? 'text-blue-700 bg-blue-50' : 'text-gray-700'}`}>
+                              {key === 'status' ? (
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColors[e.status] ?? 'bg-gray-100 text-gray-700'}`}>{e.status}</span>
+                              ) : vals[i] || '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 text-xs text-gray-400">
+                Les champs en <span className="text-blue-700 font-semibold">bleu</span> diffèrent entre les équipements.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ Modal Scan QR caméra ══════════════════════════════════════════════ */}
+      {showQrScan && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80" onClick={stopQrScan} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <h2 className="text-sm font-bold text-gray-900">Scanner un QR code</h2>
+              <button onClick={stopQrScan}><X className="w-5 h-5 text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <div className="relative bg-black aspect-square">
+              <video ref={qrVideoRef} className="w-full h-full object-cover" playsInline muted />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 border-2 border-white/70 rounded-xl" />
+              </div>
+            </div>
+            <p className="text-center text-xs text-gray-500 py-3 px-4">Pointez la caméra vers un QR code d'équipement</p>
           </div>
         </div>
       )}
