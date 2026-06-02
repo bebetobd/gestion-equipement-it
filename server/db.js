@@ -63,6 +63,9 @@ async function initDB() {
   // Migration: add quantity
   await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1`);
 
+  // Migration: add min_quantity (stock threshold for accessories)
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS min_quantity INTEGER NOT NULL DEFAULT 0`);
+
   // Seed users from JSON if table is empty
   const { rows: uCount } = await pool.query('SELECT COUNT(*) FROM users');
   if (parseInt(uCount[0].count, 10) === 0) {
@@ -227,8 +230,8 @@ async function initDB() {
 
   // Migration: add blocked flag to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
-  // Block specific accounts by default
-  await pool.query(`UPDATE users SET blocked = TRUE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = FALSE`);
+  // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
+  await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
 
   // Reset admin password (one-time migration)
   await pool.query(`UPDATE users SET password = $1 WHERE username = 'admin'`,
@@ -566,6 +569,7 @@ export function rowToEquipment(row) {
     replacedById: row.replaced_by_id ?? null,
     siteId: row.site_id ?? null,
     quantity: row.quantity ?? 1,
+    minQuantity: row.min_quantity ?? 0,
   };
 }
 

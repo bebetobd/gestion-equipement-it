@@ -801,15 +801,17 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
       `INSERT INTO equipments
          (name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details, site_id, quantity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
-        e.interventionDetails || '', e.siteId || null, Math.max(1, parseInt(e.quantity) || 1)
+        e.interventionDetails || '', e.siteId || null,
+        Math.max(1, parseInt(e.quantity) || 1),
+        Math.max(0, parseInt(e.minQuantity) || 0)
       ]
     );
 
@@ -856,15 +858,18 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
          name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
          location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
          last_maintenance=$12, visited=$13, technician_name=$14,
-         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18
-       WHERE id=$19
+         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18, min_quantity=$19
+       WHERE id=$20
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
-        e.interventionDetails || '', e.siteId || null, Math.max(1, parseInt(e.quantity) || 1), id
+        e.interventionDetails || '', e.siteId || null,
+        Math.max(1, parseInt(e.quantity) || 1),
+        Math.max(0, parseInt(e.minQuantity) || 0),
+        id
       ]
     );
 

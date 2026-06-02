@@ -5,11 +5,14 @@ import {
   XCircle, Info, Clock, Download, ChevronDown, ChevronLeft, ChevronRight,
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
-  MessageCircle, Send, X, Ban, ShieldCheck
+  MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
+  Moon, Sun
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Document as DocxDocument, Packer, Paragraph as DocxParagraph, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, TextRun, HeadingLevel, WidthType } from 'docx';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface AuthUser {
   id: number;
@@ -79,6 +82,7 @@ interface Equipment {
   replacedById?: number | null;
   siteId?: number | null;
   quantity: number;
+  minQuantity: number;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -185,6 +189,7 @@ const defaultFormData: EquipmentFormData = {
   interventionDetails: '',
   siteId: null,
   quantity: 1,
+  minQuantity: 0,
 };
 
 const equipmentTypes = [
@@ -235,7 +240,8 @@ const sampleEquipments: Equipment[] = [
     technicianName: 'Jean Dupont',
     visitDate: '2024-09-15T14:30',
     interventionDetails: 'Mise à jour système et nettoyage complet',
-    quantity: 1
+    quantity: 1,
+    minQuantity: 0,
   },
   {
     id: 2,
@@ -255,7 +261,8 @@ const sampleEquipments: Equipment[] = [
     technicianName: '',
     visitDate: '',
     interventionDetails: '',
-    quantity: 1
+    quantity: 1,
+    minQuantity: 0,
   },
   {
     id: 3,
@@ -275,7 +282,8 @@ const sampleEquipments: Equipment[] = [
     technicianName: 'Marie Martin',
     visitDate: '2024-09-18T09:15',
     interventionDetails: 'Remplacement toner et maintenance préventive',
-    quantity: 1
+    quantity: 1,
+    minQuantity: 0,
   }
 ];
 
@@ -506,7 +514,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [transferLoading, setTransferLoading] = useState(false);
 
   // Documents
-  const [detailsTab, setDetailsTab] = useState<'info' | 'transfers' | 'documents'>('info');
+  const [detailsTab, setDetailsTab] = useState<'info' | 'transfers' | 'documents' | 'history' | 'notes'>('info');
+  const [equipmentNotes, setEquipmentNotes] = useState<Record<number, string[]>>({});
+  const [noteInput, setNoteInput] = useState('');
+  const [tasks, setTasks] = useState<{id:number;title:string;dueDate:string;assignedTo:string;priority:'haute'|'normale'|'basse';done:boolean}[]>(() => {
+    try { return JSON.parse(localStorage.getItem('it-tasks') || '[]'); } catch { return []; }
+  });
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskForm, setTaskForm] = useState({ title:'', dueDate:'', assignedTo:'', priority:'normale' as 'haute'|'normale'|'basse' });
+  const saveTasks = (updated: typeof tasks) => { setTasks(updated); localStorage.setItem('it-tasks', JSON.stringify(updated)); };
   const [equipmentDocs, setEquipmentDocs] = useState<EquipmentDoc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [transferHistory, setTransferHistory] = useState<any[]>([]);
@@ -525,6 +541,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
   const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
+  const [maintTechFilter, setMaintTechFilter] = useState<string[]>([]);
+  const [visitTechFilter, setVisitTechFilter] = useState<string[]>([]);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [noteLoading, setNoteLoading] = useState(false);
@@ -578,6 +596,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
   const [monitoringTab, setMonitoringTab] = useState<'sessions' | 'activities'>('sessions');
   const [activeSessions, setActiveSessions] = useState<SessionInfo[]>([]);
+  const [showWarrantyModule, setShowWarrantyModule] = useState(false);
+  const [warrantyRiskFilter, setWarrantyRiskFilter] = useState<'all' | 'expired' | 'critical' | 'warning' | 'ok' | 'unknown'>('all');
   const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
   const [activityUserFilter, setActivityUserFilter] = useState<number | null>(null);
   const [monitoringLoading, setMonitoringLoading] = useState(false);
@@ -600,6 +620,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [newGroupMembers, setNewGroupMembers] = useState<number[]>([]);
   const [groupCreating, setGroupCreating] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Global search ──────────────────────────────────────────────────────────
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const globalSearchRef = useRef<HTMLInputElement>(null);
+
+  // ── Import équipements ─────────────────────────────────────────────────────
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importRows, setImportRows] = useState<Partial<Equipment>[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState('');
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  // ── QR Code ────────────────────────────────────────────────────────────────
+  const [qrEquipment, setQrEquipment] = useState<Equipment | null>(null);
+
+  // ── Kanban maintenance ─────────────────────────────────────────────────────
+  const [showKanban, setShowKanban] = useState(false);
+
+  // ── Calendrier visites ─────────────────────────────────────────────────────
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
 
   // ── Reports state ──────────────────────────────────────────────────────────
   const [showReportsModal, setShowReportsModal] = useState(false);
@@ -639,6 +682,67 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Toast & Confirm dialog
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
+  // ── Dark mode ──────────────────────────────────────────────────────────────
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('it-dark-mode') === 'true';
+  });
+
+  // ── Session timeout ────────────────────────────────────────────────────────
+  const [showSessionWarning, setShowSessionWarning] = useState(false);
+  const [sessionCountdown, setSessionCountdown] = useState(300);
+  const lastActivityRef = useRef<number>(Date.now());
+  const sessionWarningRef = useRef(false);
+
+  // Apply dark mode class on html element
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('it-dark-mode', String(darkMode));
+  }, [darkMode]);
+
+  // Session timeout — 25 min warning, 30 min auto-logout
+  useEffect(() => {
+    const WARN_MS  = 25 * 60 * 1000;
+    const LIMIT_MS = 30 * 60 * 1000;
+
+    const resetActivity = () => {
+      lastActivityRef.current = Date.now();
+      if (sessionWarningRef.current) {
+        sessionWarningRef.current = false;
+        setShowSessionWarning(false);
+        setSessionCountdown(300);
+      }
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, resetActivity, { passive: true }));
+
+    const tick = setInterval(() => {
+      const idle = Date.now() - lastActivityRef.current;
+      if (idle >= LIMIT_MS) {
+        clearInterval(tick);
+        onLogout();
+        return;
+      }
+      if (idle >= WARN_MS && !sessionWarningRef.current) {
+        sessionWarningRef.current = true;
+        setShowSessionWarning(true);
+        setSessionCountdown(Math.round((LIMIT_MS - idle) / 1000));
+      }
+      if (sessionWarningRef.current) {
+        setSessionCountdown(Math.max(0, Math.round((LIMIT_MS - idle) / 1000)));
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(tick);
+      events.forEach(e => window.removeEventListener(e, resetActivity));
+    };
+  }, []);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1278,9 +1382,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   useEffect(() => {
+    // Chargement initial de toutes les données du dashboard
     fetchEquipments();
     fetchUsers();
     fetchSites();
+    fetchMaintenance('all');
+    fetchVisits({ siteId: '', status: '', from: '', to: '' });
   }, []);
 
   // Auto-select site when user has exactly one allowed site
@@ -1336,14 +1443,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     return () => clearTimeout(timer);
   }, [reportSiteFrom, reportSiteTo, reportSiteTypeFilter, showReportsModal, reportsTab]);
 
-  // Auto-refresh dashboard data every 60 s (équipements + maintenance count)
+  // Auto-refresh dashboard data every 30 s — équipements, maintenance, visites
   useEffect(() => {
     const id = setInterval(() => {
       fetchEquipments();
-      fetchMaintenance(maintenanceFilter);
-    }, 60000);
+      fetchMaintenance('all');
+      fetchVisits({ siteId: '', status: '', from: '', to: '' });
+    }, 30000);
     return () => clearInterval(id);
-  }, [maintenanceFilter]);
+  }, []);
 
   // Chat: load users and groups once on mount
   useEffect(() => { fetchChatUsers(); fetchChatGroups(); }, []);
@@ -1398,14 +1506,79 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement)?.tagName;
+      const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
       if (event.key === 'Escape') {
         setShowForm(false);
         setShowDetailsModal(false);
+        setShowGlobalSearch(false);
+        setShowMaintenanceForm(false);
+        setShowVisitForm(false);
+        setShowChatModal(false);
+        return;
+      }
+
+      // Ignore shortcuts when typing in inputs
+      if (inInput) return;
+
+      // Ctrl+K or / → Global search
+      if ((event.ctrlKey && event.key === 'k') || event.key === '/') {
+        event.preventDefault();
+        setShowGlobalSearch(true);
+        setGlobalSearchQuery('');
+        setTimeout(() => globalSearchRef.current?.focus(), 50);
+        return;
+      }
+
+      // D → toggle dark mode
+      if (event.key === 'd' || event.key === 'D') {
+        setDarkMode(v => !v);
+        return;
+      }
+
+      // N → New equipment
+      if ((event.key === 'n' || event.key === 'N') && canWrite) {
+        closeAllModules();
+        openNewEquipmentForm();
+        return;
+      }
+
+      // R → Refresh
+      if (event.key === 'r' || event.key === 'R') {
+        handleRefresh?.();
+        return;
+      }
+
+      // M → Maintenance
+      if ((event.key === 'm' || event.key === 'M') && canWrite) {
+        openMaintenanceModule();
+        return;
+      }
+
+      // V → Visites
+      if ((event.key === 'v' || event.key === 'V') && canWrite) {
+        closeAllModules();
+        setShowVisitModule(true);
+        fetchVisits();
+        return;
+      }
+
+      // G → Garanties
+      if ((event.key === 'g' || event.key === 'G') && canWrite) {
+        openWarrantyModule();
+        return;
+      }
+
+      // E → Équipements (retour accueil)
+      if (event.key === 'e' || event.key === 'E') {
+        closeAllModules();
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [canWrite, chatConversation, chatActiveGroup]);
 
   const resetForm = () => {
     setFormData(defaultFormData);
@@ -1606,6 +1779,60 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
     doc.save('equipements.pdf');
     setShowExportMenu(false);
+  };
+
+  const handleExportWarrantyExcel = () => {
+    const rows = warrantyVisibleEquipments.map((e) => ({
+      ID: e.id,
+      Nom: e.name,
+      Type: e.type,
+      Marque: e.brand,
+      Modèle: e.model,
+      'N° Série': e.serialNumber,
+      Site: e.siteId ? (sites.find((s) => s.id === e.siteId)?.name ?? '') : 'Sans site',
+      Département: e.department,
+      Emplacement: e.location,
+      Garantie: e.warranty,
+      Statut: warrantyRiskLabels[e.warrantyStatus] ?? e.warrantyStatus,
+      'État garantie': e.warrantyLabel,
+      'Délai restant': e.warrantyDays != null ? `${e.warrantyDays} j` : 'N/A',
+      'Dernière maintenance': e.lastMaintenance,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Garanties');
+    XLSX.writeFile(wb, 'garanties.xlsx');
+  };
+
+  const handleExportWarrantyPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text('Rapport Garanties - Équipements', 14, 14);
+    doc.setFontSize(9);
+    doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${warrantyVisibleEquipments.length} équipement(s)`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [[
+        'Nom', 'Type', 'Marque / Modèle', 'N° Série', 'Site', 'Département', 'Statut garantie', 'État', 'Délai restant', 'Dernière maintenance'
+      ]],
+      body: warrantyVisibleEquipments.map((e) => [
+        e.name,
+        e.type,
+        `${e.brand} ${e.model}`.trim(),
+        e.serialNumber,
+        e.siteId ? (sites.find((s) => s.id === e.siteId)?.name ?? '') : 'Sans site',
+        e.department,
+        e.warranty,
+        e.warrantyLabel,
+        e.warrantyDays != null ? `${e.warrantyDays} j` : 'N/A',
+        e.lastMaintenance || '—',
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 18 }, 2: { cellWidth: 30 }, 3: { cellWidth: 22 }, 4: { cellWidth: 24 }, 5: { cellWidth: 24 }, 6: { cellWidth: 30 }, 7: { cellWidth: 22 }, 8: { cellWidth: 20 }, 9: { cellWidth: 24 } },
+    });
+    doc.save('garanties.pdf');
   };
 
   // ─── Transfer ───────────────────────────────────────────────────────────────
@@ -1987,6 +2214,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowMaintenanceForm(false);
     setShowMaintenanceReport(false);
     setSelectedMaintenance(null);
+    setShowWarrantyModule(false);
     setShowReportsModal(false);
     setShowMonitoringModal(false);
     setShowActivityLog(false);
@@ -1998,6 +2226,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowMaintenanceModule(true);
     setSelectedMaintenance(null);
     fetchMaintenance(maintenanceFilter);
+  };
+
+  const openWarrantyModule = () => {
+    closeAllModules();
+    setShowWarrantyModule(true);
+    setWarrantyRiskFilter('all');
   };
 
   const openSignalerPanne = (equipment: Equipment) => {
@@ -2018,6 +2252,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           const updated = await r.json();
           setMaintenanceRecords((prev) => prev.map((m) => m.id === maintenanceEditId ? updated : m));
           setSelectedMaintenance(updated);
+          // Refresh équipements : statut peut changer (résolu → actif, ouvert → maintenance)
+          fetchEquipments();
         }
       } else {
         const r = await fetch(`${API_BASE_URL}/api/maintenance`, {
@@ -2056,6 +2292,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     en_cours:   'bg-yellow-100 text-yellow-700',
     résolu:     'bg-green-100 text-green-700',
   };
+  const getWarrantyInfo = (warranty: string) => {
+    if (!warranty) return null;
+    const d = new Date(warranty);
+    if (isNaN(d.getTime())) return null;
+    const diffDays = Math.floor((d.getTime() - Date.now()) / 86400000);
+    if (diffDays < 0) return { status: 'expired' as const, days: Math.abs(diffDays), label: `Expirée`, color: 'bg-red-100 text-red-700 border-red-200' };
+    if (diffDays <= 30) return { status: 'critical' as const, days: diffDays, label: `${diffDays}j`, color: 'bg-orange-100 text-orange-700 border-orange-200' };
+    if (diffDays <= 90) return { status: 'warning' as const, days: diffDays, label: `${Math.ceil(diffDays/30)}m`, color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
+    return { status: 'ok' as const, days: diffDays, label: `${Math.floor(diffDays/30)}m`, color: 'bg-green-100 text-green-700 border-green-200' };
+  };
+
   const maintenanceStatusLabel: Record<string, string> = {
     en_attente: 'En attente',
     ouvert:     'Ouvert',
@@ -2108,173 +2355,259 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const maintenanceCount = filteredEquipments.filter((equipment) => equipment.status === 'maintenance').length;
   const notVisitedCount = filteredEquipments.filter((equipment) => !equipment.visited).length;
 
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const filteredVisits = visits.filter((visit) => selectedSiteIds.length === 0 || (visit.siteId != null && selectedSiteIds.includes(visit.siteId)));
+  const filteredMaintenance = maintenanceRecords.filter((maintenance) => {
+    if (selectedSiteIds.length === 0) return true;
+    const siteId = (maintenance as MaintenanceRecord & { siteId?: number | null }).siteId;
+    if (siteId != null) return selectedSiteIds.includes(siteId);
+    if (maintenance.equipmentId != null) {
+      const equipment = equipments.find((e) => e.id === maintenance.equipmentId);
+      return equipment?.siteId != null && selectedSiteIds.includes(equipment.siteId);
+    }
+    return false;
+  });
+
+  // KPI stats — calculés sur les données actuellement affichées et filtrées par site si nécessaire
+  const kpiStats = {
+    total: filteredEquipments.length,
+    actifs: filteredEquipments.filter(e => e.status === 'actif').length,
+    defaillants: filteredEquipments.filter(e => e.status === 'defaillant' || e.status === 'maintenance').length,
+    reformes: filteredEquipments.filter(e => e.status === 'réformé').length,
+    ticketsOuverts: filteredMaintenance.filter(m => m.status !== 'résolu').length,
+    ticketsCritiques: filteredMaintenance.filter(m => m.priority === 'critique' && m.status !== 'résolu').length,
+    nonVisites: notVisitedCount,
+    visitesPlannifiees: filteredVisits.filter(v => v.status === 'planifié').length,
+    visitesToday: filteredVisits.filter(v => v.scheduledDate === todayStr && v.status === 'planifié').length,
+    visitesEnCours: filteredVisits.filter(v => v.status === 'en_cours').length,
+    garantiesExpirees: filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'expired').length,
+    garantiesCritiques: filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'critical').length,
+    stockBas: filteredEquipments.filter(e => e.type === 'accessoires' && (e.minQuantity ?? 0) > 0 && e.quantity <= (e.minQuantity ?? 0)).length,
+  };
+
+  const lowStockItems = filteredEquipments.filter(e => e.type === 'accessoires' && (e.minQuantity ?? 0) > 0 && e.quantity <= (e.minQuantity ?? 0));
+
+  const selectedSiteNames = selectedSiteIds.length > 0
+    ? sites.filter((site) => selectedSiteIds.includes(site.id)).map((site) => site.name).join(', ')
+    : 'Tous sites';
+
+  const filterTypeLabel = filterType === 'all'
+    ? 'Tous types'
+    : equipmentTypes.find((t) => t.value === filterType)?.label ?? filterType;
+
+  const filterStatusLabel = filterStatus === 'all'
+    ? 'Tous statuts'
+    : filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1);
+
+  const kpiContextLabel = selectedSiteIds.length > 0
+    ? `${selectedSiteIds.length} site(s) sélectionné(s) — ${selectedSiteNames}`
+    : 'Toutes les données disponibles';
+
   const pagedEquipments   = filteredEquipments.slice((equipPage - 1) * PAGE_SIZE, equipPage * PAGE_SIZE);
   const pagedMaintenance  = maintenanceRecords.slice((maintenancePage - 1) * PAGE_SIZE, maintenancePage * PAGE_SIZE);
   const pagedActivityLogs = activityLogs.slice((activityPage - 1) * PAGE_SIZE, activityPage * PAGE_SIZE);
 
+  const warrantyEquipments = equipments.filter((equipment) =>
+    selectedSiteIds.length === 0 || (equipment.siteId != null && selectedSiteIds.includes(equipment.siteId))
+  );
+
+  const warrantyDetails = warrantyEquipments.map((equipment) => {
+    const warrantyInfo = getWarrantyInfo(equipment.warranty);
+    return {
+      ...equipment,
+      warrantyStatus: warrantyInfo?.status ?? 'unknown',
+      warrantyLabel: warrantyInfo?.label ?? 'Non renseignée',
+      warrantyClass: warrantyInfo?.color ?? 'bg-gray-100 text-gray-700 border-gray-200',
+      warrantyDays: warrantyInfo?.days ?? null,
+    };
+  });
+
+  const warrantyStats = {
+    total: warrantyDetails.length,
+    expired: warrantyDetails.filter((e) => e.warrantyStatus === 'expired').length,
+    critical: warrantyDetails.filter((e) => e.warrantyStatus === 'critical').length,
+    warning: warrantyDetails.filter((e) => e.warrantyStatus === 'warning').length,
+    ok: warrantyDetails.filter((e) => e.warrantyStatus === 'ok').length,
+    unknown: warrantyDetails.filter((e) => e.warrantyStatus === 'unknown').length,
+  };
+
+  const warrantySiteStats = sites
+    .filter((site) => selectedSiteIds.length === 0 || selectedSiteIds.includes(site.id))
+    .map((site) => {
+      const siteEquipments = warrantyDetails.filter((e) => e.siteId === site.id);
+      return {
+        ...site,
+        total: siteEquipments.length,
+        expired: siteEquipments.filter((e) => e.warrantyStatus === 'expired').length,
+        critical: siteEquipments.filter((e) => e.warrantyStatus === 'critical').length,
+        warning: siteEquipments.filter((e) => e.warrantyStatus === 'warning').length,
+        ok: siteEquipments.filter((e) => e.warrantyStatus === 'ok').length,
+        unknown: siteEquipments.filter((e) => e.warrantyStatus === 'unknown').length,
+      };
+    })
+    .sort((a, b) => (b.expired + b.critical) - (a.expired + a.critical) || b.warning - a.warning || b.total - a.total);
+
+  const warrantyRiskLabels: Record<string, string> = {
+    all: 'Tous statuts',
+    expired: 'Expirées',
+    critical: 'Critiques',
+    warning: 'Alerte',
+    ok: 'OK',
+    unknown: 'Non renseignées',
+  };
+
+  const warrantyRiskExplanations: Record<string, string> = {
+    expired: 'Garantie expirée : risque de frais hors garantie et délai de réparation prolongé.',
+    critical: 'Garantie bientôt expirée (≤ 30 jours) : risque élevé de coût de maintenance non couvert.',
+    warning: 'Garantie proche de fin (≤ 90 jours) : planification de renouvellement recommandée.',
+    ok: 'Garantie active : couverture encore valide.',
+    unknown: 'Aucune date de garantie renseignée : vérifier l’équipement rapidement.',
+  };
+
+  const warrantyVisibleEquipments = warrantyDetails.filter((equipment) =>
+    warrantyRiskFilter === 'all' || equipment.warrantyStatus === warrantyRiskFilter
+  );
+
+  const noSiteWarrantyEquipments = warrantyDetails.filter((equipment) => equipment.siteId == null);
+
   return (
     <>
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <aside className="fixed top-0 left-0 h-screen w-56 bg-white border-r border-gray-100 flex flex-col z-30 shadow-sm">
+      {/* ═══════════════════════════════════════════════════════════════════
+          TOP NAV — style ERP (Odoo)
+      ═══════════════════════════════════════════════════════════════════ */}
+      <nav className="fixed top-0 left-0 right-0 h-11 bg-[#1a6fa6] flex items-center z-30 shadow-md select-none">
+        {/* Grid / apps icon */}
+        <button className="w-11 h-11 flex items-center justify-center text-white/80 hover:bg-white/10 border-r border-white/15 shrink-0 transition-colors">
+          <LayoutGrid className="w-4 h-4" />
+        </button>
         {/* Brand */}
-        <div className="px-4 py-4 border-b border-gray-100 bg-indigo-700">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-              <Monitor className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-white leading-tight">Gestion IT</p>
-              <p className="text-xs text-indigo-300">Parc informatique</p>
-            </div>
-          </div>
+        <div className="px-4 h-11 flex items-center border-r border-white/15 shrink-0">
+          <Monitor className="w-4 h-4 text-white mr-2 shrink-0" />
+          <span className="text-sm font-bold text-white tracking-wide whitespace-nowrap">Gestion IT</span>
         </div>
-
-        {/* User */}
-        <div className="px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
-              {currentUser.name.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{currentUser.name}</p>
-              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleInfo.classes}`}>{roleInfo.label}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3">
-          <div className="px-3 pb-1">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Principal</p>
-          </div>
-          <button type="button"
-            onClick={() => closeAllModules()}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-medium text-indigo-700 bg-indigo-50">
-            <Monitor className="w-4 h-4 text-indigo-500 shrink-0" />
-            Équipements
+        {/* Nav items — scrollable */}
+        <div className="flex items-center h-11 overflow-x-auto flex-1" style={{scrollbarWidth:'none'}}>
+          <button type="button" onClick={() => closeAllModules()}
+            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap font-medium transition-colors">
+            <Monitor className="w-3.5 h-3.5 shrink-0" /> Équipements
           </button>
-          <button type="button"
-            onClick={() => { setShowChatModal(true); openChatConversation(chatConversation); }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <MessageCircle className="w-4 h-4 text-indigo-400 shrink-0" />
-            Messagerie
-            {(chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0)) > 0 && (
-              <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none font-bold">
-                {Math.min(9, chatUnread.global + Object.values(chatUnread.dms).reduce((a, b) => a + b, 0) + Object.values(chatUnread.groups).reduce((a, b) => a + b, 0))}
-              </span>
-            )}
-          </button>
-
-          {canWrite && (
-            <>
-              <div className="px-3 pt-3 pb-1">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Opérations</p>
-              </div>
-              {canModify && (
-                <button type="button"
-                  onClick={() => { closeAllModules(); setShowTransferModule(true); fetchAllTransfers(); }}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                  <ArrowRightLeft className="w-4 h-4 text-purple-500 shrink-0" />
-                  Transferts
-                </button>
-              )}
-              <button type="button"
-                onClick={() => openMaintenanceModule()}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <Wrench className="w-4 h-4 text-orange-500 shrink-0" />
-                Maintenance
-                {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (
-                  <span className="ml-auto bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
-                    {maintenanceRecords.filter(m => m.status !== 'résolu').length}
-                  </span>
-                )}
-              </button>
-              <button type="button"
-                onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <Clock className="w-4 h-4 text-blue-500 shrink-0" />
-                Visites de site
-                {visits.filter(v => v.status === 'planifié').length > 0 && (
-                  <span className="ml-auto bg-blue-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
-                    {visits.filter(v => v.status === 'planifié').length}
-                  </span>
-                )}
-              </button>
-            </>
+          {canWrite && canModify && (
+            <button type="button" onClick={() => { closeAllModules(); setShowTransferModule(true); fetchAllTransfers(); }}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> Transferts
+            </button>
           )}
-
-          <div className="px-3 pt-3 pb-1">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Analyses</p>
-          </div>
-          <button type="button"
-            onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
-            Rapports
+          {canWrite && (
+            <button type="button" onClick={() => openMaintenanceModule()}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <Wrench className="w-3.5 h-3.5 shrink-0" /> Maintenance
+              {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (() => {
+                const total = maintenanceRecords.filter(m => m.status !== 'résolu').length;
+                const hasCritical = maintenanceRecords.some(m => m.priority === 'critique' && m.status !== 'résolu');
+                return <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`}>{total}</span>;
+              })()}
+            </button>
+          )}
+          {canWrite && (
+            <button type="button" onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <Clock className="w-3.5 h-3.5 shrink-0" /> Visites de site
+              {(() => {
+                const todayStr = new Date().toISOString().slice(0,10);
+                const todayCount = visits.filter(v => v.scheduledDate === todayStr && v.status === 'planifié').length;
+                const planned = visits.filter(v => v.status === 'planifié').length;
+                return planned > 0 ? <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${todayCount > 0 ? 'bg-blue-400' : 'bg-blue-300'}`}>{planned}</span> : null;
+              })()}
+            </button>
+          )}
+          {canWrite && (
+            <button type="button" onClick={openWarrantyModule}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> Garanties
+              {(filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'expired').length + filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'critical').length) > 0 && (
+                <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-yellow-400">Risque</span>
+              )}
+            </button>
+          )}
+          <button type="button" onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+            <Calendar className="w-3.5 h-3.5 shrink-0" /> Rapports
           </button>
-
           {isAdmin && (
             <>
-              <div className="px-3 pt-3 pb-1">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Administration</p>
-              </div>
-              <button type="button"
-                onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <ClipboardList className="w-4 h-4 text-teal-500 shrink-0" />
-                Journal
+              <button type="button" onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" /> Journal
               </button>
-              <button type="button"
-                onClick={() => { closeAllModules(); setShowMonitoringModal(true); }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <Activity className="w-4 h-4 text-green-500 shrink-0" />
-                Monitoring
+              <button type="button" onClick={() => { closeAllModules(); setShowMonitoringModal(true); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Activity className="w-3.5 h-3.5 shrink-0" /> Monitoring
               </button>
-              <button type="button"
-                onClick={() => { fetchUsers(); setShowUserModal(true); }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <Users className="w-4 h-4 text-blue-500 shrink-0" />
-                Utilisateurs
+              <button type="button" onClick={() => { fetchUsers(); setShowUserModal(true); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Users className="w-3.5 h-3.5 shrink-0" /> Utilisateurs
               </button>
-              <button type="button"
-                onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
-                Sites
+              <button type="button" onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
+                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                <Globe className="w-3.5 h-3.5 shrink-0" /> Sites
               </button>
             </>
           )}
-        </nav>
-
-        {/* Logout */}
-        <div className="p-3 border-t border-gray-100">
-          <button type="button"
-            onClick={onLogout}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors rounded-lg">
-            <LogOut className="w-4 h-4 shrink-0" />
-            Déconnexion
+        </div>
+        {/* Right — actions + user */}
+        <div className="flex items-center gap-1 px-2 shrink-0 border-l border-white/15">
+          <button onClick={() => { setShowGlobalSearch(true); setGlobalSearchQuery(''); setTimeout(() => globalSearchRef.current?.focus(), 50); }}
+            className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors" title="Recherche (Ctrl+K)">
+            <Search className="w-4 h-4" />
+          </button>
+          <button onClick={() => { setShowChatModal(true); openChatConversation(chatConversation); }}
+            className="relative w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors" title="Messagerie">
+            <MessageCircle className="w-4 h-4" />
+            {(chatUnread.global + Object.values(chatUnread.dms).reduce((a,b)=>a+b,0) + Object.values(chatUnread.groups).reduce((a,b)=>a+b,0)) > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+            )}
+          </button>
+          {/* Dark mode toggle */}
+          <button onClick={() => setDarkMode(v => !v)}
+            className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors"
+            title={darkMode ? 'Mode clair (D)' : 'Mode sombre (D)'}>
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <div className="w-px h-5 bg-white/20 mx-1" />
+          <div className="w-7 h-7 rounded-full bg-orange-400 flex items-center justify-center text-white text-xs font-bold shrink-0">
+            {currentUser.name.charAt(0).toUpperCase()}
+          </div>
+          <div className="ml-1 mr-2 cursor-default">
+            <div className="text-white text-xs font-semibold leading-tight truncate max-w-[100px]">{currentUser.name}</div>
+            <div className="text-white/60 text-[10px] leading-tight">{roleInfo.label}</div>
+          </div>
+          <button type="button" onClick={onLogout} title="Déconnexion"
+            className="w-8 h-8 flex items-center justify-center text-white/70 hover:bg-white/12 rounded transition-colors">
+            <LogOut className="w-3.5 h-3.5" />
           </button>
         </div>
-      </aside>
+      </nav>
 
       {/* ── Main content ──────────────────────────────────────────────────── */}
-      <div className="min-h-screen bg-slate-100 ml-56 p-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="min-h-screen bg-[#f8f9fa] pt-11">
+        <div>
 
-        {/* ── Sélecteur de sites ── */}
+        {/* ── Sélecteur de sites (compact chips) ── */}
         {(sites.length > 0 || isAdmin) && (
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 flex-wrap">
             {/* Site unique → badge fixe sans dropdown */}
             {!isAdmin && userAllowedSiteIds.length === 1 ? (() => {
               const s = sites.find(s => s.id === userAllowedSiteIds[0]);
               return s ? (
-                <div className="flex items-center gap-3 bg-white border border-indigo-200 rounded-xl shadow-sm px-4 py-3 flex-1 max-w-sm">
+                <div className="flex items-center gap-3 bg-white border border-[#1a6fa6]/30 rounded-xl shadow-sm px-4 py-3 flex-1 max-w-sm">
                   <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-semibold text-gray-800 block truncate">{s.name}</span>
                     <span className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {equipments.filter(e => e.siteId === s.id).length} équip.</span>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium shrink-0">Votre site</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-[#cfe2ff] text-[#155a8a] font-medium shrink-0">Votre site</span>
                 </div>
               ) : null;
             })() : (
@@ -2289,10 +2622,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     const s = sites.find(s => s.id === id);
                     if (!s) return null;
                     return (
-                      <span key={id} className="inline-flex items-center gap-1 bg-indigo-100 text-indigo-700 text-xs font-medium px-3 py-1 rounded-full">
+                      <span key={id} className="inline-flex items-center gap-1 bg-[#cfe2ff] text-[#155a8a] text-xs font-medium px-3 py-1 rounded-full">
                         {s.name}
                         <button type="button" onClick={() => setSelectedSiteIds(prev => prev.filter(i => i !== id))}
-                          className="ml-1 hover:text-indigo-900 transition-colors">
+                          className="ml-1 hover:text-[#0d4a73] transition-colors">
                           <X className="w-3 h-3" />
                         </button>
                       </span>
@@ -2326,7 +2659,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           const available = isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id));
                           setSelectedSiteIds(selectedSiteIds.length === available.length ? [] : available.map(s => s.id));
                         }}
-                        className="text-xs text-indigo-600 hover:underline font-medium">
+                        className="text-xs text-[#1a6fa6] hover:underline font-medium">
                         {selectedSiteIds.length === (isAdmin || userAllowedSiteIds.length === 0 ? sites : sites.filter(s => userAllowedSiteIds.includes(s.id))).length
                           ? 'Tout désélectionner' : 'Tout sélectionner'}
                       </button>
@@ -2338,12 +2671,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       return (
                         <button key={site.id} type="button"
                           onClick={() => setSelectedSiteIds(prev => selected ? prev.filter(i => i !== site.id) : [...prev, site.id])}
-                          className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'}`}>
+                          className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-[#e8f3fc]' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${selected ? 'bg-[#1a6fa6] border-[#1a6fa6]' : 'border-gray-300'}`}>
                             {selected && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-medium truncate ${selected ? 'text-indigo-700' : 'text-gray-800'}`}>{site.name}</p>
+                            <p className={`text-sm font-medium truncate ${selected ? 'text-[#155a8a]' : 'text-gray-800'}`}>{site.name}</p>
                             <p className="text-xs text-gray-400 flex items-center gap-1">
                               <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''} · {count} équip.
                             </p>
@@ -2369,82 +2702,340 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Total équipements</p>
-                <p className="text-3xl font-bold text-gray-900">{filteredEquipments.length}</p>
+        {/* ── Bannière alertes critiques ── */}
+        {(kpiStats.ticketsCritiques > 0 || kpiStats.visitesToday > 0 || kpiStats.garantiesExpirees + kpiStats.garantiesCritiques > 0 || kpiStats.stockBas > 0) && (
+          <div className="mb-4 flex flex-wrap gap-3">
+            {kpiStats.ticketsCritiques > 0 && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-red-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-red-700">{kpiStats.ticketsCritiques} ticket{kpiStats.ticketsCritiques > 1 ? 's' : ''} critique{kpiStats.ticketsCritiques > 1 ? 's' : ''} non résolu{kpiStats.ticketsCritiques > 1 ? 's' : ''}</p>
+                  <p className="text-xs text-red-500 truncate">{filteredMaintenance.filter(m => m.priority === 'critique' && m.status !== 'résolu').slice(0,2).map(m => m.equipmentName || 'Équipement').join(', ')}{kpiStats.ticketsCritiques > 2 ? ` +${kpiStats.ticketsCritiques-2}` : ''}</p>
+                </div>
+                <button onClick={() => openMaintenanceModule()} className="text-xs font-semibold text-red-600 hover:text-red-800 shrink-0 underline">Voir →</button>
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <Info className="w-6 h-6 text-indigo-500" />
+            )}
+            {kpiStats.visitesToday > 0 && (
+              <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4 text-blue-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-blue-700">{kpiStats.visitesToday} visite{kpiStats.visitesToday > 1 ? 's' : ''} planifiée{kpiStats.visitesToday > 1 ? 's' : ''} aujourd'hui</p>
+                  <p className="text-xs text-blue-500 truncate">{filteredVisits.filter(v => v.scheduledDate === todayStr && v.status === 'planifié').slice(0,2).map(v => v.siteName).join(', ')}</p>
+                </div>
+                <button onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800 shrink-0 underline">Voir →</button>
               </div>
-            </div>
-            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-              {selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) filtré(s)` : 'Tous les sites'}
-            </div>
+            )}
+            {kpiStats.garantiesExpirees + kpiStats.garantiesCritiques > 0 && (
+              <div className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-yellow-700">
+                    {kpiStats.garantiesExpirees > 0 ? `${kpiStats.garantiesExpirees} garantie${kpiStats.garantiesExpirees>1?'s':''} expirée${kpiStats.garantiesExpirees>1?'s':''}` : ''}
+                    {kpiStats.garantiesExpirees > 0 && kpiStats.garantiesCritiques > 0 ? ' · ' : ''}
+                    {kpiStats.garantiesCritiques > 0 ? `${kpiStats.garantiesCritiques} expire${kpiStats.garantiesCritiques>1?'nt':''} bientôt` : ''}
+                  </p>
+                  <p className="text-xs text-yellow-600">Vérifiez les équipements concernés</p>
+                </div>
+              </div>
+            )}
+            {kpiStats.stockBas > 0 && (
+              <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
+                  <Archive className="w-4 h-4 text-orange-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-orange-700">{kpiStats.stockBas} accessoire{kpiStats.stockBas > 1 ? 's' : ''} en stock bas</p>
+                  <p className="text-xs text-orange-500 truncate">{lowStockItems.slice(0, 3).map(e => `${e.name} (${e.quantity}/${e.minQuantity})`).join(', ')}{lowStockItems.length > 3 ? ` +${lowStockItems.length - 3}` : ''}</p>
+                </div>
+                <button onClick={() => { setFilterType('accessoires'); closeAllModules(); }} className="text-xs font-semibold text-orange-600 hover:text-orange-800 shrink-0 underline">Voir →</button>
+              </div>
+            )}
           </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">En maintenance</p>
-                <p className="text-3xl font-bold text-gray-900">{maintenanceCount}</p>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center shrink-0">
-                <Wrench className="w-6 h-6 text-amber-500" />
-              </div>
+        )}
+
+        {/* ── KPI Cards ── */}
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-semibold text-slate-900">Statistiques affichées</p>
+              <p className="text-xs text-slate-500">{kpiContextLabel} · {filterTypeLabel} · {filterStatusLabel} · {filteredEquipments.length} équipement(s)</p>
             </div>
-            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-              {maintenanceCount === 0 ? 'Aucun ticket ouvert' : `${maintenanceCount} équipement${maintenanceCount > 1 ? 's' : ''} en cours`}
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Non visités</p>
-                <p className="text-3xl font-bold text-gray-900">{notVisitedCount}</p>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center shrink-0">
-                <XCircle className="w-6 h-6 text-rose-500" />
-              </div>
-            </div>
-            <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-              {notVisitedCount === 0 ? 'Tous visités' : `${notVisitedCount} sans passage technicien`}
-            </div>
+            <div className="text-xs text-slate-500">Actualisation automatique toutes les 30 s</div>
           </div>
         </div>
-
-        <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100">
-          {/* Ligne 1 : recherche + actions */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Rechercher un équipement, marque, modèle…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white focus:border-transparent transition-all"
-              />
+        <div className="mb-2 flex items-center justify-between px-1">
+          <span className="text-xs text-gray-400 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block"></span>
+            Données en direct et filtrées en fonction du site sélectionné
+          </span>
+          <button onClick={() => { fetchEquipments(); fetchMaintenance('all'); fetchVisits({ siteId:'', status:'', from:'', to:'' }); }}
+            className="text-xs text-[#1a6fa6] hover:text-[#0d4a73] flex items-center gap-1 font-medium">
+            <RefreshCcw className="w-3 h-3" /> Actualiser maintenant
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+          {[
+            {
+              label: 'Total équipements',
+              value: kpiStats.total,
+              icon: <Monitor className="w-5 h-5 text-[#1a6fa6]" />,
+              bg: 'bg-[#e8f3fc]',
+              sub: selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) filtré(s)` : 'Tous sites confondus',
+              onClick: () => closeAllModules(),
+            },
+            {
+              label: 'Actifs',
+              value: kpiStats.actifs,
+              icon: <CheckCircle className="w-5 h-5 text-green-500" />,
+              bg: 'bg-green-50',
+              sub: `${kpiStats.reformes} réformé(s)`,
+              onClick: () => { setFilterStatus('actif'); closeAllModules(); },
+            },
+            {
+              label: 'Défaillants',
+              value: kpiStats.defaillants,
+              icon: <AlertTriangle className="w-5 h-5 text-red-500" />,
+              bg: 'bg-red-50',
+              sub: 'Panne ou maintenance',
+              onClick: () => { setFilterStatus('defaillant'); closeAllModules(); },
+            },
+            {
+              label: 'Tickets ouverts',
+              value: kpiStats.ticketsOuverts,
+              icon: <Wrench className="w-5 h-5 text-amber-500" />,
+              bg: 'bg-amber-50',
+              sub: `${kpiStats.ticketsCritiques} critique(s) urgents`,
+              onClick: openMaintenanceModule,
+            },
+            {
+              label: 'Non visités',
+              value: kpiStats.nonVisites,
+              icon: <XCircle className="w-5 h-5 text-rose-500" />,
+              bg: 'bg-rose-50',
+              sub: 'Sans passage technicien',
+              onClick: () => closeAllModules(),
+            },
+            {
+              label: 'Visites planifiées',
+              value: kpiStats.visitesPlannifiees,
+              icon: <Calendar className="w-5 h-5 text-blue-500" />,
+              bg: 'bg-blue-50',
+              sub: kpiStats.visitesToday > 0 ? `⚡ ${kpiStats.visitesToday} aujourd'hui` : kpiStats.visitesEnCours > 0 ? `${kpiStats.visitesEnCours} en cours` : 'Interventions à venir',
+              onClick: () => { closeAllModules(); setShowVisitModule(true); fetchVisits(); },
+            },
+          ].map(({ label, value, icon, bg, sub, onClick }) => (
+            <div key={label} onClick={onClick}
+              className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md hover:border-[#1a6fa6]/30 transition-all group">
+              <div className="flex items-center justify-between mb-2">
+                <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform`}>{icon}</div>
+                <p className="text-2xl font-bold text-gray-900">{value}</p>
+              </div>
+              <p className="text-xs font-semibold text-gray-700 leading-tight">{label}</p>
+              <p className={`text-xs mt-0.5 truncate ${sub.startsWith('⚡') ? 'text-blue-600 font-semibold' : 'text-gray-400'}`}>{sub}</p>
             </div>
+          ))}
+        </div>
 
-            {/* Actualiser */}
-            <button
-              onClick={handleRefresh}
-              title="Actualiser"
-              className="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
-            >
-              <RefreshCcw className="w-4 h-4" />
+        {/* ── Graphiques Dashboard ── */}
+        {filteredEquipments.length > 0 && (() => {
+          // Donut chart — statuts
+          const statusData = [
+            { key: 'actif',        label: 'Actif',        color: '#22c55e', count: filteredEquipments.filter(e => e.status === 'actif').length },
+            { key: 'maintenance',  label: 'Maintenance',  color: '#f59e0b', count: filteredEquipments.filter(e => e.status === 'maintenance').length },
+            { key: 'defaillant',   label: 'Défaillant',   color: '#ef4444', count: filteredEquipments.filter(e => e.status === 'defaillant').length },
+            { key: 'inactif',      label: 'Inactif',      color: '#6b7280', count: filteredEquipments.filter(e => e.status === 'inactif').length },
+            { key: 'réformé',      label: 'Réformé',      color: '#a855f7', count: filteredEquipments.filter(e => e.status === 'réformé').length },
+          ].filter(d => d.count > 0);
+          const total = statusData.reduce((s, d) => s + d.count, 0);
+          // Build donut arcs
+          const r = 48; const cx = 64; const cy = 64; const sw = 20;
+          let cumAngle = -Math.PI / 2;
+          const arcs = statusData.map(d => {
+            const angle = (d.count / total) * 2 * Math.PI;
+            const x1 = cx + r * Math.cos(cumAngle);
+            const y1 = cy + r * Math.sin(cumAngle);
+            cumAngle += angle;
+            const x2 = cx + r * Math.cos(cumAngle);
+            const y2 = cy + r * Math.sin(cumAngle);
+            const large = angle > Math.PI ? 1 : 0;
+            return { ...d, d: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`, angle };
+          });
+
+          // Bar chart — types
+          const typeData = [
+            { key: 'ordinateur', label: 'Ordi.', color: '#1a6fa6', count: filteredEquipments.filter(e => e.type === 'ordinateur').length },
+            { key: 'reseau',     label: 'Réseau', color: '#06b6d4', count: filteredEquipments.filter(e => e.type === 'reseau').length },
+            { key: 'serveur',    label: 'Serveur', color: '#8b5cf6', count: filteredEquipments.filter(e => e.type === 'serveur').length },
+            { key: 'imprimante', label: 'Imprim.', color: '#f59e0b', count: filteredEquipments.filter(e => e.type === 'imprimante').length },
+            { key: 'accessoires',label: 'Access.', color: '#10b981', count: filteredEquipments.filter(e => e.type === 'accessoires').length },
+            { key: 'autre',      label: 'Autre',  color: '#6b7280', count: filteredEquipments.filter(e => e.type === 'autre').length },
+          ].filter(d => d.count > 0);
+          const maxCount = Math.max(...typeData.map(d => d.count), 1);
+          const barH = 80; const barW = 28; const gap = 8;
+          const chartW = typeData.length * (barW + gap);
+
+          return (
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Donut — statuts */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-4">Répartition par statut</h3>
+                <div className="flex items-center gap-6">
+                  <svg width="128" height="128" viewBox="0 0 128 128" style={{flexShrink:0}}>
+                    {arcs.map((arc, i) => (
+                      <path key={i} d={arc.d} fill="none" stroke={arc.color} strokeWidth={sw}
+                        strokeLinecap="butt" opacity={0.9} />
+                    ))}
+                    <text x="64" y="60" textAnchor="middle" fill="#374151" fontSize="18" fontWeight="bold">{total}</text>
+                    <text x="64" y="76" textAnchor="middle" fill="#9ca3af" fontSize="10">équip.</text>
+                  </svg>
+                  <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                    {arcs.map(d => (
+                      <div key={d.key} className="flex items-center gap-2 min-w-0">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{backgroundColor: d.color}} />
+                        <span className="text-xs text-gray-600 flex-1 truncate">{d.label}</span>
+                        <span className="text-xs font-bold text-gray-900 tabular-nums">{d.count}</span>
+                        <span className="text-xs text-gray-400 tabular-nums w-9 text-right">{Math.round(d.count/total*100)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Barres — types */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-4">Équipements par type</h3>
+                <div className="flex items-end gap-1 overflow-x-auto" style={{height: barH + 40}}>
+                  <svg width={Math.max(chartW + 16, 200)} height={barH + 36} viewBox={`0 0 ${Math.max(chartW + 16, 200)} ${barH + 36}`} style={{overflow:'visible'}}>
+                    {typeData.map((d, i) => {
+                      const bh = Math.max(4, Math.round((d.count / maxCount) * barH));
+                      const x = 8 + i * (barW + gap);
+                      const y = barH - bh;
+                      return (
+                        <g key={d.key}>
+                          <rect x={x} y={y} width={barW} height={bh} rx="4" fill={d.color} opacity={0.85} />
+                          <text x={x + barW/2} y={y - 4} textAnchor="middle" fill="#374151" fontSize="11" fontWeight="bold">{d.count}</text>
+                          <text x={x + barW/2} y={barH + 14} textAnchor="middle" fill="#6b7280" fontSize="9">{d.label}</text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Widget Tâches/Rappels ── */}
+        {canWrite && (() => {
+          const overdue = tasks.filter(t => !t.done && t.dueDate && new Date(t.dueDate) < new Date());
+          const upcoming = tasks.filter(t => !t.done && (!t.dueDate || new Date(t.dueDate) >= new Date()));
+          const prioStyle = { haute: 'bg-red-100 text-red-700 border-red-200', normale: 'bg-blue-100 text-blue-700 border-blue-200', basse: 'bg-gray-100 text-gray-600 border-gray-200' };
+          return (
+            <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-indigo-500" />
+                  <h3 className="text-sm font-bold text-gray-900">Tâches & Rappels</h3>
+                  {overdue.length > 0 && <span className="text-xs bg-red-500 text-white rounded-full px-1.5 py-0.5 font-bold">{overdue.length} en retard</span>}
+                  <span className="text-xs text-gray-400">{tasks.filter(t => !t.done).length} actif(s)</span>
+                </div>
+                <button onClick={() => setShowTaskForm(v => !v)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1a6fa6] hover:text-[#0d4a73] px-2.5 py-1.5 rounded-lg hover:bg-[#e8f3fc] transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Nouvelle tâche
+                </button>
+              </div>
+              {showTaskForm && (
+                <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="flex-1 min-w-40">
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Titre *</label>
+                      <input type="text" value={taskForm.title} onChange={e => setTaskForm(f => ({...f, title: e.target.value}))} placeholder="Ex : Vérifier serveur rack 3" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Échéance</label>
+                      <input type="date" value={taskForm.dueDate} onChange={e => setTaskForm(f => ({...f, dueDate: e.target.value}))} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Assigné à</label>
+                      <input type="text" value={taskForm.assignedTo} onChange={e => setTaskForm(f => ({...f, assignedTo: e.target.value}))} placeholder="Nom du technicien" className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1a6fa6] w-40" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Priorité</label>
+                      <select value={taskForm.priority} onChange={e => setTaskForm(f => ({...f, priority: e.target.value as 'haute'|'normale'|'basse'}))} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1a6fa6]">
+                        <option value="haute">Haute</option>
+                        <option value="normale">Normale</option>
+                        <option value="basse">Basse</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { if (!taskForm.title.trim()) return; saveTasks([...tasks, { id: Date.now(), ...taskForm, done: false }]); setTaskForm({ title:'', dueDate:'', assignedTo:'', priority:'normale' }); setShowTaskForm(false); }} disabled={!taskForm.title.trim()} className="px-3 py-2 rounded-lg bg-[#1a6fa6] text-white text-sm font-semibold hover:bg-[#155a8a] disabled:opacity-50">Ajouter</button>
+                      <button onClick={() => setShowTaskForm(false)} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">Annuler</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {tasks.length === 0 ? (
+                <div className="px-5 py-6 text-center text-gray-400 text-sm">Aucune tâche. Cliquez sur "Nouvelle tâche" pour commencer.</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {[...overdue, ...upcoming].filter(t => !t.done).concat(tasks.filter(t => t.done)).slice(0, 6).map(task => {
+                    const isOverdue = !task.done && task.dueDate && new Date(task.dueDate) < new Date();
+                    return (
+                      <div key={task.id} className={`flex items-center gap-3 px-5 py-2.5 hover:bg-gray-50 transition-colors ${task.done ? 'opacity-50' : ''}`}>
+                        <button onClick={() => saveTasks(tasks.map(t => t.id === task.id ? {...t, done: !t.done} : t))} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${task.done ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-indigo-400'}`}>
+                          {task.done && <CircleCheck className="w-3.5 h-3.5 text-white" />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-sm font-medium ${task.done ? 'line-through text-gray-400' : 'text-gray-800'}`}>{task.title}</span>
+                          {task.assignedTo && <span className="text-xs text-gray-400 ml-2">→ {task.assignedTo}</span>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${prioStyle[task.priority]}`}>{task.priority}</span>
+                          {task.dueDate && <span className={`text-xs font-mono ${isOverdue ? 'text-red-600 font-bold' : 'text-gray-400'}`}>{new Date(task.dueDate+'T00:00:00').toLocaleDateString('fr-FR', {day:'2-digit', month:'short'})}</span>}
+                          <button onClick={() => saveTasks(tasks.filter(t => t.id !== task.id))} className="text-gray-300 hover:text-red-500 p-0.5 rounded transition-colors"><XCircle className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {tasks.filter(t => !t.done).length > 6 && <p className="text-center text-xs text-gray-400 py-2">+{tasks.filter(t=>!t.done).length - 6} autre(s)…</p>}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {!showForm && !(showTransferModal && !showTransferModule) && <>
+        {/* ══ PANNEAU DE CONTRÔLE — style Odoo ══════════════════════════════ */}
+        <div className="bg-white border-b border-gray-200 sticky top-11 z-20">
+          {/* Ligne 1 : titre + boutons action + recherche */}
+          <div className="flex items-center gap-2 px-4 py-2">
+            <h2 className="text-lg font-light text-gray-800 mr-2 shrink-0">Équipements</h2>
+            {canWrite && (
+              <button onClick={openNewEquipmentForm}
+                className="bg-[#1a6fa6] text-white text-[11px] font-bold uppercase tracking-wide px-4 py-1.5 rounded hover:opacity-90 shrink-0">
+                NOUVEAU
+              </button>
+            )}
+            {canWrite && (
+              <button onClick={() => { setImportRows([]); setImportError(''); setShowImportModal(true); }}
+                className="border border-gray-300 text-gray-600 text-[11px] font-semibold px-3 py-1.5 rounded hover:bg-gray-50 shrink-0 flex items-center gap-1">
+                <Upload className="w-3.5 h-3.5" /> Importer
+              </button>
+            )}
+            <button onClick={handleRefresh} title="Actualiser"
+              className="border border-gray-300 text-gray-500 p-1.5 rounded hover:bg-gray-50 shrink-0 transition-colors">
+              <RefreshCcw className="w-3.5 h-3.5" />
             </button>
-
             {/* Exporter */}
             <div className="relative" ref={exportMenuRef}>
-              <button
-                onClick={() => setShowExportMenu((v) => !v)}
-                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Exporter
+              <button onClick={() => setShowExportMenu((v) => !v)}
+                className="border border-gray-300 text-gray-600 text-[11px] font-semibold px-3 py-1.5 rounded hover:bg-gray-50 flex items-center gap-1 shrink-0">
+                <Download className="w-3.5 h-3.5" /> Exporter
                 <ChevronDown className={`w-3 h-3 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
               {showExportMenu && (
@@ -2468,152 +3059,124 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               )}
             </div>
 
-            {/* Nouvel équipement */}
-            {canWrite && (
-              <button
-                onClick={openNewEquipmentForm}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm transition-all hover:opacity-90 active:scale-95"
-                style={{background:'linear-gradient(135deg, #0f1b35 0%, #1a3a6b 45%, #1e5799 100%)'}}
-              >
-                <Plus className="w-4 h-4" />
-                Nouvel équipement
-              </button>
-            )}
+            {/* Search */}
+            <div className="relative ml-auto">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input type="text" placeholder="Recherche..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 pr-3 py-1.5 border border-gray-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent bg-[#f8f9fa] w-64 focus:bg-white transition-all"
+              />
+            </div>
           </div>
 
-          {/* Ligne 2 : filtres + compteur */}
-          <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-gray-50">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</span>
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value as 'all' | EquipmentType)}
-                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-              >
-                <option value="all">Tous</option>
-                {equipmentTypes.map((type) => (
-                  <option key={type.value} value={type.value}>{type.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Statut</span>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value as 'all' | EquipmentStatus)}
-                className="py-1.5 pl-2 pr-7 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-              >
-                <option value="all">Tous</option>
-                <option value="actif">Actif</option>
-                <option value="inactif">Inactif</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="defaillant">Défaillant</option>
-                <option value="réformé">Réformé</option>
-              </select>
-            </div>
-
-            {/* Réinitialiser les filtres si actifs */}
+          {/* Ligne 2 : filtres + groupby + pagination */}
+          <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2">
+            <button onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
+              className="flex items-center gap-1 border border-gray-300 text-gray-600 text-xs font-semibold px-3 py-1.5 rounded hover:bg-gray-50">
+              ▼ FILTRES
+            </button>
+            {/* Type */}
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value as 'all' | EquipmentType)}
+              className="border border-gray-300 text-xs text-gray-600 py-1.5 pl-2 pr-6 rounded bg-white hover:bg-gray-50 cursor-pointer">
+              <option value="all">Tous les types</option>
+              {equipmentTypes.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+            {/* Statut */}
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as 'all' | EquipmentStatus)}
+              className="border border-gray-300 text-xs text-gray-600 py-1.5 pl-2 pr-6 rounded bg-white hover:bg-gray-50 cursor-pointer">
+              <option value="all">Tous les statuts</option>
+              <option value="actif">Actif</option>
+              <option value="inactif">Inactif</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="defaillant">Défaillant</option>
+              <option value="réformé">Réformé</option>
+            </select>
             {(filterType !== 'all' || filterStatus !== 'all' || searchTerm) && (
-              <button
-                onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
-                className="text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
-              >
-                Réinitialiser
-              </button>
+              <button onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
+                className="text-xs text-[#1a6fa6] hover:underline px-1">✕ Réinitialiser</button>
             )}
-
-            <span className="ml-auto text-xs text-gray-400 font-medium">
-              {filteredEquipments.length} résultat{filteredEquipments.length !== 1 ? 's' : ''}
-            </span>
+            {/* Pagination */}
+            <div className="ml-auto flex items-center gap-1.5 text-xs text-gray-500">
+              <span>{(equipPage-1)*PAGE_SIZE+1}-{Math.min(equipPage*PAGE_SIZE, filteredEquipments.length)} / {filteredEquipments.length}</span>
+              <button onClick={() => setEquipPage(p => Math.max(1,p-1))} disabled={equipPage===1}
+                className="w-6 h-6 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50 disabled:opacity-40 disabled:cursor-default">
+                <ChevronLeft className="w-3 h-3" />
+              </button>
+              <button onClick={() => setEquipPage(p => p*PAGE_SIZE < filteredEquipments.length ? p+1 : p)} disabled={equipPage*PAGE_SIZE >= filteredEquipments.length}
+                className="w-6 h-6 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50 disabled:opacity-40 disabled:cursor-default">
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
           </div>
         </div>
 
         {loading ? (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center text-gray-400">Chargement des données…</div>
-        ) : false ? (
-          <div className="bg-white rounded-lg shadow-sm p-16 flex flex-col items-center justify-center text-center">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
-              <Globe className="w-8 h-8 text-indigo-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-700 mb-1">Sélectionnez un site</h3>
-            <p className="text-sm text-gray-400 max-w-xs">Choisissez un site dans la barre ci-dessus pour afficher ses équipements.</p>
-          </div>
+          <div className="bg-white border-b border-gray-100 p-10 text-center text-gray-400">Chargement des données…</div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+          <div className="bg-white overflow-hidden border-b border-gray-100">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px]">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Équipement</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Localisation</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Statut</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Passage technicien</th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                  <tr className="border-b border-gray-200">
+                    <th className="w-8 px-3 py-2.5 text-left"><input type="checkbox" className="w-3.5 h-3.5 accent-[#1a6fa6]" /></th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700">Équipement</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700">Type d'acte</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700">Localisation</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700">Statut</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700">Technicien</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
+                <tbody>
                   {pagedEquipments.map((equipment) => (
-                    <tr key={equipment.id} className="hover:bg-indigo-50/30 transition-colors border-b border-gray-50 last:border-0">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          {getTypeIcon(equipment.type)}
-                          <div>
-                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                              {equipment.name}
-                              {(equipment.quantity ?? 1) > 1 && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 text-xs font-bold rounded bg-indigo-100 text-indigo-700">×{equipment.quantity}</span>
-                              )}
+                    <tr key={equipment.id} className="hover:bg-[#f5f9fc] border-b border-[#f0f0f0] cursor-pointer">
+                      <td className="w-8 px-3 py-2" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="w-3.5 h-3.5 accent-[#1a6fa6]" />
+                      </td>
+                      <td className="px-3 py-2" onClick={() => openDetailsModal(equipment)}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-400 shrink-0">{getTypeIcon(equipment.type)}</span>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-[#212529] flex items-center gap-1 flex-wrap">
+                              <span className="truncate">{equipment.name}</span>
+                              {(equipment.quantity ?? 1) > 1 && <span className="text-[10px] font-bold px-1 py-px rounded bg-[#e8f3fc] text-[#1a6fa6] shrink-0">×{equipment.quantity}</span>}
+                              {(() => { const w = getWarrantyInfo(equipment.warranty); if (!w || w.status === 'ok') return null; return <span className={`text-[10px] font-semibold px-1 py-px rounded border shrink-0 ${w.color}`}>{w.status === 'expired' ? '⚠' : `⏱${w.label}`}</span>; })()}
                             </div>
-                            <div className="text-sm text-gray-500">{equipment.brand} {equipment.model}</div>
-                            <div className="text-sm text-gray-400">IP: {equipment.ipAddress || 'N/A'}</div>
+                            <div className="text-xs text-gray-500 truncate">{equipment.brand} {equipment.model}{equipment.ipAddress ? ` · ${equipment.ipAddress}` : ''}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
+                      <td className="px-3 py-2 text-[#1a6fa6] font-medium">
                         {equipmentTypes.find((t) => t.value === equipment.type)?.label}
                       </td>
-                      <td className="px-6 py-4">
-                        {equipment.siteId && (
-                          <div className="text-xs text-indigo-600 flex items-center gap-1 mb-0.5">
-                            <Building2 className="w-3 h-3" />
-                            {sites.find(s => s.id === equipment.siteId)?.name}
-                          </div>
-                        )}
-                        <div className="text-sm text-gray-900 flex items-center">
-                          <MapPin className="w-3 h-3 mr-1 text-gray-400" />
-                          {equipment.location}
+                      <td className="px-3 py-2 text-gray-600">
+                        <div className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-gray-400 shrink-0" />
+                          <span className="truncate max-w-[140px]">{equipment.location}</span>
                         </div>
-                        <div className="text-sm text-gray-500">{equipment.department}</div>
+                        {equipment.siteId && <div className="text-[11px] text-[#1a6fa6] mt-0.5">{sites.find(s => s.id === equipment.siteId)?.name}</div>}
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[equipment.status]}`}>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded-full ${statusColors[equipment.status]}`}>
                           {equipment.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-2 text-gray-600 text-xs">
                         {equipment.visited ? (
-                          <button
-                            onClick={() => openDetailsModal(equipment)}
-                            className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 hover:bg-green-200"
-                          >
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            {equipment.technicianName}
-                          </button>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                            <XCircle className="w-3 h-3 mr-1" />
-                            Non visité
+                          <span className="flex items-center gap-1 text-green-700">
+                            <CheckCircle className="w-3 h-3" />{equipment.technicianName || 'Visité'}
                           </span>
+                        ) : (
+                          <span className="text-gray-400">Non visité</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-sm font-medium">
+                      <td className="px-3 py-2 text-sm font-medium">
                         <div className="flex items-center gap-2">
                           {canModify && (
                             <button
                               onClick={() => handleEdit(equipment)}
-                              className="text-indigo-600 hover:text-indigo-900"
+                              className="text-[#1a6fa6] hover:text-[#0d4a73]"
                               title="Modifier"
                             >
                               <Edit className="w-4 h-4" />
@@ -2662,6 +3225,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           >
                             <Info className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={() => setQrEquipment(equipment)}
+                            className="text-teal-500 hover:text-teal-700"
+                            title="QR Code"
+                          >
+                            <QrCode className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -2672,24 +3242,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
           </div>
         )}
+        </>}
 
         {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => { setShowForm(false); resetForm(); }} />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[90vh]">
-              <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                  <Monitor className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-base font-bold text-gray-900">{editingId !== null ? 'Modifier l\'équipement' : 'Nouvel équipement'}</h2>
-                  <p className="text-xs text-gray-400">{editingId !== null ? 'Modifier les informations' : 'Ajouter un équipement au parc'}</p>
-                </div>
-                <button onClick={() => { setShowForm(false); resetForm(); }} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                  <XCircle className="w-5 h-5 text-gray-400" />
-                </button>
+          <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
+              <button onClick={() => { setShowForm(false); resetForm(); setNewEquipDocs([]); }}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 mr-1" title="Retour à la liste">
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                <Monitor className="w-5 h-5 text-[#1a6fa6]" />
               </div>
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-gray-900">{editingId !== null ? 'Modifier l\'équipement' : 'Nouvel équipement'}</h2>
+                <p className="text-xs text-gray-400">{editingId !== null ? 'Modifier les informations' : 'Ajouter un équipement au parc'}</p>
+              </div>
+            </div>
+            <div className="p-6">
                 <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -2698,7 +3268,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2707,7 +3277,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.type}
                       onChange={(e) => setFormData({ ...formData, type: e.target.value as EquipmentType })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     >
                       {equipmentTypes.map((type) => (
                         <option key={type.value} value={type.value}>
@@ -2723,7 +3293,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.brand}
                       onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2733,7 +3303,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.model}
                       onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2743,7 +3313,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.serialNumber}
                       onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2753,7 +3323,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.ipAddress}
                       onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                       placeholder="192.168.1.100"
                     />
                   </div>
@@ -2763,7 +3333,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.siteId ?? ''}
                       onChange={e => setFormData({ ...formData, siteId: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     >
                       <option value="">— Sélectionner un site —</option>
                       {sites.map(s => (
@@ -2779,9 +3349,26 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       min={1}
                       value={formData.quantity}
                       onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
+
+                  {formData.type === 'accessoires' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Seuil de stock minimum
+                        <span className="ml-1 text-xs text-gray-400 font-normal">(alerte si stock ≤ seuil)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={formData.minQuantity}
+                        onChange={(e) => setFormData({ ...formData, minQuantity: Math.max(0, parseInt(e.target.value) || 0) })}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
+                        placeholder="0 = désactivé"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Localisation *</label>
@@ -2789,7 +3376,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.location}
                       onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2799,7 +3386,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.department}
                       onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2808,7 +3395,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as EquipmentStatus })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     >
                       <option value="actif">Actif</option>
                       <option value="inactif">Inactif</option>
@@ -2823,7 +3410,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.purchaseDate}
                       onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2833,7 +3420,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.warranty}
                       onChange={(e) => setFormData({ ...formData, warranty: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
 
@@ -2843,7 +3430,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="date"
                       value={formData.lastMaintenance}
                       onChange={(e) => setFormData({ ...formData, lastMaintenance: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
                 </div>
@@ -2896,7 +3483,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     type="button"
                     onClick={handleSubmit}
                     disabled={uploadingDocs}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-60"
+                    className="px-4 py-2 bg-[#1a6fa6] text-white rounded hover:bg-[#155a8a] disabled:opacity-60"
                   >
                     {uploadingDocs ? 'Upload…' : editingId !== null ? 'Modifier' : 'Ajouter'}
                   </button>
@@ -2904,8 +3491,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {showDetailsModal && selectedEquipment && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
@@ -2913,8 +3499,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
               {/* Header */}
               <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                  <Monitor className="w-5 h-5 text-indigo-600" />
+                <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                  <Monitor className="w-5 h-5 text-[#1a6fa6]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-bold text-gray-900 truncate">{selectedEquipment.name}</h3>
@@ -2926,15 +3512,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b px-6">
-                {([['info', 'Informations', Info], ['transfers', 'Transferts', ArrowRightLeft], ['documents', 'Documents', FileText]] as const).map(([tab, label, Icon]) => (
+              <div className="flex border-b px-4 overflow-x-auto">
+                {([['info', 'Infos', Info], ['history', 'Historique', Activity], ['notes', 'Notes', MessageCircle], ['transfers', 'Transferts', ArrowRightLeft], ['documents', 'Documents', FileText]] as const).map(([tab, label, Icon]) => (
                   <button key={tab} onClick={() => {
                     setDetailsTab(tab);
                     if (tab === 'documents' && equipmentDocs.length === 0) fetchDocuments(selectedEquipment.id);
                     if (tab === 'transfers' && transferHistory.length === 0) fetchTransferHistory(selectedEquipment.id);
+                    if (tab === 'notes') {
+                      const saved = localStorage.getItem(`eq-notes-${selectedEquipment.id}`);
+                      if (saved) setEquipmentNotes(n => ({ ...n, [selectedEquipment.id]: JSON.parse(saved) }));
+                    }
                   }}
-                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition ${detailsTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                    <Icon className="w-4 h-4" />{label}
+                    className={`flex items-center gap-1.5 px-3 py-3 text-sm font-medium border-b-2 -mb-px transition shrink-0 ${detailsTab === tab ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                    <Icon className="w-3.5 h-3.5" />{label}
                   </button>
                 ))}
               </div>
@@ -2984,8 +3574,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             </div>
                           )}
                           {replaces && (
-                            <div className="mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-sm">
-                              <p className="text-indigo-700">Remplace l'ancien équipement : <span className="font-medium">{replaces.name}</span> <span className="text-indigo-400">(réformé)</span></p>
+                            <div className="mt-3 p-3 rounded-xl bg-[#e8f3fc] border border-indigo-100 text-sm">
+                              <p className="text-[#155a8a]">Remplace l'ancien équipement : <span className="font-medium">{replaces.name}</span> <span className="text-indigo-400">(réformé)</span></p>
                             </div>
                           )}
                         </>
@@ -2993,7 +3583,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     })()}
                     {canModify && selectedEquipment.status !== 'réformé' && (
                       <div className="pt-3 border-t flex gap-2">
-                        <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                        <button onClick={() => openTransferModal(selectedEquipment)} className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                           <ArrowRightLeft className="w-4 h-4" /> Transférer
                         </button>
                         <button onClick={() => { setSelectedEquipment(null); openReformModal(selectedEquipment); }} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
@@ -3003,6 +3593,81 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     )}
                   </div>
                 )}
+
+                {/* ── Historique ── */}
+                {detailsTab === 'history' && (() => {
+                  type TimelineEvent = { date: string; label: string; detail: string; dot: string; icon: React.ReactNode };
+                  const events: TimelineEvent[] = [];
+                  if (selectedEquipment.purchaseDate) events.push({ date: selectedEquipment.purchaseDate, label: 'Acquisition', detail: `Mis en service${selectedEquipment.department ? ` — ${selectedEquipment.department}` : ''}`, dot: 'bg-[#e8f3fc]0', icon: <Monitor className="w-3 h-3 text-white" /> });
+                  transferHistory.forEach(ev => events.push({ date: ev.createdAt, label: 'Transfert', detail: ev.details || '—', dot: 'bg-purple-500', icon: <ArrowRightLeft className="w-3 h-3 text-white" /> }));
+                  maintenanceRecords.filter(m => m.equipmentId === selectedEquipment.id).forEach(m => events.push({ date: m.openedAt, label: `Ticket #${m.id} — ${maintenanceStatusLabel[m.status] ?? m.status}`, detail: m.failureDesc || '—', dot: m.status === 'résolu' ? 'bg-green-500' : 'bg-orange-500', icon: <Wrench className="w-3 h-3 text-white" /> }));
+                  visits.filter(v => v.equipmentIds?.includes(selectedEquipment.id)).forEach(v => events.push({ date: v.scheduledDate + 'T00:00:00', label: `Visite — ${v.siteName}`, detail: v.purpose || '—', dot: 'bg-blue-500', icon: <Clock className="w-3 h-3 text-white" /> }));
+                  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  if (events.length === 0) return (
+                    <div className="text-center py-10 text-gray-400">
+                      <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Aucun événement enregistré.</p>
+                      <p className="text-xs mt-1">Les transferts, tickets et visites apparaîtront ici.</p>
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-0">
+                      {events.map((ev, i) => (
+                        <div key={i} className="flex gap-3">
+                          <div className="flex flex-col items-center">
+                            <div className={`w-7 h-7 rounded-full ${ev.dot} flex items-center justify-center shrink-0 mt-0.5`}>{ev.icon}</div>
+                            {i < events.length - 1 && <div className="w-px flex-1 bg-gray-200 my-1 min-h-[12px]" />}
+                          </div>
+                          <div className="flex-1 pb-4">
+                            <p className="text-sm font-semibold text-gray-800">{ev.label}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{ev.detail}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">{new Date(ev.date).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Notes internes ── */}
+                {detailsTab === 'notes' && (() => {
+                  const notes = equipmentNotes[selectedEquipment.id] ?? (() => { try { return JSON.parse(localStorage.getItem(`eq-notes-${selectedEquipment.id}`) || '[]'); } catch { return []; } })();
+                  const addNote = () => {
+                    if (!noteInput.trim()) return;
+                    const updated = [...notes, `${new Date().toLocaleString('fr-FR')} — ${currentUser.name}\n${noteInput.trim()}`];
+                    localStorage.setItem(`eq-notes-${selectedEquipment.id}`, JSON.stringify(updated));
+                    setEquipmentNotes(n => ({ ...n, [selectedEquipment.id]: updated }));
+                    setNoteInput('');
+                  };
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex gap-2">
+                        <textarea value={noteInput} onChange={e => setNoteInput(e.target.value)} rows={3} placeholder="Ajouter une note interne (observation, remarque technique…)"
+                          className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] resize-none" />
+                        <button onClick={addNote} disabled={!noteInput.trim()} className="self-end px-3 py-2 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a] disabled:opacity-50">Ajouter</button>
+                      </div>
+                      {notes.length === 0 ? (
+                        <div className="text-center py-8 text-gray-400">
+                          <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-sm">Aucune note pour cet équipement.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {[...notes].reverse().map((note, i) => {
+                            const [header, ...body] = note.split('\n');
+                            return (
+                              <div key={i} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                <p className="text-xs text-gray-400 mb-1">{header}</p>
+                                <p className="text-sm text-gray-800 whitespace-pre-line">{body.join('\n')}</p>
+                                <button onClick={() => { const updated = notes.filter((_,idx) => idx !== notes.length - 1 - i); localStorage.setItem(`eq-notes-${selectedEquipment.id}`, JSON.stringify(updated)); setEquipmentNotes(n => ({...n, [selectedEquipment.id]: updated})); }} className="text-xs text-red-400 hover:text-red-600 mt-1">Supprimer</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── Transferts ── */}
                 {detailsTab === 'transfers' && (
@@ -3037,7 +3702,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <p className="text-sm text-gray-500">{equipmentDocs.length} document(s)</p>
-                      <label className="inline-flex items-center gap-2 cursor-pointer rounded-xl bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-700">
+                      <label className="inline-flex items-center gap-2 cursor-pointer rounded-xl bg-[#1a6fa6] px-3 py-1.5 text-sm text-white hover:bg-[#155a8a]">
                         <Upload className="w-4 h-4" /> Ajouter
                         <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={async (e) => {
                           const files = Array.from(e.target.files || []);
@@ -3066,7 +3731,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <p className="text-xs text-gray-500">{formatFileSize(doc.fileSize)} · {doc.uploadedBy} · {new Date(doc.uploadedAt).toLocaleDateString('fr-FR')}</p>
                               {doc.description && <p className="text-xs text-gray-400 italic">{doc.description}</p>}
                             </div>
-                            <button onClick={() => downloadDocument(doc.id)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Télécharger">
+                            <button onClick={() => downloadDocument(doc.id)} className="text-[#1a6fa6] hover:text-[#0d4a73] p-1" title="Télécharger">
                               <Download className="w-4 h-4" />
                             </button>
                             {canModify && (
@@ -3093,39 +3758,43 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Maintenance module ───────────────────────────────────────────── */}
       {showMaintenanceModule && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           <div className="flex flex-col flex-1 overflow-hidden">
 
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
-                  <Wrench className="w-5 h-5 text-orange-600" />
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Wrench className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Module Maintenance</h2>
-                  <p className="text-sm text-gray-500">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</p>
+                  <h2 className="text-base font-bold text-white">Module Maintenance</h2>
+                  <p className="text-sm text-white/70">{maintenanceRecords.filter(m => m.status !== 'résolu').length} ticket(s) actif(s)</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
-                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-gray-100">
-                  <XCircle className="w-6 h-6 text-gray-500" />
+                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
+                  <XCircle className="w-5 h-5 text-white/80" />
                 </button>
               </div>
             </div>
 
             {/* Tabs */}
             <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
-              <button onClick={() => setShowMaintenanceReport(false)}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${!showMaintenanceReport ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                Liste des tickets
+              <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(false); }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && !showKanban ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                <LayoutList className="w-3.5 h-3.5" /> Liste
               </button>
-              <button onClick={() => { setShowMaintenanceReport(true); if (maintenanceFilter !== 'all') { setMaintenanceFilter('all'); fetchMaintenance('all'); } }}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showMaintenanceReport ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(true); }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && showKanban ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                <LayoutGrid className="w-3.5 h-3.5" /> Kanban
+              </button>
+              <button onClick={() => { setShowMaintenanceReport(true); setShowKanban(false); if (maintenanceFilter !== 'all') { setMaintenanceFilter('all'); fetchMaintenance('all'); } }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showMaintenanceReport ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                 Rapport
               </button>
             </div>
@@ -3148,7 +3817,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
             {/* Rapport maintenance */}
             {showMaintenanceReport && (() => {
-              const all = maintenanceRecords;
+              const allRecords = maintenanceRecords;
+              const allTechs = [...new Set(allRecords.map(m => m.technician || 'Non assigné'))].sort();
+              const all = maintTechFilter.length > 0
+                ? allRecords.filter(m => maintTechFilter.includes(m.technician || 'Non assigné'))
+                : allRecords;
               const byStatus = (['en_attente','ouvert','en_cours','résolu'] as const).map(s => ({
                 s, label: maintenanceStatusLabel[s] ?? s, style: maintenanceStatusStyle[s],
                 count: all.filter(m => m.status === s).length,
@@ -3235,26 +3908,89 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 doc.save(`rapport-maintenance-${Date.now()}.pdf`);
               };
 
+              const exportMaintenanceWord = async () => {
+                const makeHdr = (cells: string[]) => new DocxTableRow({
+                  children: cells.map(c => new DocxTableCell({
+                    children: [new DocxParagraph({ children: [new TextRun({ text: c, bold: true })] })],
+                    width: { size: Math.floor(9000 / cells.length), type: WidthType.DXA },
+                  })),
+                });
+                const makeRow = (cells: string[]) => new DocxTableRow({
+                  children: cells.map(c => new DocxTableCell({
+                    children: [new DocxParagraph({ children: [new TextRun(c)] })],
+                    width: { size: Math.floor(9000 / cells.length), type: WidthType.DXA },
+                  })),
+                });
+                const children = [
+                  new DocxParagraph({ text: 'Rapport Maintenance', heading: HeadingLevel.HEADING_1 }),
+                  new DocxParagraph({ children: [new TextRun(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${all.length} ticket(s)`)] }),
+                  ...(maintTechFilter.length > 0 ? [new DocxParagraph({ children: [new TextRun({ text: `Technicien(s) : ${maintTechFilter.join(', ')}`, italics: true })] })] : []),
+                  new DocxParagraph({ text: '' }),
+                  new DocxParagraph({ text: 'Résumé par statut', heading: HeadingLevel.HEADING_2 }),
+                  new DocxTable({ rows: [makeHdr(['Statut','Nombre']), ...byStatus.map(r => makeRow([r.label, String(r.count)]))] }),
+                  new DocxParagraph({ text: '' }),
+                  new DocxParagraph({ text: 'Par technicien', heading: HeadingLevel.HEADING_2 }),
+                  new DocxTable({ rows: [makeHdr(['Technicien','Total','Résolus','Taux (%)']), ...Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => makeRow([t, String(d.total), String(d.resolved), (d.total ? Math.round((d.resolved / d.total) * 100) : 0) + '%']))] }),
+                  new DocxParagraph({ text: '' }),
+                  new DocxParagraph({ text: 'Top équipements en panne', heading: HeadingLevel.HEADING_2 }),
+                  new DocxTable({ rows: [makeHdr(['Équipement','Tickets']), ...Object.entries(byEq).sort((a,b) => b[1]-a[1]).slice(0,10).map(([eq,cnt]) => makeRow([eq, String(cnt)]))] }),
+                  new DocxParagraph({ text: '' }),
+                  new DocxParagraph({ text: 'Tous les tickets', heading: HeadingLevel.HEADING_2 }),
+                  new DocxTable({ rows: [makeHdr(['#','Statut','Priorité','Équipement','Technicien','Description']), ...all.map(m => makeRow([String(m.id), maintenanceStatusLabel[m.status] ?? m.status, m.priority, m.equipmentName || '—', m.technician || '—', m.failureDesc || '—']))] }),
+                ];
+                const doc = new DocxDocument({ sections: [{ children }] });
+                const blob = await Packer.toBlob(doc);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `rapport-maintenance-${Date.now()}.docx`; a.click();
+                URL.revokeObjectURL(url);
+              };
+
               return (
                 <div className="flex-1 overflow-auto px-6 pb-6 pt-4 space-y-6">
-                  {/* Boutons export */}
-                  <div className="flex justify-end gap-2">
-                    <button onClick={exportMaintenanceExcel}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
-                      <Download className="w-4 h-4 text-green-600" /> Excel
-                    </button>
-                    <button onClick={exportMaintenancePdf}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
-                      <Download className="w-4 h-4 text-red-500" /> PDF
-                    </button>
+                  {/* Filtre technicien + exports */}
+                  <div className="flex flex-wrap items-start justify-between gap-4 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2 flex-1">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">Filtrer par technicien :</span>
+                      {allTechs.map(tech => (
+                        <button key={tech} onClick={() => setMaintTechFilter(f => f.includes(tech) ? f.filter(t => t !== tech) : [...f, tech])}
+                          className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${maintTechFilter.includes(tech) ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-600'}`}>
+                          {tech}
+                        </button>
+                      ))}
+                      {maintTechFilter.length > 0 && (
+                        <button onClick={() => setMaintTechFilter([])} className="text-xs text-gray-400 hover:text-gray-700 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors">
+                          ✕ Effacer
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={exportMaintenanceExcel}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                        <Download className="w-4 h-4 text-green-600" /> Excel
+                      </button>
+                      <button onClick={exportMaintenancePdf}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                        <Download className="w-4 h-4 text-red-500" /> PDF
+                      </button>
+                      <button onClick={exportMaintenanceWord}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 shadow-sm">
+                        <Download className="w-4 h-4 text-blue-600" /> Word
+                      </button>
+                    </div>
                   </div>
+                  {maintTechFilter.length > 0 && (
+                    <p className="text-xs text-orange-600 font-medium bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                      Rapport filtré — {all.length} ticket(s) pour : {maintTechFilter.join(', ')}
+                    </p>
+                  )}
                   {/* Stat cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {[
                       { label: 'Total tickets', value: all.length, color: 'text-gray-800' },
                       { label: 'Actifs', value: all.filter(m => m.status !== 'résolu').length, color: 'text-red-600' },
                       { label: 'Résolus', value: resolved.length, color: 'text-green-600' },
-                      { label: 'Délai moyen résolution', value: avgH > 0 ? `${avgH}h` : '—', color: 'text-indigo-600' },
+                      { label: 'Délai moyen résolution', value: avgH > 0 ? `${avgH}h` : '—', color: 'text-[#1a6fa6]' },
                     ].map(({ label, value, color }) => (
                       <div key={label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
                         <div className={`text-2xl font-bold ${color}`}>{value}</div>
@@ -3263,34 +3999,59 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     ))}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {/* Par statut */}
+                    {/* Donut statut */}
                     <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-                      <h3 className="font-semibold text-gray-700 mb-4">Par statut</h3>
-                      <div className="space-y-3">
-                        {byStatus.map(({ label, style, count }) => (
-                          <div key={label} className="flex items-center gap-3">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium w-24 text-center shrink-0 ${style}`}>{label}</span>
-                            <div className="flex-1 bg-gray-100 rounded-full h-2">
-                              <div className="h-2 rounded-full bg-orange-400 transition-all" style={{ width: `${all.length ? (count / all.length) * 100 : 0}%` }} />
+                      <h3 className="font-semibold text-gray-700 mb-4">Répartition par statut</h3>
+                      {all.length === 0 ? <p className="text-sm text-gray-400 text-center py-4">Aucune donnée</p> : (() => {
+                        const statusColors = ['#6366f1','#ef4444','#f59e0b','#22c55e'];
+                        const r = 52; const cx = 70; const cy = 70; const stroke = 18;
+                        let cumul = 0;
+                        const total = byStatus.reduce((s,b) => s + b.count, 0) || 1;
+                        const circumference = 2 * Math.PI * r;
+                        return (
+                          <div className="flex items-center gap-4">
+                            <svg width="140" height="140" viewBox="0 0 140 140">
+                              {byStatus.map(({ count }, i) => {
+                                const pct = count / total;
+                                const offset = circumference * (1 - cumul);
+                                const dashArr = `${circumference * pct} ${circumference * (1 - pct)}`;
+                                cumul += pct;
+                                return count > 0 ? <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={statusColors[i]} strokeWidth={stroke} strokeDasharray={dashArr} strokeDashoffset={offset} style={{transition:'all 0.5s'}} transform={`rotate(-90 ${cx} ${cy})`} /> : null;
+                              })}
+                              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" className="text-xl font-bold" fontSize="22" fontWeight="bold" fill="#1f2937">{all.length}</text>
+                              <text x={cx} y={cy+16} textAnchor="middle" fontSize="10" fill="#9ca3af">tickets</text>
+                            </svg>
+                            <div className="space-y-2 flex-1">
+                              {byStatus.map(({ label, style, count }, i) => (
+                                <div key={label} className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background: statusColors[i]}} />
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${style}`}>{label}</span>
+                                  <span className="text-sm font-bold text-gray-700 ml-auto">{count}</span>
+                                </div>
+                              ))}
                             </div>
-                            <span className="text-sm font-bold text-gray-700 w-6 text-right">{count}</span>
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })()}
                     </div>
-                    {/* Par priorité */}
+                    {/* Barres priorité */}
                     <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
                       <h3 className="font-semibold text-gray-700 mb-4">Par priorité</h3>
                       <div className="space-y-3">
-                        {Object.entries(byPriority).sort((a, b) => b[1] - a[1]).map(([prio, cnt]) => (
-                          <div key={prio} className="flex items-center gap-3">
-                            <span className="text-xs text-gray-600 capitalize w-20 shrink-0">{prio}</span>
-                            <div className="flex-1 bg-gray-100 rounded-full h-2">
-                              <div className={`h-2 rounded-full transition-all ${prioColors[prio] ?? 'bg-gray-400'}`} style={{ width: `${all.length ? (cnt / all.length) * 100 : 0}%` }} />
+                        {Object.entries(byPriority).sort((a, b) => b[1] - a[1]).map(([prio, cnt]) => {
+                          const pct = all.length ? (cnt / all.length) * 100 : 0;
+                          return (
+                            <div key={prio}>
+                              <div className="flex justify-between mb-1">
+                                <span className="text-xs text-gray-600 capitalize font-medium">{prio}</span>
+                                <span className="text-xs font-bold text-gray-700">{cnt} <span className="text-gray-400 font-normal">({Math.round(pct)}%)</span></span>
+                              </div>
+                              <div className="bg-gray-100 rounded-full h-3 overflow-hidden">
+                                <div className={`h-3 rounded-full transition-all ${prioColors[prio] ?? 'bg-gray-400'}`} style={{width:`${pct}%`}} />
+                              </div>
                             </div>
-                            <span className="text-sm font-bold text-gray-700 w-6 text-right">{cnt}</span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -3311,7 +4072,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <td className="py-1.5 font-medium text-gray-800">{tech}</td>
                               <td className="py-1.5 text-right text-gray-500">{d.total}</td>
                               <td className="py-1.5 text-right text-green-600 font-medium">{d.resolved}</td>
-                              <td className="py-1.5 text-right text-indigo-600 font-medium">{d.total ? Math.round((d.resolved / d.total) * 100) : 0}%</td>
+                              <td className="py-1.5 text-right text-[#1a6fa6] font-medium">{d.total ? Math.round((d.resolved / d.total) * 100) : 0}%</td>
                             </tr>
                           ))}
                         </tbody>
@@ -3341,8 +4102,60 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               );
             })()}
 
+            {/* ── Kanban ── */}
+            {showKanban && !showMaintenanceReport && (
+              <div className="flex-1 overflow-x-auto px-6 py-4">
+                <div className="flex gap-4 h-full" style={{minWidth:'max-content'}}>
+                  {(['en_attente','ouvert','en_cours','résolu'] as const).map(st => {
+                    const cols = { en_attente:{label:'En attente',dot:'bg-blue-500',hdr:'bg-blue-50 border-blue-200'}, ouvert:{label:'Ouvert',dot:'bg-red-500',hdr:'bg-red-50 border-red-200'}, en_cours:{label:'En cours',dot:'bg-yellow-500',hdr:'bg-yellow-50 border-yellow-200'}, résolu:{label:'Résolu',dot:'bg-green-500',hdr:'bg-green-50 border-green-200'} };
+                    const prioStyle: Record<string,string> = { critique:'bg-red-100 text-red-700', haute:'bg-orange-100 text-orange-700', normale:'bg-blue-100 text-blue-700', basse:'bg-gray-100 text-gray-600' };
+                    const statusLabels: Record<string,string> = { en_attente:'Attente', ouvert:'Ouvert', en_cours:'En cours', résolu:'Résolu' };
+                    const records = maintenanceRecords.filter(m => m.status === st);
+                    const col = cols[st];
+                    return (
+                      <div key={st} className="w-72 shrink-0 flex flex-col">
+                        <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border ${col.hdr}`}>
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${col.dot}`} />
+                          <span className="font-semibold text-gray-700 text-sm">{col.label}</span>
+                          <span className="ml-auto text-xs bg-white border border-gray-200 text-gray-600 rounded-full px-2 py-0.5 font-bold">{records.length}</span>
+                        </div>
+                        <div className="space-y-2 overflow-y-auto" style={{maxHeight:'calc(100vh - 300px)'}}>
+                          {records.length === 0 && <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center text-xs text-gray-400">Aucun ticket</div>}
+                          {records.map(m => (
+                            <div key={m.id} className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm cursor-pointer hover:shadow-md hover:border-orange-300 transition-all"
+                              onClick={() => { setSelectedMaintenance(m); setShowMaintenanceForm(false); }}>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${prioStyle[m.priority] ?? 'bg-gray-100 text-gray-600'}`}>{m.priority}</span>
+                                <span className="text-xs text-gray-400 font-mono">#{m.id}</span>
+                              </div>
+                              <p className="text-sm font-semibold text-gray-800 mb-1 line-clamp-2">{m.failureDesc || '—'}</p>
+                              {m.equipmentName && <p className="text-xs text-[#1a6fa6] font-medium truncate">{m.equipmentName}</p>}
+                              {m.technician && (
+                                <div className="flex items-center gap-1.5 mt-2">
+                                  <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600">{m.technician.charAt(0).toUpperCase()}</div>
+                                  <span className="text-xs text-gray-500 truncate">{m.technician}</span>
+                                </div>
+                              )}
+                              <div className="flex gap-1 mt-2 pt-2 border-t border-gray-50 flex-wrap">
+                                {(['en_attente','ouvert','en_cours','résolu'] as const).filter(s => s !== st).map(s => (
+                                  <button key={s} onClick={e => { e.stopPropagation(); fetch(`/api/maintenance/${m.id}`, { method:'PUT', headers:{'Content-Type':'application/json', Authorization:`Bearer ${localStorage.getItem('token')}`}, body:JSON.stringify({...m, status:s}) }).then(() => { fetchMaintenance(maintenanceFilter); fetchEquipments(); }); }}
+                                    className="flex-1 text-xs py-1 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors text-center min-w-0 truncate">
+                                    → {statusLabels[s]}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Body */}
-            {!showMaintenanceReport && (
+            {!showMaintenanceReport && !showKanban && (
             <div className="flex flex-1 overflow-hidden">
 
               {/* List */}
@@ -3419,7 +4232,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </button>
                       )}
                       <button onClick={() => { setShowNoteForm(v => !v); setNoteText(''); }}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 flex items-center gap-1">
+                        className="text-xs px-3 py-1.5 rounded-xl border border-[#1a6fa6]/30 text-[#1a6fa6] hover:bg-[#e8f3fc] flex items-center gap-1">
                         <Edit className="w-3.5 h-3.5" /> Nouvelle information
                       </button>
                       {canModify && selectedMaintenance.status !== 'résolu' && (
@@ -3452,7 +4265,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
                     {/* Notes / informations complémentaires */}
                     {(selectedMaintenance.notes || showNoteForm) && (
-                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                      <div className="rounded-xl border border-indigo-100 bg-[#e8f3fc] p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Edit className="w-4 h-4 text-blue-500" />
                           <span className="text-sm font-semibold text-gray-700">Informations complémentaires</span>
@@ -3471,7 +4284,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               onChange={e => setNoteText(e.target.value)}
                               rows={3}
                               placeholder="Saisir une nouvelle information…"
-                              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent resize-none"
+                              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent resize-none"
                             />
                             <div className="flex gap-2">
                               <button
@@ -3493,7 +4306,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   } catch {}
                                   setNoteLoading(false);
                                 }}
-                                className="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                                className="px-4 py-1.5 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a] disabled:opacity-50"
                               >
                                 {noteLoading ? 'Enregistrement…' : 'Enregistrer'}
                               </button>
@@ -3535,7 +4348,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Équipement concerné</label>
                         <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                           <option value="">— Sélectionner un équipement —</option>
                           {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
                         </select>
@@ -3544,7 +4357,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Priorité</label>
                       <select value={maintenanceForm.priority} onChange={e => setMaintForm(f => ({ ...f, priority: e.target.value as MaintenancePriority }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                         <option value="faible">Faible</option>
                         <option value="normale">Normale</option>
                         <option value="haute">Haute</option>
@@ -3554,33 +4367,33 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Description de la panne *</label>
                       <textarea rows={3} value={maintenanceForm.failureDesc} onChange={e => setMaintForm(f => ({ ...f, failureDesc: e.target.value }))}
-                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Diagnostic</label>
                       <textarea rows={3} value={maintenanceForm.diagnosis} onChange={e => setMaintForm(f => ({ ...f, diagnosis: e.target.value }))}
-                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Solution / Réparation effectuée</label>
                       <textarea rows={3} value={maintenanceForm.solution} onChange={e => setMaintForm(f => ({ ...f, solution: e.target.value }))}
-                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Pièces remplacées</label>
                       <input type="text" value={maintenanceForm.partsReplaced} onChange={e => setMaintForm(f => ({ ...f, partsReplaced: e.target.value }))}
-                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
                       <input type="text" value={maintenanceForm.technician} onChange={e => setMaintForm(f => ({ ...f, technician: e.target.value }))}
-                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     {maintenanceEditId && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
                         <select value={maintenanceForm.status} onChange={e => setMaintForm(f => ({ ...f, status: e.target.value as MaintenanceStatus }))}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                           <option value="en_attente">En attente</option>
                           <option value="ouvert">Ouvert</option>
                           <option value="en_cours">En cours</option>
@@ -3592,7 +4405,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <button onClick={() => { setShowMaintenanceForm(false); setMaintenanceEditId(null); }}
                         className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-700 hover:bg-gray-50">Annuler</button>
                       <button onClick={handleSaveMaintenance}
-                        className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">
+                        className="flex-1 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a]">
                         {maintenanceEditId ? 'Enregistrer' : 'Créer le ticket'}
                       </button>
                     </div>
@@ -3605,33 +4418,186 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Module Transferts ════════════════════════════════════════════ */}
-      {showTransferModule && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-40 flex flex-col bg-gray-50">
-          {/* Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-                <ArrowRightLeft className="w-5 h-5 text-purple-600" />
+      {/* ══ Module Garanties ════════════════════════════════════════════ */}
+      {showWarrantyModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">Module Garanties</h2>
+                  <p className="text-sm text-white/70">{warrantyStats.total} équipement(s) suivi(s) · {selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) sélectionné(s)` : 'Tous sites'}</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Module Transferts</h2>
-                <p className="text-sm text-gray-500">{allTransfers.length} transfert(s) enregistré(s)</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handleRefresh}
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
+                  <RefreshCcw className="w-4 h-4" /> Rafraîchir
+                </button>
+                <button onClick={handleExportWarrantyExcel}
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
+                  <Download className="w-4 h-4" /> Excel
+                </button>
+                <button onClick={handleExportWarrantyPdf}
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
+                  <Download className="w-4 h-4" /> PDF
+                </button>
+                <button onClick={() => setShowWarrantyModule(false)} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
+                  <XCircle className="w-5 h-5 text-white/80" />
+                </button>
               </div>
             </div>
-            <button onClick={() => setShowTransferModule(false)} className="p-2 rounded-lg hover:bg-gray-100">
-              <XCircle className="w-6 h-6 text-gray-500" />
+
+            <div className="px-6 py-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              {[
+                { label: 'Total suivis', value: warrantyStats.total, color: 'text-slate-900', bg: 'bg-white' },
+                { label: 'Garantie expirée', value: warrantyStats.expired, color: 'text-red-600', bg: 'bg-red-50' },
+                { label: 'Critique', value: warrantyStats.critical, color: 'text-amber-700', bg: 'bg-amber-50' },
+                { label: 'Bientôt fin', value: warrantyStats.warning, color: 'text-orange-600', bg: 'bg-orange-50' },
+                { label: 'Non renseignées', value: warrantyStats.unknown, color: 'text-gray-700', bg: 'bg-gray-50' },
+              ].map((card) => (
+                <div key={card.label} className={`rounded-2xl border border-gray-200 p-4 ${card.bg}`}>
+                  <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">{card.label}</div>
+                  <div className={`mt-3 text-3xl font-bold ${card.color}`}>{card.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-6 pb-6 overflow-auto flex-1 space-y-6">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Filtrer par risque</p>
+                      <p className="text-xs text-gray-500">Affiche les équipements selon leur statut de garantie.</p>
+                    </div>
+                    <span className="text-xs font-medium text-slate-500">{warrantyRiskLabels[warrantyRiskFilter]}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['all','expired','critical','warning','unknown','ok'] as const).map((status) => (
+                      <button key={status} type="button" onClick={() => setWarrantyRiskFilter(status)}
+                        className={`rounded-full px-3 py-2 text-xs font-semibold transition ${warrantyRiskFilter === status ? 'bg-[#1a6fa6] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                        {warrantyRiskLabels[status]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">Risques et actions</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {Object.entries(warrantyRiskExplanations).map(([status, text]) => (
+                      <div key={status} className="rounded-2xl border border-gray-100 bg-slate-50 p-3">
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">{warrantyRiskLabels[status]}</div>
+                        <div className="text-sm text-slate-700">{text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 overflow-hidden">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-800">Synthèse par site</h3>
+                      <p className="text-xs text-gray-500">Sites triés par exposition au risque.</p>
+                    </div>
+                    <button onClick={() => setWarrantyRiskFilter('all')} className="text-xs text-[#1a6fa6] hover:text-[#154a7d]">Réinitialiser</button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm text-left">
+                      <thead className="border-b border-gray-200 text-gray-500">
+                        <tr>
+                          <th className="px-3 py-3 font-semibold">Site</th>
+                          <th className="px-3 py-3 font-semibold text-right">Total</th>
+                          <th className="px-3 py-3 font-semibold text-right">Exp.</th>
+                          <th className="px-3 py-3 font-semibold text-right">Crit.</th>
+                          <th className="px-3 py-3 font-semibold text-right">Alerte</th>
+                          <th className="px-3 py-3 font-semibold text-right">OK</th>
+                          <th className="px-3 py-3 font-semibold text-right">N/A</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {warrantySiteStats.map((site) => (
+                          <tr key={site.id} className="hover:bg-slate-50">
+                            <td className="px-3 py-3 font-medium text-slate-800">{site.name}</td>
+                            <td className="px-3 py-3 text-right text-slate-600">{site.total}</td>
+                            <td className="px-3 py-3 text-right text-red-600">{site.expired}</td>
+                            <td className="px-3 py-3 text-right text-amber-700">{site.critical}</td>
+                            <td className="px-3 py-3 text-right text-orange-600">{site.warning}</td>
+                            <td className="px-3 py-3 text-right text-emerald-600">{site.ok}</td>
+                            <td className="px-3 py-3 text-right text-slate-500">{site.unknown}</td>
+                          </tr>
+                        ))}
+                        {warrantySiteStats.length === 0 && (
+                          <tr><td colSpan={7} className="px-3 py-4 text-center text-sm text-gray-400">Aucun site sélectionné ou aucune donnée disponible.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-4">Équipements</h3>
+                  <div className="space-y-3">
+                    {warrantyVisibleEquipments.slice(0, 12).map((equipment) => (
+                      <div key={equipment.id} className="rounded-2xl border border-gray-100 p-3 hover:bg-slate-50 transition">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-900 truncate">{equipment.name}</div>
+                            <div className="text-xs text-gray-500">{equipment.department} · {equipment.location}</div>
+                          </div>
+                          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full border ${equipment.warrantyClass}`}>{equipment.warrantyLabel}</span>
+                        </div>
+                        <div className="mt-3 text-xs text-gray-500 flex flex-wrap gap-2">
+                          <span>{equipment.siteId ? sites.find((s) => s.id === equipment.siteId)?.name ?? 'Site inconnu' : 'Sans site'}</span>
+                          <span>Type: {equipment.type}</span>
+                          <span>Réf: {equipment.serialNumber || '—'}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {warrantyVisibleEquipments.length === 0 && <p className="text-sm text-gray-400">Aucun équipement correspondant à ce filtre.</p>}
+                    {warrantyVisibleEquipments.length > 12 && (
+                      <div className="text-xs text-slate-500">Affichage des 12 premiers résultats sur {warrantyVisibleEquipments.length}.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Module Transferts ════════════════════════════════════════════ */}
+      {showTransferModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-40 flex flex-col bg-gray-50">
+          {/* Header */}
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <ArrowRightLeft className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Module Transferts</h2>
+                <p className="text-sm text-white/70">{allTransfers.length} transfert(s) enregistré(s)</p>
+              </div>
+            </div>
+            <button onClick={() => setShowTransferModule(false)} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
+              <XCircle className="w-5 h-5 text-white/80" />
             </button>
           </div>
 
           {/* Tabs */}
           <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
             <button onClick={() => setShowTransferReport(false)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${!showTransferReport ? 'border-purple-500 text-purple-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${!showTransferReport ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               Liste des transferts
             </button>
             <button onClick={() => setShowTransferReport(true)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showTransferReport ? 'border-purple-500 text-purple-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showTransferReport ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               Rapport
             </button>
           </div>
@@ -3652,12 +4618,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
 
           {!showTransferReport && (<>
-          {/* Filters */}
-          <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
+          {/* Filters — masquées pendant le formulaire */}
+          {!showTransferModal && <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
             <select
               value={transferModuleFilter.department}
               onChange={e => setTransferModuleFilter(f => ({ ...f, department: e.target.value }))}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]"
             >
               <option value="">Tous les services</option>
               {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
@@ -3666,10 +4632,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </select>
             <input type="date" value={transferModuleFilter.from}
               onChange={e => setTransferModuleFilter(f => ({ ...f, from: e.target.value }))}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
             <input type="date" value={transferModuleFilter.to}
               onChange={e => setTransferModuleFilter(f => ({ ...f, to: e.target.value }))}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
             <button onClick={() => { setTransferModuleFilter({ department: '', from: '', to: '' }); }}
               className="px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 flex items-center gap-2">
               <RefreshCcw className="w-4 h-4" /> Réinitialiser
@@ -3681,15 +4647,103 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
                   setShowTransferModal(true);
                 }}
-                className="ml-auto px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700 flex items-center gap-2"
+                className="ml-auto px-4 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a] flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" /> Nouveau transfert
               </button>
             )}
-          </div>
+          </div>}
+
+          {/* Formulaire inline dans le module */}
+          {showTransferModal && (
+            <div className="flex-1 overflow-auto px-6 pb-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-xl">
+                <div className="flex items-center gap-3 mb-5 pb-4 border-b border-gray-100">
+                  <button onClick={() => { setShowTransferModal(false); setTransferTarget(null); }}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title="Retour à la liste">
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center shrink-0">
+                    <ArrowRightLeft className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">Nouveau transfert</h3>
+                    <p className="text-xs text-gray-400">Déplacer un équipement vers un autre site ou emplacement</p>
+                  </div>
+                </div>
+                {/* Sélecteur d'équipement */}
+                {!transferTarget ? (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Équipement à transférer *</label>
+                    <select defaultValue="" onChange={e => {
+                      const eq = equipments.find(x => x.id === Number(e.target.value)) ?? null;
+                      if (eq) { setTransferTarget(eq); setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department, toSiteId: eq.siteId ?? null })); }
+                    }} className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm">
+                      <option value="" disabled>— Sélectionner un équipement —</option>
+                      {equipments.filter(e => e.status !== 'réformé').map(e => (
+                        <option key={e.id} value={e.id}>{e.name} — {e.location} ({e.department})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="mb-4 rounded-lg bg-purple-50 border border-purple-100 px-3 py-2 text-sm text-gray-600 space-y-0.5">
+                    <p><span className="font-semibold text-gray-800">{transferTarget.name}</span></p>
+                    <p>Bureau actuel : <span className="font-medium">{transferTarget.location || '—'}</span> · {transferTarget.department || '—'}</p>
+                    {transferTarget.siteId && <p>Site actuel : <span className="font-medium">{sites.find(s => s.id === transferTarget.siteId)?.name ?? `Site #${transferTarget.siteId}`}</span></p>}
+                  </div>
+                )}
+                <div className="space-y-3">
+                  <div className="rounded-xl border-2 border-purple-100 bg-purple-50 p-3">
+                    <label className="block text-sm font-semibold text-purple-800 mb-2 flex items-center gap-1.5"><Globe className="w-4 h-4" />Site de destination *</label>
+                    <select value={transferForm.toSiteId ?? ''} onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm bg-white">
+                      <option value="">— Sélectionner un site —</option>
+                      {sites.map(s => <option key={s.id} value={s.id}>{s.name}{s.city ? ` — ${s.city}` : ''}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1"><Building2 className="inline w-3.5 h-3.5 mr-1 text-purple-500" />Nouveau bureau / localisation *</label>
+                    <input type="text" value={transferForm.toLocation} onChange={e => setTransferForm({ ...transferForm, toLocation: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Ex: Bureau 301…" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nouveau département *</label>
+                    <input type="text" value={transferForm.toDepartment} onChange={e => setTransferForm({ ...transferForm, toDepartment: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Ex: Comptabilité…" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Raison du transfert</label>
+                    <select value={transferForm.reason} onChange={e => setTransferForm({ ...transferForm, reason: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm">
+                      <option>Réorganisation</option><option>Transfert de site</option><option>Maintenance</option>
+                      <option>Demande du service</option><option>Remplacement</option><option>Autre</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
+                    <input type="text" value={transferForm.technicianName} onChange={e => setTransferForm({ ...transferForm, technicianName: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Nom du technicien" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optionnel)</label>
+                    <textarea value={transferForm.notes} onChange={e => setTransferForm({ ...transferForm, notes: e.target.value })} rows={2}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Informations complémentaires…" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button onClick={() => { setShowTransferModal(false); setTransferTarget(null); }} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
+                  <button onClick={handleTransfer} disabled={transferLoading || !transferTarget}
+                    className="px-4 py-2 bg-[#1a6fa6] text-white rounded hover:bg-[#155a8a] text-sm disabled:opacity-60 flex items-center gap-2">
+                    {transferLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Table */}
-          <div className="flex-1 overflow-auto px-6 pb-6">
+          {!showTransferModal && <div className="flex-1 overflow-auto px-6 pb-6">
             {transferModuleLoading ? (
               <div className="flex items-center justify-center h-40 text-gray-400">Chargement…</div>
             ) : allTransfers.length === 0 ? (
@@ -3734,12 +4788,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             </div>
                           </td>
                           <td className="px-4 py-3 text-gray-600">
-                            {siteChanged && fromSiteName && <p className="text-xs text-indigo-600 font-medium">{fromSiteName}</p>}
+                            {siteChanged && fromSiteName && <p className="text-xs text-[#1a6fa6] font-medium">{fromSiteName}</p>}
                             <span className="font-medium">{fromLocation}</span>
                             {fromDept && <span className="text-gray-400"> · {fromDept}</span>}
                           </td>
                           <td className="px-4 py-3">
-                            {siteChanged && toSiteName && <p className="text-xs text-indigo-600 font-medium flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" />{toSiteName}</p>}
+                            {siteChanged && toSiteName && <p className="text-xs text-[#1a6fa6] font-medium flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" />{toSiteName}</p>}
                             <span className="inline-flex items-center gap-1 font-medium text-purple-700">
                               <ArrowRightLeft className="w-3 h-3" /> {toLocation}
                             </span>
@@ -3753,7 +4807,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </table>
               </div>
             )}
-          </div>
+          </div>}
           </>)}
 
           {/* Rapport transferts */}
@@ -3920,18 +4974,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Modale Gestion des Sites ════════════════════════════════════ */}
+      {/* ══ Module Gestion des Sites ════════════════════════════════════ */}
       {showSiteModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSiteModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 bg-gray-50 flex flex-col">
             {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <Globe className="w-5 h-5 text-indigo-600" />
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-200 shrink-0 bg-white">
+              <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                <Globe className="w-5 h-5 text-[#1a6fa6]" />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-gray-900">Gestion des sites</h2>
-                <p className="text-xs text-gray-400">Configurer les sites et localisations</p>
+                <p className="text-xs text-white/70">Configurer les sites et localisations</p>
               </div>
               <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
                 <XCircle className="w-5 h-5 text-gray-400" />
@@ -3950,7 +5003,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 )}
                 <div className="space-y-2">
                   {sites.map(site => (
-                    <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 hover:bg-gray-50'}`}
+                    <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-indigo-400 bg-[#e8f3fc]' : 'border-gray-100 hover:bg-gray-50'}`}
                       onClick={() => { setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description }); }}>
                       <div className="flex items-start justify-between gap-2">
                         <div>
@@ -3961,7 +5014,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           {site.address && <p className="text-xs text-gray-400 mt-0.5">{site.address}</p>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs text-indigo-600 font-medium">{site.equipmentCount} équip.</span>
+                          <span className="text-xs text-[#1a6fa6] font-medium">{site.equipmentCount} équip.</span>
                           <button onClick={e => { e.stopPropagation(); handleDeleteSite(site.id); }}
                             className="text-red-400 hover:text-red-600" title="Supprimer">
                             <Trash2 className="w-3.5 h-3.5" />
@@ -3982,29 +5035,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Nom du site *</label>
                     <input type="text" value={siteForm.name} onChange={e => setSiteForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="Ex: Siège Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                      placeholder="Ex: Siège Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Ville</label>
                       <input type="text" value={siteForm.city} onChange={e => setSiteForm(f => ({ ...f, city: e.target.value }))}
-                        placeholder="Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="Paris" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Pays</label>
                       <input type="text" value={siteForm.country} onChange={e => setSiteForm(f => ({ ...f, country: e.target.value }))}
-                        placeholder="France" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        placeholder="France" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Adresse</label>
                     <input type="text" value={siteForm.address} onChange={e => setSiteForm(f => ({ ...f, address: e.target.value }))}
-                      placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                      placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
                     <textarea rows={2} value={siteForm.description} onChange={e => setSiteForm(f => ({ ...f, description: e.target.value }))}
-                      placeholder="Informations complémentaires…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                      placeholder="Informations complémentaires…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
                   <div className="flex gap-2 pt-1">
                     {editingSiteId && (
@@ -4014,7 +5067,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </button>
                     )}
                     <button onClick={handleSaveSite} disabled={siteLoading || !siteForm.name.trim()}
-                      className="flex-1 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                      className="flex-1 py-2 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a] disabled:opacity-50 flex items-center justify-center gap-2">
                       {siteLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                       {editingSiteId ? 'Enregistrer' : 'Créer le site'}
                     </button>
@@ -4022,7 +5075,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               </div>
             </div>
-          </div>
         </div>
       )}
 
@@ -4060,14 +5112,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <input type="number" min={1} max={reformTarget.quantity}
                     value={reformForm.reformQty}
                     onChange={e => setReformForm(f => ({ ...f, reformQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), reformTarget.quantity ?? 1) }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                 </div>
               )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Raison de la réforme *</label>
                 <select value={reformForm.reason} onChange={e => setReformForm(f => ({ ...f, reason: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                   <option value="">— Sélectionner —</option>
                   <option>Fin de vie / obsolescence</option>
                   <option>Défaillance irréparable</option>
@@ -4081,7 +5133,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Remplacé par un équipement existant</label>
                 <select value={reformForm.replacedById ?? ''} onChange={e => setReformForm(f => ({ ...f, replacedById: e.target.value ? Number(e.target.value) : null }))}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                   <option value="">— Aucun remplacement ou non encore enregistré —</option>
                   {equipments.filter(e => e.id !== reformTarget.id && e.status !== 'réformé').map(e => (
                     <option key={e.id} value={e.id}>{e.name} — {e.location}</option>
@@ -4093,14 +5145,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes complémentaires</label>
                 <textarea rows={2} value={reformForm.notes} onChange={e => setReformForm(f => ({ ...f, notes: e.target.value }))}
                   placeholder="Informations supplémentaires…"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowReformModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleReform} disabled={reformLoading || !reformForm.reason}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm disabled:opacity-50 flex items-center gap-2">
+                className="px-4 py-2 bg-[#1a6fa6] text-white rounded hover:bg-[#155a8a] text-sm disabled:opacity-50 flex items-center gap-2">
                 {reformLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 <Archive className="w-4 h-4" /> Confirmer la réforme
               </button>
@@ -4110,24 +5162,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ── Transfer modal ───────────────────────────────────────────────── */}
-      {showTransferModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowTransferModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
-                <ArrowRightLeft className="w-5 h-5 text-purple-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Transfert d'équipement</h2>
-                <p className="text-xs text-gray-400">Déplacer vers un autre site ou emplacement</p>
-              </div>
-              <button onClick={() => setShowTransferModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
-              </button>
+      {/* ── Transfer form inline (depuis la liste équipements) ──────────── */}
+      {showTransferModal && !showTransferModule && (
+        <div className="bg-white rounded-xl shadow-sm mb-6 border border-gray-100">
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
+            <button onClick={() => { setShowTransferModal(false); setTransferTarget(null); }}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 mr-1" title="Retour à la liste">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
+              <ArrowRightLeft className="w-5 h-5 text-white" />
             </div>
-            <div className="overflow-y-auto p-6 flex-1">
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-bold text-gray-900">Transfert d'équipement</h2>
+              <p className="text-xs text-gray-400">Déplacer vers un autre site ou emplacement</p>
+            </div>
+          </div>
+          <div className="p-6">
 
             {/* Sélecteur d'équipement (quand ouvert depuis le module) */}
             {!transferTarget ? (
@@ -4142,7 +5193,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       setTransferForm(f => ({ ...f, toLocation: eq.location, toDepartment: eq.department, toSiteId: eq.siteId ?? null }));
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm"
                 >
                   <option value="" disabled>— Sélectionner un équipement —</option>
                   {equipments.filter(e => e.status !== 'réformé').map(e => (
@@ -4169,7 +5220,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 ) : (
                   <select value={transferForm.toSiteId ?? ''}
                     onChange={e => setTransferForm({ ...transferForm, toSiteId: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm bg-white">
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm bg-white">
                     <option value="">— Sélectionner un site —</option>
                     {sites.map(s => (
                       <option key={s.id} value={s.id}>{s.name}{s.city ? ` — ${s.city}` : ''}{s.country ? `, ${s.country}` : ''}</option>
@@ -4193,21 +5244,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </label>
                 <input type="text" value={transferForm.toLocation}
                   onChange={(e) => setTransferForm({ ...transferForm, toLocation: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
                   placeholder="Ex: Bureau 301, Salle serveurs…" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nouveau département *</label>
                 <input type="text" value={transferForm.toDepartment}
                   onChange={(e) => setTransferForm({ ...transferForm, toDepartment: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
                   placeholder="Ex: Comptabilité, RH…" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Raison du transfert</label>
                 <select value={transferForm.reason}
                   onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm">
                   <option>Réorganisation</option>
                   <option>Transfert de site</option>
                   <option>Maintenance</option>
@@ -4220,7 +5271,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
                 <input type="text" value={transferForm.technicianName}
                   onChange={(e) => setTransferForm({ ...transferForm, technicianName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
                   placeholder="Nom du technicien" />
               </div>
               {transferTarget && (transferTarget.quantity ?? 1) > 1 && (
@@ -4231,7 +5282,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <input type="number" min={1} max={transferTarget.quantity}
                     value={transferForm.transferQty}
                     onChange={e => setTransferForm({ ...transferForm, transferQty: Math.min(Math.max(1, parseInt(e.target.value) || 1), transferTarget.quantity ?? 1) })}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm" />
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm" />
                   {transferForm.transferQty < (transferTarget.quantity ?? 1) && (
                     <p className="text-xs text-purple-600 mt-1">Transfert partiel — {transferTarget.quantity - transferForm.transferQty} unité(s) resteront sur le site actuel.</p>
                   )}
@@ -4242,18 +5293,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <textarea value={transferForm.notes}
                   onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
                   rows={2}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
                   placeholder="Informations complémentaires…" />
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleTransfer} disabled={transferLoading || !transferTarget}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm disabled:opacity-60 flex items-center gap-2">
+                className="px-4 py-2 bg-[#1a6fa6] text-white rounded hover:bg-[#155a8a] text-sm disabled:opacity-60 flex items-center gap-2">
                 {transferLoading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 <ArrowRightLeft className="w-4 h-4" /> Confirmer le transfert
               </button>
-            </div>
             </div>
           </div>
         </div>
@@ -4261,18 +5311,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Reports modal ────────────────────────────────────────────────── */}
       {showReportsModal && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           <div className="flex flex-col flex-1 overflow-hidden">
 
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-                  <Calendar className="w-5 h-5 text-indigo-600" />
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Module Rapports</h2>
-                  <p className="text-sm text-gray-500">Statistiques et historique du parc</p>
+                  <h2 className="text-base font-bold text-white">Module Rapports</h2>
+                  <p className="text-sm text-white/70">Statistiques et historique du parc</p>
                 </div>
               </div>
               <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
@@ -4298,7 +5348,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   if (tab === 'maintenance' && reportMaintenanceAll.length === 0) fetchReportMaintenance();
                   if (tab === 'visits' && reportVisitsAll.length === 0) fetchReportVisits();
                 }}
-                  className={`whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  className={`whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 transition-colors ${reportsTab === tab ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {label}
                 </button>
               ))}
@@ -4318,7 +5368,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         setReportHistory([]);
                         if (id) fetchReportHistory(id);
                       }}
-                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]"
                     >
                       <option value="">— Sélectionner un équipement —</option>
                       {equipments.map(eq => (
@@ -4351,13 +5401,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       <div>
                         {/* Equipment card */}
                         {eq && (
-                          <div className="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 flex flex-wrap gap-4 text-sm">
-                            <div><span className="font-semibold text-indigo-800">{eq.name}</span> <span className="text-indigo-500">·</span> {eq.brand} {eq.model}</div>
-                            <div className="text-indigo-600">S/N: {eq.serialNumber || '—'}</div>
-                            <div className="text-indigo-600">IP: {eq.ipAddress || '—'}</div>
-                            <div className="text-indigo-600">Dept: {eq.department}</div>
-                            <div className="text-indigo-600">Statut: <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColors[eq.status]}`}>{eq.status}</span></div>
-                            <div className="text-indigo-600">{reportHistory.length} événement(s)</div>
+                          <div className="mb-5 rounded-xl border border-indigo-100 bg-[#e8f3fc] p-4 flex flex-wrap gap-4 text-sm">
+                            <div><span className="font-semibold text-[#0d4a73]">{eq.name}</span> <span className="text-indigo-500">·</span> {eq.brand} {eq.model}</div>
+                            <div className="text-[#1a6fa6]">S/N: {eq.serialNumber || '—'}</div>
+                            <div className="text-[#1a6fa6]">IP: {eq.ipAddress || '—'}</div>
+                            <div className="text-[#1a6fa6]">Dept: {eq.department}</div>
+                            <div className="text-[#1a6fa6]">Statut: <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColors[eq.status]}`}>{eq.status}</span></div>
+                            <div className="text-[#1a6fa6]">{reportHistory.length} événement(s)</div>
                           </div>
                         )}
 
@@ -4407,17 +5457,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                       <input type="date" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                       <input type="date" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Service</label>
                       <select value={reportDeptFilter} onChange={e => setReportDeptFilter(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]">
                         <option value="">Tous</option>
                         {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
                           <option key={d} value={d}>{d}</option>
@@ -4427,7 +5477,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
                       <select value={reportTypeFilter} onChange={e => setReportTypeFilter(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]">
                         <option value="">Tous</option>
                         <option value="ordinateur">Ordinateur</option>
                         <option value="reseau">Réseau</option>
@@ -4553,10 +5603,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                 <span className="font-semibold text-gray-800">{dept.department}</span>
                                 <span className="text-xs text-gray-400">{dept.equipment_count} équipement(s)</span>
                               </div>
-                              <span className="text-sm font-bold text-indigo-700">{dept.total_events} événements</span>
+                              <span className="text-sm font-bold text-[#155a8a]">{dept.total_events} événements</span>
                             </div>
                             <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
-                              <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth}%` }} />
+                              <div className="bg-[#e8f3fc]0 h-2 rounded-full transition-all" style={{ width: `${barWidth}%` }} />
                             </div>
                             <div className="flex flex-wrap gap-3 text-xs">
                               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />{dept.creations} créations</span>
@@ -4577,7 +5627,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {reportsTab === 'user' && (
                 <div className="space-y-4">
                   {!isAdmin && (
-                    <div className="flex items-center gap-2 rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-2.5 text-sm text-indigo-700">
+                    <div className="flex items-center gap-2 rounded-lg bg-[#e8f3fc] border border-indigo-100 px-4 py-2.5 text-sm text-[#155a8a]">
                       <User className="w-4 h-4 shrink-0" />
                       Rapport de vos actions sur vos sites assignés.
                     </div>
@@ -4587,17 +5637,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Du</label>
                       <input type="date" value={reportUserFrom} onChange={e => setReportUserFrom(e.target.value)}
-                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Au</label>
                       <input type="date" value={reportUserTo} onChange={e => setReportUserTo(e.target.value)}
-                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Service</label>
                       <select value={reportUserDeptFilter} onChange={e => setReportUserDeptFilter(e.target.value)}
-                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
                         <option value="">Tous les services</option>
                         {[...new Set(equipments.map(e => e.department).filter(Boolean))].sort().map(d => (
                           <option key={d} value={d}>{d}</option>
@@ -4650,12 +5700,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {reportUserStats.length > 0 && (
                     <>
                       <div className="grid grid-cols-3 gap-3 text-sm">
-                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-center">
-                          <div className="text-2xl font-bold text-indigo-700">{reportUserStats.length}</div>
+                        <div className="rounded-xl border border-indigo-100 bg-[#e8f3fc] p-3 text-center">
+                          <div className="text-2xl font-bold text-[#155a8a]">{reportUserStats.length}</div>
                           <div className="text-xs text-gray-500 mt-0.5">Utilisateur(s) actif(s)</div>
                         </div>
-                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-center">
-                          <div className="text-2xl font-bold text-indigo-700">{reportUserStats.reduce((s, u) => s + Number(u.total_actions), 0)}</div>
+                        <div className="rounded-xl border border-indigo-100 bg-[#e8f3fc] p-3 text-center">
+                          <div className="text-2xl font-bold text-[#155a8a]">{reportUserStats.reduce((s, u) => s + Number(u.total_actions), 0)}</div>
                           <div className="text-xs text-gray-500 mt-0.5">Actions au total</div>
                         </div>
                         <div className="rounded-xl border border-green-100 bg-green-50 p-3 text-center">
@@ -4671,7 +5721,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           const barW = Math.round((Number(user.total_actions) / maxTotal) * 100);
                           const isExpanded = reportUserExpanded === user.username;
                           const pills = [
-                            { label: 'Créations',     value: Number(user.creations),     color: 'bg-indigo-100 text-indigo-700' },
+                            { label: 'Créations',     value: Number(user.creations),     color: 'bg-[#cfe2ff] text-[#155a8a]' },
                             { label: 'Modifications', value: Number(user.modifications), color: 'bg-yellow-100 text-yellow-700' },
                             { label: 'Interventions', value: Number(user.interventions), color: 'bg-green-100 text-green-700' },
                             { label: 'Transferts',    value: Number(user.transferts),    color: 'bg-purple-100 text-purple-700' },
@@ -4685,8 +5735,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               {/* En-tête utilisateur */}
                               <div className="flex items-center gap-4 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
                                 onClick={() => fetchUserDetail(user.username)}>
-                                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                                  <User className="w-5 h-5 text-indigo-600" />
+                                <div className="w-10 h-10 rounded-full bg-[#cfe2ff] flex items-center justify-center shrink-0">
+                                  <User className="w-5 h-5 text-[#1a6fa6]" />
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
@@ -4696,9 +5746,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   </div>
                                   <div className="flex items-center gap-2 mt-1">
                                     <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                                      <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${barW}%` }} />
+                                      <div className="bg-[#e8f3fc]0 h-1.5 rounded-full" style={{ width: `${barW}%` }} />
                                     </div>
-                                    <span className="text-xs font-bold text-indigo-700 shrink-0">{user.total_actions} actions</span>
+                                    <span className="text-xs font-bold text-[#155a8a] shrink-0">{user.total_actions} actions</span>
                                   </div>
                                   <div className="flex flex-wrap gap-1.5 mt-2">
                                     {pills.map(p => (
@@ -4759,7 +5809,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {reportsTab === 'site' && (
                 <div className="space-y-4">
                   {!isAdmin && (
-                    <div className="flex items-center gap-2 rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-2.5 text-sm text-indigo-700">
+                    <div className="flex items-center gap-2 rounded-lg bg-[#e8f3fc] border border-indigo-100 px-4 py-2.5 text-sm text-[#155a8a]">
                       <Globe className="w-4 h-4 shrink-0" />
                       Rapport limité à vos sites assignés.
                     </div>
@@ -4769,17 +5819,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                       <input type="date" value={reportSiteFrom} onChange={e => setReportSiteFrom(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                       <input type="date" value={reportSiteTo} onChange={e => setReportSiteTo(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
                       <select value={reportSiteTypeFilter} onChange={e => setReportSiteTypeFilter(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]">
                         <option value="">Tous</option>
                         <option value="ordinateur">Ordinateur</option>
                         <option value="reseau">Réseau</option>
@@ -4846,14 +5896,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                                    <div className="bg-indigo-500 h-1.5 rounded-full" style={{width:`${barW}%`}} />
+                                    <div className="bg-[#e8f3fc]0 h-1.5 rounded-full" style={{width:`${barW}%`}} />
                                   </div>
                                   <span className="text-xs text-gray-500 shrink-0">{site.total_events} événement(s)</span>
                                 </div>
                               </div>
                               <div className="flex gap-3 text-center shrink-0">
                                 {[
-                                  ['Équip.', site.equipment_count, 'text-indigo-600'],
+                                  ['Équip.', site.equipment_count, 'text-[#1a6fa6]'],
                                   ['Créations', site.creations, 'text-green-600'],
                                   ['Modifs', site.modifications, 'text-yellow-600'],
                                   ['Transferts', site.transferts, 'text-purple-600'],
@@ -4911,7 +5961,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {!reportMaintenanceLoading && reportMaintenanceAll.length === 0 && (
                     <div className="text-center py-12 text-gray-400">
                       <p>Aucun ticket de maintenance trouvé.</p>
-                      <button onClick={fetchReportMaintenance} className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">Charger</button>
+                      <button onClick={fetchReportMaintenance} className="mt-3 px-4 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a]">Charger</button>
                     </div>
                   )}
                   {reportMaintenanceAll.length > 0 && (() => {
@@ -4939,7 +5989,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           {label:'Total tickets',value:all.length,color:'text-gray-800'},
                           {label:'Actifs',value:all.filter(m=>m.status!=='résolu').length,color:'text-red-600'},
                           {label:'Résolus',value:resolved.length,color:'text-green-600'},
-                          {label:'Délai moyen résolution',value:avgH>0?`${avgH}h`:'—',color:'text-indigo-600'},
+                          {label:'Délai moyen résolution',value:avgH>0?`${avgH}h`:'—',color:'text-[#1a6fa6]'},
                         ].map(({label,value,color})=>(
                           <div key={label} className="bg-white rounded-xl border p-4 shadow-sm">
                             <div className={`text-2xl font-bold ${color}`}>{value}</div>
@@ -4988,7 +6038,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                 <td className="py-1.5 font-medium text-gray-800">{tech}</td>
                                 <td className="py-1.5 text-right text-gray-500">{d.total}</td>
                                 <td className="py-1.5 text-right text-green-600 font-medium">{d.resolved}</td>
-                                <td className="py-1.5 text-right text-indigo-600 font-medium">{d.total?Math.round((d.resolved/d.total)*100):0}%</td>
+                                <td className="py-1.5 text-right text-[#1a6fa6] font-medium">{d.total?Math.round((d.resolved/d.total)*100):0}%</td>
                               </tr>
                             ))}
                           </tbody>
@@ -5006,13 +6056,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   {!reportVisitsLoading && reportVisitsAll.length === 0 && (
                     <div className="text-center py-12 text-gray-400">
                       <p>Aucune visite trouvée.</p>
-                      <button onClick={fetchReportVisits} className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">Charger</button>
+                      <button onClick={fetchReportVisits} className="mt-3 px-4 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a]">Charger</button>
                     </div>
                   )}
                   {reportVisitsAll.length > 0 && (() => {
                     const all = reportVisitsAll;
                     const visitStatusStyle: Record<string,string> = {
-                      planifié:'bg-indigo-100 text-indigo-700', en_cours:'bg-yellow-100 text-yellow-700',
+                      planifié:'bg-[#cfe2ff] text-[#155a8a]', en_cours:'bg-yellow-100 text-yellow-700',
                       terminé:'bg-green-100 text-green-700', reporté:'bg-orange-100 text-orange-700', annulé:'bg-red-100 text-red-700'
                     };
                     const byStatus = (['planifié','en_cours','terminé','reporté','annulé'] as const).map(s=>({
@@ -5035,7 +6085,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         {[
                           {label:'Total visites',value:all.length,color:'text-blue-700'},
                           {label:'Terminées',value:all.filter(v=>v.status==='terminé').length,color:'text-green-600'},
-                          {label:'À venir',value:all.filter(v=>v.status==='planifié'||v.status==='en_cours').length,color:'text-indigo-600'},
+                          {label:'À venir',value:all.filter(v=>v.status==='planifié'||v.status==='en_cours').length,color:'text-[#1a6fa6]'},
                           {label:'Avec maintenance',value:withMaint,color:'text-orange-600'},
                         ].map(({label,value,color})=>(
                           <div key={label} className="bg-white rounded-xl border p-4 shadow-sm">
@@ -5093,23 +6143,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ── Monitoring modal ─────────────────────────────────────────────── */}
       {showMonitoringModal && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           <div className="flex flex-col flex-1 overflow-hidden">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
-                  <Activity className="w-5 h-5 text-green-600" />
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Monitoring en temps réel</h2>
-                  <p className="text-sm text-gray-500">
+                  <h2 className="text-base font-bold text-white">Monitoring en temps réel</h2>
+                  <p className="text-sm text-white/70">
                     {activeSessions.filter(s => isOnline(s.lastSeen)).length} en ligne · {activeSessions.filter(s => !isOnline(s.lastSeen)).length} inactif(s) · rafraîchissement auto toutes les 30s
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                <div className="flex items-center gap-1.5 text-xs text-white/70">
                   {monitoringLoading
                     ? <div className="w-3 h-3 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                     : <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
@@ -5155,7 +6205,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </button>
               <button
                 onClick={() => setMonitoringTab('activities')}
-                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${monitoringTab === 'activities' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${monitoringTab === 'activities' ? 'border-[#1a6fa6] text-[#1a6fa6] bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
               >
                 <span className="flex items-center gap-2">
                   <Clock className="w-4 h-4" />
@@ -5235,7 +6285,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   fetchActivities(session.userId);
                                   setMonitoringTab('activities');
                                 }}
-                                className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+                                className="text-xs text-[#1a6fa6] hover:text-[#0d4a73] underline"
                               >
                                 Voir l'activité de {session.name} →
                               </button>
@@ -5260,7 +6310,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         activityUserFilterRef.current = null;
                         fetchActivities(null);
                       }}
-                      className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === null ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === null ? 'bg-[#1a6fa6] text-white border-[#1a6fa6]' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
                     >
                       Tous
                     </button>
@@ -5272,7 +6322,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           activityUserFilterRef.current = u.id;
                           fetchActivities(u.id);
                         }}
-                        className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${activityUserFilter === u.id ? 'bg-[#1a6fa6] text-white border-[#1a6fa6]' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}
                       >
                         {u.name}
                       </button>
@@ -5328,34 +6378,33 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       )}
 
       {showUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowUserModal(false)} />
-          <div
-            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[90vh]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-indigo-600" />
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+          {/* Header */}
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <Users className="w-5 h-5 text-white" />
               </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Gestion des utilisateurs</h2>
-                <p className="text-xs text-gray-400">Rôles, permissions et accès par site</p>
+              <div>
+                <h2 className="text-base font-bold text-white">Gestion des utilisateurs</h2>
+                <p className="text-sm text-white/70">{userAccounts.length} compte(s) enregistré(s)</p>
               </div>
-              <button onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="flex items-center gap-2">
+              {!showUserFormModal && (
+                <button onClick={openUserCreate}
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
+                  <Plus className="w-4 h-4" /> Ajouter un utilisateur
+                </button>
+              )}
+              <button onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <XCircle className="w-6 h-6 text-gray-500" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6">
-            <div className="flex justify-end mb-4">
-              <button
-                onClick={openUserCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700"
-              >
-                <Plus className="w-4 h-4" />
-                Ajouter un utilisateur
-              </button>
-            </div>
+          </div>
+
+          {/* Table utilisateurs */}
+          {!showUserFormModal && <div className="flex-1 overflow-y-auto p-6">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -5418,10 +6467,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <button onClick={() => openAccessModal(user)} title="Gérer rôle, permissions et sites"
-                              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium">
+                              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-[#e8f3fc] text-[#155a8a] border border-[#1a6fa6]/30 hover:bg-[#cfe2ff] font-medium">
                               Accès
                             </button>
-                            <button onClick={() => openUserEdit(user)} className="text-indigo-600 hover:text-indigo-900" title="Modifier identité">
+                            <button onClick={() => openUserEdit(user)} className="text-[#1a6fa6] hover:text-[#0d4a73]" title="Modifier identité">
                               <Edit className="w-4 h-4" />
                             </button>
                             {user.id !== currentUser.id && (
@@ -5451,43 +6500,35 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </tbody>
               </table>
             </div>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>}
 
-      {showUserFormModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setShowUserFormModal(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 px-0 py-0 pb-4 border-b border-gray-100 mb-4">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <User className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">{userEditingId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}</h2>
-                <p className="text-xs text-gray-400">{userEditingId ? 'Modifier le compte' : 'Créer un nouveau compte'}</p>
-              </div>
-              <button onClick={() => setShowUserFormModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
-              </button>
-            </div>
-            {userFormError && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{userFormError}</div>
-            )}
-            <div className="space-y-4">
+          {/* Formulaire inline */}
+          {showUserFormModal && (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 max-w-lg">
+                <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
+                  <button onClick={() => setShowUserFormModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 mr-1" title="Retour">
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                    <User className="w-5 h-5 text-[#1a6fa6]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-base font-bold text-gray-900">{userEditingId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}</h2>
+                    <p className="text-xs text-gray-400">{userEditingId ? 'Modifier le compte' : 'Créer un nouveau compte'}</p>
+                  </div>
+                </div>
+                {userFormError && (
+                  <div className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{userFormError}</div>
+                )}
+                <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nom d'utilisateur *</label>
                 <input
                   type="text"
                   value={userFormData.username}
                   onChange={(e) => setUserFormData({ ...userFormData, username: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                 />
               </div>
               <div>
@@ -5496,7 +6537,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   type="text"
                   value={userFormData.name}
                   onChange={(e) => setUserFormData({ ...userFormData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                 />
               </div>
               <div>
@@ -5504,7 +6545,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={userFormData.role}
                   onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value as UserFormData['role'] })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                 >
                   <option value="admin">Administrateur</option>
                   <option value="technicien">Technicien</option>
@@ -5520,7 +6561,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   value={userFormData.password}
                   onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
                   placeholder={userEditingId ? 'Laisser vide pour ne pas changer' : ''}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                 />
               </div>
 
@@ -5536,12 +6577,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {PERMISSION_CONFIG.map((perm) => {
                       const checked = userFormData.permissions.includes(perm.value);
                       const colorMap: Record<string, string> = {
-                        blue:   checked ? 'border-indigo-400 bg-indigo-50'   : 'border-gray-200 hover:border-indigo-300',
+                        blue:   checked ? 'border-indigo-400 bg-[#e8f3fc]'   : 'border-gray-200 hover:border-[#1a6fa6]/50',
                         green:  checked ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-green-300',
                         orange: checked ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300'
                       };
                       const badgeMap: Record<string, string> = {
-                        blue: 'bg-indigo-100 text-indigo-700', green: 'bg-green-100 text-green-700', orange: 'bg-orange-100 text-orange-700'
+                        blue: 'bg-[#cfe2ff] text-[#155a8a]', green: 'bg-green-100 text-green-700', orange: 'bg-orange-100 text-orange-700'
                       };
                       return (
                         <label
@@ -5630,13 +6671,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   type="button"
                   onClick={handleUserSubmit}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+                  className="px-4 py-2 bg-[#1a6fa6] text-white rounded hover:bg-[#155a8a]"
                 >
                   {userEditingId ? 'Modifier' : 'Ajouter'}
                 </button>
               </div>
             </div>
           </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -5646,8 +6689,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-indigo-600" />
+              <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-gray-900">Gestion des accès</h2>
@@ -5670,7 +6713,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     { value: 'technicien', label: 'Technicien', desc: 'Selon permissions', color: 'blue' },
                     { value: 'user', label: 'Utilisateur', desc: 'Selon permissions', color: 'gray' },
                   ] as const).map(r => (
-                    <label key={r.value} className={`flex flex-col gap-1 rounded-xl border-2 p-3 cursor-pointer transition-colors ${accessForm.role === r.value ? r.value === 'admin' ? 'border-red-400 bg-red-50' : r.value === 'technicien' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <label key={r.value} className={`flex flex-col gap-1 rounded-xl border-2 p-3 cursor-pointer transition-colors ${accessForm.role === r.value ? r.value === 'admin' ? 'border-red-400 bg-red-50' : r.value === 'technicien' ? 'border-indigo-400 bg-[#e8f3fc]' : 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
                       <input type="radio" name="role" value={r.value} checked={accessForm.role === r.value}
                         onChange={() => setAccessForm(f => ({ ...f, role: r.value }))} className="sr-only" />
                       <span className="text-sm font-semibold text-gray-800">{r.label}</span>
@@ -5688,7 +6731,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {PERMISSION_CONFIG.map(perm => {
                       const checked = accessForm.permissions.includes(perm.value);
                       const colorMap: Record<string, string> = {
-                        blue:   checked ? 'border-indigo-400 bg-indigo-50'   : 'border-gray-200 hover:border-indigo-300',
+                        blue:   checked ? 'border-indigo-400 bg-[#e8f3fc]'   : 'border-gray-200 hover:border-[#1a6fa6]/50',
                         green:  checked ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-green-300',
                         orange: checked ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300',
                       };
@@ -5757,7 +6800,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <div className="px-6 py-4 border-t flex justify-end gap-3 bg-gray-50 rounded-b-2xl">
               <button onClick={() => setShowAccessModal(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm">Annuler</button>
               <button onClick={handleSaveAccess} disabled={accessLoading}
-                className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                className="px-5 py-2 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a] disabled:opacity-50">
                 {accessLoading ? 'Enregistrement…' : 'Enregistrer'}
               </button>
             </div>
@@ -5767,16 +6810,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Journal d'activité ═══════════════════════════════════════════════ */}
       {showActivityLog && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           {/* Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-teal-600" />
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <ClipboardList className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Journal d'activité</h2>
-                <p className="text-sm text-gray-500">{activityEntries.length} entrée(s) affichée(s)</p>
+                <h2 className="text-base font-bold text-white">Journal d'activité</h2>
+                <p className="text-sm text-white/70">{activityEntries.length} entrée(s) affichée(s)</p>
               </div>
             </div>
             <button onClick={() => setShowActivityLog(false)} className="p-2 rounded-lg hover:bg-gray-100">
@@ -5792,7 +6835,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={activityFilter.username}
                   onChange={e => setActivityFilter(f => ({ ...f, username: e.target.value }))}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]"
                 >
                   <option value="">— Tous les utilisateurs —</option>
                   {userAccounts.map((u: UserAccount) => <option key={u.id} value={u.username}>{u.name} ({u.username})</option>)}
@@ -5803,7 +6846,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <select
                   value={activityFilter.action}
                   onChange={e => setActivityFilter(f => ({ ...f, action: e.target.value }))}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]"
                 >
                   <option value="">— Toutes les actions —</option>
                   {['Connexion','Déconnexion','Ajout équipement','Modification équipement','Suppression équipement',
@@ -5818,13 +6861,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <label className="block text-xs font-medium text-gray-600 mb-1">Du</label>
                 <input type="date" value={activityFilter.dateFrom}
                   onChange={e => setActivityFilter(f => ({ ...f, dateFrom: e.target.value }))}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Au</label>
                 <input type="date" value={activityFilter.dateTo}
                   onChange={e => setActivityFilter(f => ({ ...f, dateTo: e.target.value }))}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
               </div>
               <button
                 onClick={() => {
@@ -5907,7 +6950,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <div className="px-6 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border-b border-gray-100 shrink-0">
                 {[
                   { label: 'Total actions', value: activityEntries.length, color: 'text-teal-700', bg: 'bg-teal-50' },
-                  { label: 'Utilisateurs actifs', value: uniqueUsers, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+                  { label: 'Utilisateurs actifs', value: uniqueUsers, color: 'text-[#155a8a]', bg: 'bg-[#e8f3fc]' },
                   { label: 'Connexions', value: connexions, color: 'text-green-700', bg: 'bg-green-50' },
                   { label: 'Opérations', value: modifications, color: 'text-purple-700', bg: 'bg-purple-50' },
                 ].map(({ label, value, color, bg }) => (
@@ -5985,23 +7028,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
       {/* ══ Module Visites de site ══════════════════════════════════════════════ */}
       {showVisitModule && (
-        <div className="fixed top-0 left-56 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-50 flex flex-col bg-gray-50">
           {/* Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-blue-600" />
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Visites de site</h2>
-                <p className="text-sm text-gray-500">{visits.length} visite(s) enregistrée(s)</p>
+                <h2 className="text-base font-bold text-white">Visites de site</h2>
+                <p className="text-sm text-white/70">{visits.length} visite(s) enregistrée(s)</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {canWrite && (
+              {canWrite && !showVisitForm && (
                 <button
                   onClick={() => { setEditingVisitId(null); setVisitForm(defaultVisitForm); setShowVisitForm(true); }}
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                  className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                   <Plus className="w-4 h-4" /> Nouvelle visite
                 </button>
               )}
@@ -6011,14 +7054,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
           </div>
 
+          {!showVisitForm && <>
           {/* Tabs */}
           <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
-            <button onClick={() => setShowVisitReports(false)}
-              className={`px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${!showVisitReports ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              Liste des visites
+            <button onClick={() => { setShowVisitReports(false); setShowCalendar(false); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showVisitReports && !showCalendar ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              <LayoutList className="w-3.5 h-3.5" /> Liste
             </button>
-            <button onClick={() => setShowVisitReports(true)}
-              className={`px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${showVisitReports ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            <button onClick={() => { setShowVisitReports(false); setShowCalendar(true); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showVisitReports && showCalendar ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              <Calendar className="w-3.5 h-3.5" /> Calendrier
+            </button>
+            <button onClick={() => { setShowVisitReports(true); setShowCalendar(false); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showVisitReports ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               Rapport
             </button>
           </div>
@@ -6043,13 +7091,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="px-6 pb-4 flex flex-wrap gap-3 shrink-0">
             <select value={visitFilter.siteId}
               onChange={e => { const f = { ...visitFilter, siteId: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
               <option value="">Tous les sites</option>
               {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <select value={visitFilter.status}
               onChange={e => { const f = { ...visitFilter, status: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
               <option value="">Tous les statuts</option>
               <option value="planifié">Planifié</option>
               <option value="en_cours">En cours</option>
@@ -6059,10 +7107,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </select>
             <input type="date" value={visitFilter.from}
               onChange={e => { const f = { ...visitFilter, from: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
             <input type="date" value={visitFilter.to}
               onChange={e => { const f = { ...visitFilter, to: e.target.value }; setVisitFilter(f); fetchVisits(f); }}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400" />
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
             <button onClick={() => { const f = { siteId: '', status: '', from: '', to: '' }; setVisitFilter(f); fetchVisits(f); }}
               className="px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 flex items-center gap-2">
               <RefreshCcw className="w-4 h-4" /> Réinitialiser
@@ -6073,20 +7121,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           {showVisitReports && (
             <div className="flex-1 overflow-auto px-6 pb-6">
               {(() => {
+                const allVisitTechs = [...new Set(visits.map(v => v.technician || 'Non assigné'))].sort();
+                const filteredVisits = visitTechFilter.length > 0
+                  ? visits.filter(v => visitTechFilter.includes(v.technician || 'Non assigné'))
+                  : visits;
                 const byStatus = ['planifié','en_cours','terminé','reporté','annulé'].map(s => ({
                   status: s,
-                  count: visits.filter(v => v.status === s).length
+                  count: filteredVisits.filter(v => v.status === s).length
                 }));
                 const bySite = sites.map(s => {
-                  const siteVisits = visits.filter(v => v.siteId === s.id);
+                  const siteVisits = filteredVisits.filter(v => v.siteId === s.id);
                   const last = siteVisits.filter(v => v.status === 'terminé').sort((a,b) => b.scheduledDate.localeCompare(a.scheduledDate))[0];
                   return { site: s.name, total: siteVisits.length, terminé: siteVisits.filter(v=>v.status==='terminé').length, lastDate: last?.scheduledDate ?? '—' };
                 }).filter(r => r.total > 0).sort((a,b) => b.total - a.total);
                 const byTech: Record<string, number> = {};
-                visits.forEach(v => { byTech[v.technician] = (byTech[v.technician] ?? 0) + 1; });
+                filteredVisits.forEach(v => { byTech[v.technician] = (byTech[v.technician] ?? 0) + 1; });
                 const techRows = Object.entries(byTech).sort((a,b) => b[1]-a[1]);
                 const statusLabels: Record<string,{label:string,cls:string}> = {
-                  'planifié':{label:'Planifié',cls:'bg-indigo-100 text-indigo-700'},
+                  'planifié':{label:'Planifié',cls:'bg-[#cfe2ff] text-[#155a8a]'},
                   'en_cours':{label:'En cours',cls:'bg-yellow-100 text-yellow-700'},
                   'terminé':{label:'Terminé',cls:'bg-green-100 text-green-700'},
                   'reporté':{label:'Reporté',cls:'bg-orange-100 text-orange-700'},
@@ -6094,22 +7146,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 };
                 const exportVisitsExcel = () => {
                   const wb = XLSX.utils.book_new();
-                  // Par statut
                   const wsStatus = XLSX.utils.json_to_sheet(byStatus.map(r => ({
                     Statut: statusLabels[r.status]?.label ?? r.status, Nombre: r.count,
                   })));
                   XLSX.utils.book_append_sheet(wb, wsStatus, 'Par statut');
-                  // Par site
                   const wsSite = XLSX.utils.json_to_sheet(bySite.map(r => ({
                     Site: r.site, Total: r.total, Terminées: r.terminé,
                     'Dernière visite': r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
                   })));
                   XLSX.utils.book_append_sheet(wb, wsSite, 'Par site');
-                  // Par technicien
                   const wsTech = XLSX.utils.json_to_sheet(techRows.map(([t, cnt]) => ({ Technicien: t, Visites: cnt })));
                   XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
-                  // Toutes les visites
-                  const wsAll = XLSX.utils.json_to_sheet(visits.map(v => ({
+                  const wsAll = XLSX.utils.json_to_sheet(filteredVisits.map(v => ({
                     '#': v.id, Site: v.siteName,
                     Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'),
                     Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status,
@@ -6124,8 +7172,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 const exportVisitsPdf = () => {
                   const doc = new jsPDF({ orientation: 'landscape' });
                   doc.setFontSize(16); doc.text('Rapport Visites de site', 14, 16);
-                  doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${visits.length} visites`, 14, 23);
-                  // Par statut
+                  doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${filteredVisits.length} visite(s)${visitTechFilter.length > 0 ? ` · Filtre : ${visitTechFilter.join(', ')}` : ''}`, 14, 23);
                   doc.setFontSize(12); doc.text('Répartition par statut', 14, 32);
                   autoTable(doc, {
                     startY: 35,
@@ -6133,7 +7180,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     body: byStatus.map(r => [statusLabels[r.status]?.label ?? r.status, r.count]),
                     theme: 'striped', headStyles: { fillColor: [79, 70, 229] },
                   });
-                  // Par site
                   const y1 = (doc as any).lastAutoTable.finalY + 8;
                   doc.setFontSize(12); doc.text('Visites par site', 14, y1);
                   autoTable(doc, {
@@ -6145,7 +7191,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     ]),
                     theme: 'striped', headStyles: { fillColor: [79, 70, 229] },
                   });
-                  // Par technicien
                   const y2 = (doc as any).lastAutoTable.finalY + 8;
                   if (y2 < 180) {
                     doc.setFontSize(12); doc.text('Visites par technicien', 14, y2);
@@ -6159,28 +7204,139 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   doc.save(`rapport-visites-${Date.now()}.pdf`);
                 };
 
+                const exportVisitsWord = async () => {
+                  const makeHdr = (cells: string[]) => new DocxTableRow({
+                    children: cells.map(c => new DocxTableCell({
+                      children: [new DocxParagraph({ children: [new TextRun({ text: c, bold: true })] })],
+                      width: { size: Math.floor(9000 / cells.length), type: WidthType.DXA },
+                    })),
+                  });
+                  const makeRow = (cells: string[]) => new DocxTableRow({
+                    children: cells.map(c => new DocxTableCell({
+                      children: [new DocxParagraph({ children: [new TextRun(c)] })],
+                      width: { size: Math.floor(9000 / cells.length), type: WidthType.DXA },
+                    })),
+                  });
+                  const children = [
+                    new DocxParagraph({ text: 'Rapport Visites de site', heading: HeadingLevel.HEADING_1 }),
+                    new DocxParagraph({ children: [new TextRun(`Généré le ${new Date().toLocaleDateString('fr-FR')} · ${filteredVisits.length} visite(s)`)] }),
+                    ...(visitTechFilter.length > 0 ? [new DocxParagraph({ children: [new TextRun({ text: `Technicien(s) : ${visitTechFilter.join(', ')}`, italics: true })] })] : []),
+                    new DocxParagraph({ text: '' }),
+                    new DocxParagraph({ text: 'Répartition par statut', heading: HeadingLevel.HEADING_2 }),
+                    new DocxTable({ rows: [makeHdr(['Statut','Nombre']), ...byStatus.map(r => makeRow([statusLabels[r.status]?.label ?? r.status, String(r.count)]))] }),
+                    new DocxParagraph({ text: '' }),
+                    new DocxParagraph({ text: 'Visites par site', heading: HeadingLevel.HEADING_2 }),
+                    new DocxTable({ rows: [makeHdr(['Site','Total','Terminées','Dernière visite']), ...bySite.map(r => makeRow([r.site, String(r.total), String(r.terminé), r.lastDate !== '—' ? new Date(r.lastDate+'T00:00:00').toLocaleDateString('fr-FR') : '—']))] }),
+                    new DocxParagraph({ text: '' }),
+                    new DocxParagraph({ text: 'Visites par technicien', heading: HeadingLevel.HEADING_2 }),
+                    new DocxTable({ rows: [makeHdr(['Technicien','Nombre de visites']), ...techRows.map(([t, cnt]) => makeRow([t, String(cnt)]))] }),
+                    new DocxParagraph({ text: '' }),
+                    new DocxParagraph({ text: 'Détail de toutes les visites', heading: HeadingLevel.HEADING_2 }),
+                    new DocxTable({ rows: [makeHdr(['#','Site','Date','Technicien','Statut','Objectif','Maintenance']), ...filteredVisits.map(v => makeRow([String(v.id), v.siteName, new Date(v.scheduledDate+'T00:00:00').toLocaleDateString('fr-FR'), v.technician, statusLabels[v.status]?.label ?? v.status, v.purpose, v.withMaintenance ? 'Oui' : 'Non']))] }),
+                  ];
+                  const doc = new DocxDocument({ sections: [{ children }] });
+                  const blob = await Packer.toBlob(doc);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = `rapport-visites-${Date.now()}.docx`; a.click();
+                  URL.revokeObjectURL(url);
+                };
+
                 return (
                   <div className="space-y-6 mt-2">
-                    {/* Boutons export */}
-                    <div className="flex justify-end gap-2">
-                      <button onClick={exportVisitsExcel}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
-                        <Download className="w-4 h-4 text-green-600" /> Excel
-                      </button>
-                      <button onClick={exportVisitsPdf}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
-                        <Download className="w-4 h-4 text-red-500" /> PDF
-                      </button>
-                    </div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                      <h3 className="font-semibold text-gray-800 mb-3">Répartition par statut</h3>
-                      <div className="flex flex-wrap gap-3">
-                        {byStatus.map(({ status, count }) => (
-                          <div key={status} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${statusLabels[status]?.cls ?? 'bg-gray-100 text-gray-700'}`}>
-                            <span className="text-sm font-medium">{statusLabels[status]?.label ?? status}</span>
-                            <span className="text-lg font-bold">{count}</span>
-                          </div>
+                    {/* Filtre technicien + exports */}
+                    <div className="flex flex-wrap items-start justify-between gap-4 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                      <div className="flex flex-wrap items-center gap-2 flex-1">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">Filtrer par technicien :</span>
+                        {allVisitTechs.map(tech => (
+                          <button key={tech} onClick={() => setVisitTechFilter(f => f.includes(tech) ? f.filter(t => t !== tech) : [...f, tech])}
+                            className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${visitTechFilter.includes(tech) ? 'bg-[#1a6fa6] text-white border-[#1a6fa6] shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-[#1a6fa6]/50 hover:text-[#1a6fa6]'}`}>
+                            {tech}
+                          </button>
                         ))}
+                        {visitTechFilter.length > 0 && (
+                          <button onClick={() => setVisitTechFilter([])} className="text-xs text-gray-400 hover:text-gray-700 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors">
+                            ✕ Effacer
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={exportVisitsExcel}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                          <Download className="w-4 h-4 text-green-600" /> Excel
+                        </button>
+                        <button onClick={exportVisitsPdf}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 shadow-sm">
+                          <Download className="w-4 h-4 text-red-500" /> PDF
+                        </button>
+                        <button onClick={exportVisitsWord}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 shadow-sm">
+                          <Download className="w-4 h-4 text-blue-600" /> Word
+                        </button>
+                      </div>
+                    </div>
+                    {visitTechFilter.length > 0 && (
+                      <p className="text-xs text-[#1a6fa6] font-medium bg-[#e8f3fc] border border-indigo-100 rounded-lg px-3 py-2">
+                        Rapport filtré — {filteredVisits.length} visite(s) pour : {visitTechFilter.join(', ')}
+                      </p>
+                    )}
+                    {/* Donut statut visites */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="font-semibold text-gray-800 mb-4">Répartition par statut</h3>
+                        {filteredVisits.length === 0 ? <p className="text-sm text-gray-400 text-center py-4">Aucune donnée</p> : (() => {
+                          const palette = ['#6366f1','#eab308','#22c55e','#f97316','#ef4444'];
+                          const r = 52; const cx = 70; const cy = 70; const stroke = 18;
+                          const total = byStatus.reduce((s,b) => s + b.count, 0) || 1;
+                          let cumul = 0;
+                          const circumference = 2 * Math.PI * r;
+                          return (
+                            <div className="flex items-center gap-4">
+                              <svg width="140" height="140" viewBox="0 0 140 140">
+                                {byStatus.map(({ count }, i) => {
+                                  const pct = count / total;
+                                  const offset = circumference * (1 - cumul);
+                                  const dashArr = `${circumference * pct} ${circumference * (1 - pct)}`;
+                                  cumul += pct;
+                                  return count > 0 ? <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={palette[i]} strokeWidth={stroke} strokeDasharray={dashArr} strokeDashoffset={offset} style={{transition:'all 0.5s'}} transform={`rotate(-90 ${cx} ${cy})`} /> : null;
+                                })}
+                                <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize="22" fontWeight="bold" fill="#1f2937">{filteredVisits.length}</text>
+                                <text x={cx} y={cy+16} textAnchor="middle" fontSize="10" fill="#9ca3af">visites</text>
+                              </svg>
+                              <div className="space-y-1.5 flex-1">
+                                {byStatus.map(({ status, count }, i) => (
+                                  <div key={status} className="flex items-center gap-2">
+                                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background: palette[i]}} />
+                                    <span className="text-xs text-gray-600 flex-1">{statusLabels[status]?.label ?? status}</span>
+                                    <span className="text-sm font-bold text-gray-700">{count}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      {/* Barres horizontales par technicien */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="font-semibold text-gray-800 mb-4">Par technicien</h3>
+                        {techRows.length === 0 ? <p className="text-sm text-gray-400 text-center py-4">Aucune donnée</p> : (
+                          <div className="space-y-3">
+                            {techRows.slice(0, 6).map(([tech, cnt]) => {
+                              const maxCnt = techRows[0]?.[1] || 1;
+                              return (
+                                <div key={tech}>
+                                  <div className="flex justify-between mb-1">
+                                    <span className="text-xs font-medium text-gray-700 truncate max-w-[120px]">{tech}</span>
+                                    <span className="text-xs font-bold text-[#155a8a]">{cnt}</span>
+                                  </div>
+                                  <div className="bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                                    <div className="h-2.5 rounded-full bg-[#e8f3fc]0 transition-all" style={{width:`${(cnt/maxCnt)*100}%`}} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -6207,27 +7363,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </tbody>
                       </table>
                     </div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                      <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Visites par technicien</h3></div>
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b border-gray-100">
-                          <tr>
-                            <th className="px-4 py-3 text-left font-medium text-gray-600">Technicien</th>
-                            <th className="px-4 py-3 text-center font-medium text-gray-600">Nombre de visites</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {techRows.map(([tech, count]) => (
-                            <tr key={tech} className="border-b border-gray-50 hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium text-gray-800">{tech}</td>
-                              <td className="px-4 py-3 text-center text-gray-700">{count}</td>
-                            </tr>
-                          ))}
-                          {techRows.length === 0 && <tr><td colSpan={2} className="px-4 py-8 text-center text-gray-400">Aucune donnée</td></tr>}
-                        </tbody>
-                      </table>
-                    </div>
-                    {visits.filter(v => v.validationComment).length > 0 && (
+                    {filteredVisits.filter(v => v.validationComment).length > 0 && (
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Commentaires de validation</h3></div>
                         <div className="divide-y divide-gray-50">
@@ -6252,7 +7388,64 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           )}
 
           {/* Table */}
-          {!showVisitReports && <div className="flex-1 overflow-auto px-6 pb-6">
+          {/* ── Calendrier des visites ── */}
+          {showCalendar && !showVisitReports && (
+            <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                {/* Nav mois */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                  <button onClick={() => { const d = new Date(calendarYear, calendarMonth - 1); setCalendarYear(d.getFullYear()); setCalendarMonth(d.getMonth()); }} className="p-2 rounded-lg hover:bg-gray-100"><ChevronLeft className="w-5 h-5 text-gray-500" /></button>
+                  <h3 className="text-base font-bold text-gray-900 capitalize">{new Date(calendarYear, calendarMonth).toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</h3>
+                  <button onClick={() => { const d = new Date(calendarYear, calendarMonth + 1); setCalendarYear(d.getFullYear()); setCalendarMonth(d.getMonth()); }} className="p-2 rounded-lg hover:bg-gray-100"><ChevronRight className="w-5 h-5 text-gray-500" /></button>
+                </div>
+                {/* Grille */}
+                <div className="p-4">
+                  <div className="grid grid-cols-7 mb-2">
+                    {['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(d => (
+                      <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>
+                    ))}
+                  </div>
+                  {(() => {
+                    const statusCls: Record<string,string> = { planifié:'bg-[#e8f3fc]0', en_cours:'bg-yellow-500', terminé:'bg-green-500', reporté:'bg-orange-400', annulé:'bg-red-400' };
+                    const firstDay = new Date(calendarYear, calendarMonth, 1);
+                    const startDow = (firstDay.getDay() + 6) % 7; // Lundi = 0
+                    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+                    const todayStr = new Date().toISOString().slice(0,10);
+                    const cells: JSX.Element[] = [];
+                    for (let i = 0; i < startDow; i++) cells.push(<div key={`e${i}`} />);
+                    for (let day = 1; day <= daysInMonth; day++) {
+                      const dateStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                      const dayVisits = visits.filter(v => v.scheduledDate === dateStr);
+                      const isToday = dateStr === todayStr;
+                      cells.push(
+                        <div key={day} className={`min-h-[72px] p-1 rounded-lg border transition-colors ${isToday ? 'border-indigo-400 bg-[#e8f3fc]' : 'border-transparent hover:bg-gray-50'}`}>
+                          <div className={`text-xs font-bold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-[#1a6fa6] text-white' : 'text-gray-600'}`}>{day}</div>
+                          <div className="space-y-0.5">
+                            {dayVisits.slice(0,3).map(v => (
+                              <div key={v.id} onClick={() => setVisitActionDialog(null)} title={`${v.siteName} — ${v.technician}`}
+                                className={`text-xs px-1.5 py-0.5 rounded-md text-white truncate cursor-default ${statusCls[v.status] ?? 'bg-gray-400'}`}>
+                                {v.siteName}
+                              </div>
+                            ))}
+                            {dayVisits.length > 3 && <div className="text-xs text-gray-400 text-center">+{dayVisits.length-3}</div>}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return <div className="grid grid-cols-7 gap-1">{cells}</div>;
+                  })()}
+                </div>
+                {/* Légende */}
+                <div className="px-4 pb-4 flex flex-wrap gap-3">
+                  {[['planifié','bg-[#e8f3fc]0','Planifié'],['en_cours','bg-yellow-500','En cours'],['terminé','bg-green-500','Terminé'],['reporté','bg-orange-400','Reporté'],['annulé','bg-red-400','Annulé']].map(([,cls,label]) => (
+                    <div key={label} className="flex items-center gap-1.5"><span className={`w-3 h-3 rounded-full ${cls}`} /><span className="text-xs text-gray-500">{label}</span></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showVisitReports && !showCalendar && <div className="flex-1 overflow-auto px-6 pb-6">
             {visitsLoading ? (
               <div className="flex items-center justify-center h-40 text-gray-400">Chargement…</div>
             ) : visits.length === 0 ? (
@@ -6333,7 +7526,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   setEditingVisitId(v.id);
                                   setVisitForm({ siteId: v.siteId, scheduledDate: v.scheduledDate, scheduledTime: v.scheduledTime, technician: v.technician, purpose: v.purpose, status: v.status, notes: v.notes, withMaintenance: v.withMaintenance, equipmentIds: v.equipmentIds, maintenanceDesc: v.maintenanceDesc });
                                   setShowVisitForm(true);
-                                }} className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50" title="Modifier">
+                                }} className="p-1.5 rounded-lg text-[#1a6fa6] hover:bg-[#e8f3fc]" title="Modifier">
                                   <Edit className="w-4 h-4" />
                                 </button>
                               )}
@@ -6384,7 +7577,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nouvelle date prévue</label>
                     <input type="date" value={visitActionDialog.newDate}
                       onChange={e => setVisitActionDialog(d => d ? { ...d, newDate: e.target.value } : d)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
                 )}
 
@@ -6396,7 +7589,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <textarea rows={3} value={visitActionDialog.comment}
                     onChange={e => setVisitActionDialog(d => d ? { ...d, comment: e.target.value } : d)}
                     placeholder={visitActionDialog.action === 'annulé' ? 'Motif de l\'annulation…' : visitActionDialog.action === 'reporté' ? 'Raison du report…' : 'Notes sur le déroulement de la visite…'}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" />
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6] resize-none" />
                 </div>
 
                 {/* Maintenance handling (when visit has maintenance) */}
@@ -6422,7 +7615,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <input type="radio" name="maintAction" value="programmer"
                           checked={visitActionDialog.maintenanceAction === 'programmer'}
                           onChange={() => setVisitActionDialog(d => d ? { ...d, maintenanceAction: 'programmer' } : d)}
-                          className="mt-0.5 text-indigo-600" />
+                          className="mt-0.5 text-[#1a6fa6]" />
                         <div>
                           <p className="text-sm font-medium text-gray-800">À programmer</p>
                           <p className="text-xs text-gray-500">Les tickets passent en « Ouvert » pour planification</p>
@@ -6459,28 +7652,28 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
             </div>
           )}
+          </>}
 
-          {/* Visit form modal */}
+          {/* Visit form inline */}
           {showVisitForm && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setShowVisitForm(false)} />
-              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+            <div className="flex-1 overflow-auto px-6 pb-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 max-w-lg mx-auto">
                 {/* Form header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
+                  <button onClick={() => setShowVisitForm(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 mr-1" title="Retour">
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
                   <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5 text-blue-600" />
+                    <Clock className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-gray-900">{editingVisitId ? 'Modifier la visite' : 'Programmer une visite'}</h3>
                     <p className="text-xs text-gray-400">Renseignez les informations de la visite</p>
                   </div>
-                  <button onClick={() => setShowVisitForm(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                    <XCircle className="w-5 h-5 text-gray-400" />
-                  </button>
                 </div>
 
                 {/* Form body */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="p-6 space-y-4">
                   {/* Site */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Site <span className="text-red-500">*</span></label>
@@ -6489,14 +7682,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {visitForm.siteId && (() => {
                       const s = sites.find(s => s.id === visitForm.siteId);
                       return s ? (
-                        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-[#e8f3fc] border border-[#1a6fa6]/30 rounded-lg">
                           <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-indigo-800 truncate">{s.name}</p>
+                            <p className="text-sm font-semibold text-[#0d4a73] truncate">{s.name}</p>
                             <p className="text-xs text-indigo-500">{s.city}{s.country ? `, ${s.country}` : ''}</p>
                           </div>
                           <button type="button" onClick={() => { setVisitForm(f => ({ ...f, siteId: null, equipmentIds: [] })); setSiteSearchQuery(''); }}
-                            className="text-indigo-400 hover:text-indigo-700 shrink-0" title="Changer de site">
+                            className="text-indigo-400 hover:text-[#155a8a] shrink-0" title="Changer de site">
                             <XCircle className="w-4 h-4" />
                           </button>
                         </div>
@@ -6506,7 +7699,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     {/* Search input (shown when no site selected) */}
                     {!visitForm.siteId && (
                       <div className="relative">
-                        <div className="flex items-center gap-2 border border-gray-300 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-400 focus-within:border-indigo-400">
+                        <div className="flex items-center gap-2 border border-gray-300 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-[#1a6fa6] focus-within:border-[#1a6fa6]">
                           <Search className="w-4 h-4 text-gray-400 shrink-0" />
                           <input
                             type="text"
@@ -6545,7 +7738,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                     setShowVisitSiteDropdown(false);
                                     setEqSearchQuery('');
                                   }}
-                                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-indigo-50 text-left border-b border-gray-50 last:border-0">
+                                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#e8f3fc] text-left border-b border-gray-50 last:border-0">
                                   <Globe className="w-4 h-4 text-indigo-400 shrink-0" />
                                   <div className="min-w-0">
                                     <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
@@ -6565,12 +7758,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Date <span className="text-red-500">*</span></label>
                       <input type="date" value={visitForm.scheduledDate} onChange={e => setVisitForm(f => ({ ...f, scheduledDate: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Heure</label>
                       <input type="time" value={visitForm.scheduledTime} onChange={e => setVisitForm(f => ({ ...f, scheduledTime: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
                   </div>
 
@@ -6579,7 +7772,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Technicien <span className="text-red-500">*</span></label>
                     <input type="text" value={visitForm.technician} onChange={e => setVisitForm(f => ({ ...f, technician: e.target.value }))}
                       placeholder="Nom du technicien"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
 
                   {/* Objet */}
@@ -6587,14 +7780,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Objet de la visite <span className="text-red-500">*</span></label>
                     <input type="text" value={visitForm.purpose} onChange={e => setVisitForm(f => ({ ...f, purpose: e.target.value }))}
                       placeholder="Ex : Audit réseau, vérification équipements…"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]" />
                   </div>
 
                   {/* Statut */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
                     <select value={visitForm.status} onChange={e => setVisitForm(f => ({ ...f, status: e.target.value as VisitStatus }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]">
                       <option value="planifié">Planifié</option>
                       <option value="en_cours">En cours</option>
                       <option value="terminé">Terminé</option>
@@ -6607,7 +7800,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                     <textarea value={visitForm.notes} onChange={e => setVisitForm(f => ({ ...f, notes: e.target.value }))}
                       rows={2} placeholder="Informations complémentaires…"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" />
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6] resize-none" />
                   </div>
 
                   {/* Maintenance */}
@@ -6736,7 +7929,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     Annuler
                   </button>
                   <button onClick={saveVisit} disabled={visitSaving}
-                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40">
+                    className="flex-1 px-4 py-2 bg-[#1a6fa6] text-white rounded-lg text-sm font-medium hover:bg-[#155a8a] disabled:opacity-40">
                     {visitSaving ? 'Enregistrement…' : editingVisitId ? 'Mettre à jour' : 'Programmer'}
                   </button>
                 </div>
@@ -6756,17 +7949,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {/* ── Sidebar ───────────────────────────────────────────────────── */}
             <div className="w-60 shrink-0 border-r border-gray-100 bg-gray-50 flex flex-col">
               <div className="flex items-center gap-2 px-4 py-4 border-b border-gray-200">
-                <MessageCircle className="w-5 h-5 text-indigo-600" />
+                <MessageCircle className="w-5 h-5 text-[#1a6fa6]" />
                 <h3 className="font-bold text-gray-900 flex-1">Messagerie</h3>
               </div>
 
               {/* Global */}
               <button
                 onClick={() => openChatConversation('global')}
-                className={`flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === 'global' ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+                className={`flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === 'global' ? 'bg-[#e8f3fc] border-r-2 border-[#1a6fa6]' : ''}`}
               >
-                <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                  <Globe className="w-4 h-4 text-indigo-600" />
+                <div className="w-9 h-9 rounded-full bg-[#cfe2ff] flex items-center justify-center shrink-0">
+                  <Globe className="w-4 h-4 text-[#1a6fa6]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900">Chat global</p>
@@ -6785,7 +7978,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 {isAdmin && (
                   <button
                     onClick={() => setShowCreateGroup(true)}
-                    className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold"
+                    className="text-[#1a6fa6] hover:text-[#0d4a73] text-xs font-semibold"
                     title="Créer un groupe"
                   >+ Nouveau</button>
                 )}
@@ -6798,7 +7991,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <button
                     key={g.id}
                     onClick={() => openGroupConversation(g.id)}
-                    className={`flex items-center gap-3 px-4 py-2.5 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup === g.id ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-2.5 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup === g.id ? 'bg-[#e8f3fc] border-r-2 border-[#1a6fa6]' : ''}`}
                   >
                     <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-purple-600 font-bold text-sm">
                       {g.name.charAt(0).toUpperCase()}
@@ -6825,7 +8018,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <button
                     key={u.id}
                     onClick={() => openChatConversation(u.id)}
-                    className={`flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === u.id ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-100 transition-colors ${chatActiveGroup == null && chatConversation === u.id ? 'bg-[#e8f3fc] border-r-2 border-[#1a6fa6]' : ''}`}
                   >
                     <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center shrink-0 text-white text-sm font-bold">
                       {u.name.charAt(0).toUpperCase()}
@@ -6853,7 +8046,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       {(chatGroups.find(g => g.id === chatActiveGroup)?.name ?? 'G').charAt(0).toUpperCase()}
                     </div>
                   : chatConversation === 'global'
-                    ? <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center"><Globe className="w-5 h-5 text-indigo-600" /></div>
+                    ? <div className="w-9 h-9 rounded-full bg-[#cfe2ff] flex items-center justify-center"><Globe className="w-5 h-5 text-[#1a6fa6]" /></div>
                     : <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold">
                         {(chatUsers.find(u => u.id === chatConversation)?.name ?? '?').charAt(0).toUpperCase()}
                       </div>
@@ -6904,7 +8097,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         {!isOwn && (
                           <span className="text-xs text-gray-500 mb-0.5 ml-1">{msg.senderName}</span>
                         )}
-                        <div className={`px-3 py-2 rounded-2xl text-sm break-words ${isOwn ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
+                        <div className={`px-3 py-2 rounded-2xl text-sm break-words ${isOwn ? 'bg-[#1a6fa6] text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
                           {msg.content}
                         </div>
                         <span className="text-xs text-gray-400 mt-0.5 mx-1">
@@ -6931,13 +8124,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           ? 'Message au canal global…'
                           : `Message privé à ${chatUsers.find(u => u.id === chatConversation)?.name ?? ''}…`
                     }
-                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white transition-colors"
+                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#1a6fa6] focus:bg-white transition-colors"
                     autoFocus
                   />
                   <button
                     type="submit"
                     disabled={!chatInput.trim() || chatSending}
-                    className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 disabled:opacity-40 transition-colors shrink-0"
+                    className="w-10 h-10 rounded-full bg-[#1a6fa6] text-white flex items-center justify-center hover:bg-[#155a8a] disabled:opacity-40 transition-colors shrink-0"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -6953,7 +8146,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       {toast && (
         <div
           className={`fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium text-white transition-all ${
-            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-indigo-500'
+            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-[#e8f3fc]0'
           }`}
         >
           {toast.type === 'error' && <AlertTriangle className="w-4 h-4 shrink-0" />}
@@ -7002,7 +8195,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   value={newGroupName}
                   onChange={e => setNewGroupName(e.target.value)}
                   placeholder="Ex: Équipe technique…"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6]"
                   autoFocus
                 />
               </div>
@@ -7017,7 +8210,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         onChange={e => setNewGroupMembers(prev =>
                           e.target.checked ? [...prev, u.id] : prev.filter(id => id !== u.id)
                         )}
-                        className="rounded text-indigo-600"
+                        className="rounded text-[#1a6fa6]"
                       />
                       <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                         {u.name.charAt(0).toUpperCase()}
@@ -7042,7 +8235,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <button
                   type="submit"
                   disabled={!newGroupName.trim() || newGroupMembers.length === 0 || groupCreating}
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40"
+                  className="flex-1 px-4 py-2 bg-[#1a6fa6] text-white rounded-lg text-sm font-medium hover:bg-[#155a8a] disabled:opacity-40"
                 >{groupCreating ? 'Création…' : 'Créer le groupe'}</button>
               </div>
             </form>
@@ -7050,6 +8243,329 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
     </div>
+
+      {/* ══ Modal QR Code ══════════════════════════════════════════════════════ */}
+      {qrEquipment && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setQrEquipment(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 max-w-xs w-full mx-4">
+            <div className="flex items-center gap-3 w-full">
+              <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center">
+                <QrCode className="w-5 h-5 text-teal-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-gray-900 truncate">{qrEquipment.name}</h3>
+                <p className="text-xs text-gray-400">{qrEquipment.brand} {qrEquipment.model}</p>
+              </div>
+              <button onClick={() => setQrEquipment(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-3 bg-white rounded-xl border-2 border-gray-100" id="qr-print-area">
+              <QRCodeSVG
+                value={JSON.stringify({ id: qrEquipment.id, name: qrEquipment.name, sn: qrEquipment.serialNumber, type: qrEquipment.type })}
+                size={180}
+                level="M"
+              />
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-500 font-mono">S/N : {qrEquipment.serialNumber || '—'}</p>
+              <p className="text-xs text-gray-400">{qrEquipment.location} — {qrEquipment.department}</p>
+            </div>
+            <button onClick={() => {
+              const area = document.getElementById('qr-print-area');
+              if (!area) return;
+              const w = window.open('', '_blank');
+              if (!w) return;
+              w.document.write(`<html><head><title>QR - ${qrEquipment.name}</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">`);
+              w.document.write(area.innerHTML);
+              w.document.write(`<p style="margin-top:12px;font-size:13px;color:#555">${qrEquipment.name} · ${qrEquipment.serialNumber || ''}</p>`);
+              w.document.write('</body></html>');
+              w.document.close();
+              w.print();
+            }}
+              className="w-full py-2.5 rounded-xl bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 flex items-center justify-center gap-2">
+              <Download className="w-4 h-4" /> Imprimer / Télécharger
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modal Import équipements ══════════════════════════════════════════ */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowImportModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
+              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+                <Upload className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-gray-900">Importer des équipements</h3>
+                <p className="text-xs text-gray-400">Fichier Excel (.xlsx) ou CSV — colonnes : nom, type, marque, modèle, n° série, IP, localisation, service, statut, date achat</p>
+              </div>
+              <button onClick={() => setShowImportModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><XCircle className="w-5 h-5" /></button>
+            </div>
+            {/* Drop zone */}
+            <div className="px-6 pt-5 pb-3">
+              <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-green-400 hover:bg-green-50 transition-colors">
+                <Upload className="w-7 h-7 text-gray-400 mb-2" />
+                <span className="text-sm text-gray-500 font-medium">Cliquer pour choisir un fichier</span>
+                <span className="text-xs text-gray-400 mt-1">.xlsx, .xls, .csv</span>
+                <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setImportError('');
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    try {
+                      const wb = XLSX.read(ev.target?.result, { type: 'array' });
+                      const ws = wb.Sheets[wb.SheetNames[0]];
+                      const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                      const colMap: Record<string, keyof Equipment> = {
+                        'nom': 'name', 'name': 'name',
+                        'type': 'type',
+                        'marque': 'brand', 'brand': 'brand',
+                        'modèle': 'model', 'modele': 'model', 'model': 'model',
+                        'n° série': 'serialNumber', 'serial': 'serialNumber', 'sn': 'serialNumber', 'serialnumber': 'serialNumber',
+                        'ip': 'ipAddress', 'ipaddress': 'ipAddress',
+                        'localisation': 'location', 'location': 'location',
+                        'service': 'department', 'department': 'department',
+                        'statut': 'status', 'status': 'status',
+                        'date achat': 'purchaseDate', 'purchasedate': 'purchaseDate',
+                      };
+                      const rows: Partial<Equipment>[] = raw.map(r => {
+                        const eq: Partial<Equipment> = { status: 'actif', quantity: 1 };
+                        Object.entries(r).forEach(([k, v]) => {
+                          const mapped = colMap[k.toLowerCase().trim()];
+                          if (mapped) (eq as any)[mapped] = String(v);
+                        });
+                        return eq;
+                      }).filter(r => r.name);
+                      setImportRows(rows);
+                      if (rows.length === 0) setImportError('Aucune ligne valide trouvée. Vérifiez que la colonne "nom" existe.');
+                    } catch { setImportError('Erreur de lecture du fichier.'); }
+                  };
+                  reader.readAsArrayBuffer(file);
+                  e.target.value = '';
+                }} />
+              </label>
+              {importError && <p className="text-xs text-red-600 mt-2 bg-red-50 px-3 py-2 rounded-lg">{importError}</p>}
+            </div>
+            {/* Preview */}
+            {importRows.length > 0 && (
+              <div className="flex-1 overflow-auto px-6 pb-4">
+                <p className="text-xs font-semibold text-gray-500 mb-2">{importRows.length} équipement(s) détecté(s) — aperçu :</p>
+                <div className="overflow-x-auto rounded-xl border border-gray-100">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50"><tr>
+                      {['Nom','Type','Marque','Modèle','N° Série','IP','Localisation','Service','Statut'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {importRows.slice(0,10).map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{r.name}</td>
+                          <td className="px-3 py-2 text-gray-600">{r.type || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600">{r.brand || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600">{r.model || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600 font-mono">{r.serialNumber || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600 font-mono">{r.ipAddress || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600">{r.location || '—'}</td>
+                          <td className="px-3 py-2 text-gray-600">{r.department || '—'}</td>
+                          <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">{r.status || 'actif'}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importRows.length > 10 && <p className="text-center text-xs text-gray-400 py-2">… et {importRows.length - 10} autre(s)</p>}
+                </div>
+              </div>
+            )}
+            {/* Footer */}
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+              <button onClick={() => setShowImportModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">Annuler</button>
+              <button
+                disabled={importRows.length === 0 || importLoading}
+                onClick={async () => {
+                  setImportLoading(true);
+                  let ok = 0; let fail = 0;
+                  for (const row of importRows) {
+                    try {
+                      const res = await fetch('/api/equipment', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ name: row.name || '', type: row.type || 'autre', brand: row.brand || '', model: row.model || '', serialNumber: row.serialNumber || '', ipAddress: row.ipAddress || '', location: row.location || '', department: row.department || '', status: row.status || 'actif', purchaseDate: row.purchaseDate || '', warranty: '', lastMaintenance: '', visited: false, technicianName: '', visitDate: '', interventionDetails: '', quantity: 1 }) });
+                      if (res.ok) ok++; else fail++;
+                    } catch { fail++; }
+                  }
+                  setImportLoading(false);
+                  setShowImportModal(false);
+                  handleRefresh();
+                  alert(`Import terminé — ${ok} ajouté(s)${fail > 0 ? `, ${fail} échec(s)` : ''}.`);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {importLoading ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Import en cours…</> : <><Upload className="w-4 h-4" />Importer {importRows.length > 0 ? `${importRows.length} ligne(s)` : ''}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Recherche globale ══════════════════════════════════════════════════ */}
+      {showGlobalSearch && (
+        <div className="fixed inset-0 z-[90] flex flex-col items-center pt-20 px-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowGlobalSearch(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[70vh]">
+            {/* Search input */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+              <Search className="w-5 h-5 text-gray-400 shrink-0" />
+              <input ref={globalSearchRef} type="text" value={globalSearchQuery} onChange={e => setGlobalSearchQuery(e.target.value)}
+                placeholder="Rechercher un équipement, ticket, visite, site…"
+                className="flex-1 text-base outline-none text-gray-900 placeholder-gray-400"
+                onKeyDown={e => { if (e.key === 'Escape') setShowGlobalSearch(false); }}
+              />
+              {globalSearchQuery && <button onClick={() => setGlobalSearchQuery('')} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>}
+              <kbd className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded font-mono">Esc</kbd>
+            </div>
+            {/* Results */}
+            <div className="flex-1 overflow-y-auto p-3">
+              {globalSearchQuery.trim().length < 2 ? (
+                <div className="py-10 text-center">
+                  <Search className="w-10 h-10 mx-auto text-gray-200 mb-3" />
+                  <p className="text-sm text-gray-400">Tapez au moins 2 caractères pour rechercher</p>
+                  <div className="flex flex-wrap justify-center gap-2 mt-4">
+                    {['Équipements','Maintenance','Visites','Sites'].map(cat => (
+                      <span key={cat} className="text-xs px-3 py-1.5 bg-gray-100 rounded-full text-gray-500">{cat}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : (() => {
+                const q = globalSearchQuery.toLowerCase();
+                const eqResults = equipments.filter(e => [e.name, e.brand, e.model, e.serialNumber, e.location, e.department, e.ipAddress].some(f => f?.toLowerCase().includes(q))).slice(0,8);
+                const maintResults = maintenanceRecords.filter(m => [m.failureDesc, m.equipmentName, m.technician, m.diagnosis].some(f => f?.toLowerCase().includes(q))).slice(0,5);
+                const visitResults = visits.filter(v => [v.siteName, v.technician, v.purpose, v.notes].some(f => f?.toLowerCase().includes(q))).slice(0,5);
+                const siteResults = sites.filter(s => [s.name, s.city, s.country, s.address].some(f => f?.toLowerCase().includes(q))).slice(0,4);
+                const total = eqResults.length + maintResults.length + visitResults.length + siteResults.length;
+                if (total === 0) return <div className="py-10 text-center text-sm text-gray-400">Aucun résultat pour « {globalSearchQuery} »</div>;
+                return (
+                  <div className="space-y-3">
+                    {eqResults.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 px-2">Équipements ({eqResults.length})</p>
+                        <div className="space-y-1">
+                          {eqResults.map(e => (
+                            <button key={e.id} onClick={() => { setShowGlobalSearch(false); closeAllModules(); openDetailsModal(e); }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors">
+                              <div className="w-8 h-8 rounded-lg bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                                <Monitor className="w-4 h-4 text-indigo-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{e.name}</p>
+                                <p className="text-xs text-gray-400 truncate">{[e.brand, e.model, e.location].filter(Boolean).join(' · ')}</p>
+                              </div>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${{ actif:'bg-green-100 text-green-700', inactif:'bg-gray-100 text-gray-500', maintenance:'bg-amber-100 text-amber-700', defaillant:'bg-red-100 text-red-700', réformé:'bg-gray-200 text-gray-500' }[e.status] ?? 'bg-gray-100 text-gray-600'}`}>{e.status}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {maintResults.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 px-2">Maintenance ({maintResults.length})</p>
+                        <div className="space-y-1">
+                          {maintResults.map(m => (
+                            <button key={m.id} onClick={() => { setShowGlobalSearch(false); openMaintenanceModule(); setSelectedMaintenance(m); }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors">
+                              <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+                                <Wrench className="w-4 h-4 text-orange-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{m.failureDesc || '—'}</p>
+                                <p className="text-xs text-gray-400 truncate">{m.equipmentName} · {m.technician || 'Non assigné'}</p>
+                              </div>
+                              <span className="text-xs text-gray-400 font-mono shrink-0">#{m.id}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {visitResults.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 px-2">Visites ({visitResults.length})</p>
+                        <div className="space-y-1">
+                          {visitResults.map(v => (
+                            <button key={v.id} onClick={() => { setShowGlobalSearch(false); closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors">
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                                <Clock className="w-4 h-4 text-blue-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{v.siteName}</p>
+                                <p className="text-xs text-gray-400 truncate">{v.technician} · {new Date(v.scheduledDate+'T00:00:00').toLocaleDateString('fr-FR')}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {siteResults.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 px-2">Sites ({siteResults.length})</p>
+                        <div className="space-y-1">
+                          {siteResults.map(s => (
+                            <button key={s.id} onClick={() => { setShowGlobalSearch(false); setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors">
+                              <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center shrink-0">
+                                <Globe className="w-4 h-4 text-teal-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{s.name}</p>
+                                <p className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''} · {s.equipmentCount} équip.</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Session timeout warning ══════════════════════════════════════════ */}
+      {showSessionWarning && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-yellow-100 flex items-center justify-center mx-auto mb-4">
+              <Clock className="w-7 h-7 text-yellow-600" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Session inactive</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Vous serez déconnecté automatiquement dans{' '}
+              <span className="font-bold text-red-600 text-base tabular-nums">
+                {Math.floor(sessionCountdown / 60)}:{String(sessionCountdown % 60).padStart(2, '0')}
+              </span>
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => { lastActivityRef.current = Date.now(); sessionWarningRef.current = false; setShowSessionWarning(false); setSessionCountdown(300); }}
+                className="flex-1 py-2.5 rounded-xl bg-[#1a6fa6] text-white text-sm font-semibold hover:bg-[#155a8a] transition-colors">
+                Rester connecté
+              </button>
+              <button onClick={onLogout}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                Se déconnecter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Aide raccourcis clavier ════════════════════════════════════════════ */}
     </>
   );
 };
