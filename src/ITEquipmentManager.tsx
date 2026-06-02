@@ -2995,29 +2995,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-blue-400">{purchases.filter(p => p.status === 'en_attente').length}</span>
                 )}
               </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowRMAModule(true); fetchRMA(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> RMA
-              </button>
               <button type="button" onClick={() => { closeAllModules(); setShowAnomalies(true); fetchAnomalies(); }}
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Anomalies
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowInventory(true); setInventoryScanned(new Set()); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <CheckCircle className="w-3.5 h-3.5 shrink-0" /> Inventaire
-              </button>
-              <button type="button" onClick={() => setShowTVDashboard(true)}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <LayoutList className="w-3.5 h-3.5 shrink-0" /> TV Dashboard
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowSettings(true); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <Info className="w-3.5 h-3.5 shrink-0" /> Paramètres
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowMonthlyReport(true); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <FileText className="w-3.5 h-3.5 shrink-0" /> Rapport mensuel
               </button>
               <button type="button" onClick={downloadBackup}
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors"
@@ -5267,8 +5247,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         );
       })()}
 
-      {/* ══ Rapport mensuel ══════════════════════════════════════════════ */}
-      {showMonthlyReport && (
+      {/* ══ Rapport mensuel (retiré) ══════════════════════════════════════ */}
+      {false && showMonthlyReport && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowMonthlyReport(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto">
@@ -9778,8 +9758,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Module RMA ════════════════════════════════════════════════════════ */}
-      {showRMAModule && (
+      {/* ══ Module RMA (retiré) ══════════════════════════════════════════════ */}
+      {false && showRMAModule && (
         <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
           <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -9881,8 +9861,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Module Inventaire physique ════════════════════════════════════════ */}
-      {showInventory && (
+      {/* ══ Module Inventaire physique (retiré) ══════════════════════════════ */}
+      {false && showInventory && (
         <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
           <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -9936,8 +9916,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Dashboard TV (supervision plein écran) ════════════════════════════ */}
-      {showTVDashboard && (
+      {/* ══ Dashboard TV (retiré) ════════════════════════════════════════════ */}
+      {false && showTVDashboard && (
         <div className="fixed inset-0 z-[100] bg-[#0d1117] text-white flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-8 py-4 border-b border-white/10">
             <div className="flex items-center gap-3">
@@ -9977,8 +9957,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      {/* ══ Paramètres (Slack webhook + masquage) ════════════════════════════ */}
-      {showSettings && (
+      {/* ══ Paramètres (retiré) ═════════════════════════════════════════════ */}
+      {false && showSettings && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowSettings(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
