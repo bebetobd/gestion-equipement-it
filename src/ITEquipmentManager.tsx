@@ -2970,35 +2970,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
                 <Globe className="w-3.5 h-3.5 shrink-0" /> Sites
               </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowLicenseModule(true); fetchLicenses(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <File className="w-3.5 h-3.5 shrink-0" /> Licences
-                {licenses.filter(l => l.expiry_date && new Date(l.expiry_date) < new Date()).length > 0 && (
-                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-red-500">{licenses.filter(l => l.expiry_date && new Date(l.expiry_date) < new Date()).length}</span>
-                )}
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowTrends(true); fetchTrends(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <Activity className="w-3.5 h-3.5 shrink-0" /> Tendances
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowContractsModule(true); fetchContracts(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <ClipboardList className="w-3.5 h-3.5 shrink-0" /> Contrats
-                {contracts.filter(c => c.end_date && new Date(c.end_date) < new Date(Date.now() + 30*86400000)).length > 0 && (
-                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-orange-400">{contracts.filter(c => c.end_date && new Date(c.end_date) < new Date(Date.now() + 30*86400000)).length}</span>
-                )}
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowPurchasesModule(true); fetchPurchases(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <Plus className="w-3.5 h-3.5 shrink-0" /> Achats
-                {purchases.filter(p => p.status === 'en_attente').length > 0 && (
-                  <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-blue-400">{purchases.filter(p => p.status === 'en_attente').length}</span>
-                )}
-              </button>
-              <button type="button" onClick={() => { closeAllModules(); setShowAnomalies(true); fetchAnomalies(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Anomalies
-              </button>
               <button type="button" onClick={downloadBackup}
                 className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors"
                 title="Télécharger une sauvegarde complète JSON">
