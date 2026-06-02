@@ -2,7 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { sendAlertCriticalTicket, sendAlertWarrantyExpiry, sendMonthlyReport } from './mailer.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { sendMail, sendMonthlyReport } from './mailer.js';
+const execAsync = promisify(exec);
 import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen } from './db.js';
 import {
   authenticate,
@@ -992,14 +995,14 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
       `INSERT INTO equipments
          (name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details, site_id, quantity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
         old.name, old.type, old.brand || '', old.model || '', old.serialNumber || '',
         old.ipAddress || '', toLocation, toDepartment, old.status,
         old.purchaseDate || '', old.warranty || '', old.lastMaintenance || '',
         old.visited, old.technicianName || '', old.visitDate || '',
-        old.interventionDetails || '', newSiteId, qty
+        old.interventionDetails || '', newSiteId, qty, old.minQuantity ?? 0
       ]
     );
   } else {
@@ -1571,7 +1574,7 @@ app.get('/api/visits', authenticate, asyncHandler(async (req, res) => {
   res.json(visits);
 }));
 
-app.post('/api/visits', authenticate, requirePermission('écriture'), asyncHandler(async (req, res) => {
+app.post('/api/visits', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
   const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc } = req.body;
   if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
     return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
@@ -1581,7 +1584,7 @@ app.post('/api/visits', authenticate, requirePermission('écriture'), asyncHandl
   res.status(201).json(visit);
 }));
 
-app.patch('/api/visits/:id', authenticate, requirePermission('écriture'), asyncHandler(async (req, res) => {
+app.patch('/api/visits/:id', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate } = req.body;
   if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
@@ -1707,12 +1710,10 @@ app.delete('/api/licenses/:id', authenticate, requirePermission('modification'),
 app.post('/api/email/test', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   const { to } = req.body;
   if (!to) return res.status(400).json({ message: 'Destinataire requis' });
-  const ok = await sendMail?.({ to, subject: '✅ Test Gestion IT', html: '<p>Connexion SMTP opérationnelle.</p>' }).catch(() => false);
-  if (ok === undefined) return res.status(503).json({ message: 'SMTP non configuré (variables SMTP_HOST, SMTP_USER, SMTP_PASS manquantes)' });
+  if (!process.env.SMTP_HOST) return res.status(503).json({ message: 'SMTP non configuré (SMTP_HOST manquant)' });
+  const ok = await sendMail({ to, subject: '✅ Test Gestion IT', html: '<p>Connexion SMTP opérationnelle.</p>' });
   res.json({ sent: ok });
 }));
-
-import { sendMail } from './mailer.js';
 
 app.post('/api/email/monthly-report', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   const { to } = req.body;
@@ -1736,9 +1737,6 @@ app.post('/api/email/monthly-report', authenticate, requireAdmin, asyncHandler(a
 }));
 
 // ─── Ping réseau ──────────────────────────────────────────────────────────────
-import { exec } from 'child_process';
-import { promisify } from 'util';
-const execAsync = promisify(exec);
 
 app.get('/api/ping/:ip', authenticate, asyncHandler(async (req, res) => {
   const ip = req.params.ip;

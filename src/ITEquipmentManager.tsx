@@ -6,7 +6,7 @@ import {
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
-  Moon, Sun
+  Moon, Sun, Eye, EyeOff
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -729,9 +729,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // ── Dashboard TV ───────────────────────────────────────────────────────────
   const [showTVDashboard, setShowTVDashboard] = useState(false);
-
-  // ── Mode kiosque ───────────────────────────────────────────────────────────
-  const [kioskMode, setKioskMode] = useState(false);
 
   // ── Amortissement ──────────────────────────────────────────────────────────
   const getDepreciation = (equipment: Equipment) => {
@@ -2997,17 +2994,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             title="Vérifier connectivité réseau de tous les équipements">
             <Wifi className="w-4 h-4" />
           </button>
-          {/* Masquage données sensibles */}
+          {/* Masquage données sensibles (N° série, IP, clés) */}
           <button onClick={() => { const v = !maskSensitive; setMaskSensitive(v); localStorage.setItem('it-mask-sensitive', String(v)); }}
             className={`w-9 h-9 flex items-center justify-center rounded transition-colors ${maskSensitive ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/12'}`}
-            title={maskSensitive ? 'Afficher données sensibles' : 'Masquer données sensibles'}>
-            <Ban className="w-4 h-4" />
-          </button>
-          {/* Kiosque */}
-          <button onClick={() => setKioskMode(v => !v)}
-            className={`w-9 h-9 flex items-center justify-center rounded transition-colors ${kioskMode ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/12'}`}
-            title="Mode kiosque tablette">
-            <LayoutGrid className="w-4 h-4" />
+            title={maskSensitive ? 'Afficher données sensibles (N° série, IP)' : 'Masquer données sensibles (N° série, IP)'}>
+            {maskSensitive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
           {/* Scan QR */}
           <button onClick={startQrScan}
