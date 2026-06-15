@@ -28,7 +28,7 @@ pool.on('error', (err) => {
 
 let initialized = false;
 
-async function initDB() {
+export async function initDB() {
   if (initialized) return;
 
   // Don't let initDB failures break the app (tables already exist from prior runs)
@@ -94,18 +94,19 @@ async function _initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMP DEFAULT NULL`);
 
-  // Seed default users (passwords hashed at runtime)
+  // Seed default users (passwords from env or defaults)
   const defaultUsers = [
-    { username:'admin',       password:'admin2024',       role:'admin',       name:'Administrateur',  permissions:['administration','modification','lecture'] },
-    { username:'technicien',  password:'technicien2024',  role:'technicien', name:'Technicien IT',   permissions:['modification','lecture'] },
-    { username:'utilisateur', password:'utilisateur2024', role:'user',       name:'Utilisateur',     permissions:['lecture'] }
+    { username:'admin',       password: process.env.DEFAULT_ADMIN_PASSWORD    || 'admin2024',       role:'admin',       name:'Administrateur',  permissions:['administration','modification','lecture'] },
+    { username:'technicien',  password: process.env.DEFAULT_TECH_PASSWORD     || 'technicien2024',  role:'technicien', name:'Technicien IT',   permissions:['modification','lecture'] },
+    { username:'utilisateur', password: process.env.DEFAULT_USER_PASSWORD     || 'utilisateur2024', role:'user',       name:'Utilisateur',     permissions:['lecture'] }
   ];
   for (const u of defaultUsers) {
     const hash = await bcrypt.hash(u.password, 10);
-    await pool.query('DELETE FROM users WHERE username = $1', [u.username]);
     await pool.query(
-      `INSERT INTO users (username, password, name, role, permissions) VALUES ($1,$2,$3,$4,$5)`,
-      [u.username, hash, u.name, u.role, u.permissions]
+      `INSERT INTO users (username, password, role, name, permissions)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (username) DO NOTHING`,
+      [u.username, hash, u.role, u.name, u.permissions]
     );
   }
 
@@ -368,6 +369,8 @@ async function _initDB() {
   // Coordonnées géographiques des sites (pour la carte)
   await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION`);
   await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION`);
+  await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS email VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS phone VARCHAR(50) NOT NULL DEFAULT ''`);
 
   // Contrats de maintenance
   await pool.query(`
@@ -439,15 +442,23 @@ async function _initDB() {
 
   // Webhook Slack/Teams
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS slack_webhook TEXT NOT NULL DEFAULT ''`);
+
+  // Missing indexes for performance
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_equipments_site_id ON equipments(site_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_equipments_status ON equipments(status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_equipment_events_action ON equipment_events(action)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_activity_log_user_id ON user_activity_log(user_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_sender ON chat_messages(sender_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_recipient ON chat_messages(recipient_id)`);
 }
 
 export async function query(text, params) {
-  await initDB();
+
   return pool.query(text, params);
 }
 
 export async function logEquipmentEvent({ equipmentId, equipmentName, equipmentType, department, action, details, changes = [], technician = '', userId, username, userName, ip, transferRequester = '', transferResponsible = '' }) {
-  await initDB();
+
   return pool.query(
     `INSERT INTO equipment_events
        (equipment_id, equipment_name, equipment_type, department, action, details, changes, technician, user_id, username, user_name, ip, transfer_requester, transfer_responsible)
@@ -457,7 +468,7 @@ export async function logEquipmentEvent({ equipmentId, equipmentName, equipmentT
 }
 
 export async function getEquipmentHistory(equipmentId) {
-  await initDB();
+
   const { rows } = await pool.query(
     `SELECT * FROM equipment_events WHERE equipment_id = $1 ORDER BY created_at ASC`,
     [equipmentId]
@@ -466,7 +477,7 @@ export async function getEquipmentHistory(equipmentId) {
 }
 
 export async function getEventsByDateRange({ from, to, department, type, limit = 500 }) {
-  await initDB();
+
   const conditions = ['1=1'];
   const params = [];
   let i = 1;
@@ -485,7 +496,7 @@ export async function getEventsByDateRange({ from, to, department, type, limit =
 }
 
 export async function getEventsByDepartment() {
-  await initDB();
+
   const { rows } = await pool.query(`
     SELECT
       department,
@@ -505,7 +516,7 @@ export async function getEventsByDepartment() {
 }
 
 export async function addDocument({ equipmentId, filename, fileType, fileSize, fileData, description, uploadedBy }) {
-  await initDB();
+
   const { rows } = await pool.query(
     `INSERT INTO equipment_documents (equipment_id, filename, file_type, file_size, file_data, description, uploaded_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -516,7 +527,7 @@ export async function addDocument({ equipmentId, filename, fileType, fileSize, f
 }
 
 export async function getDocuments(equipmentId) {
-  await initDB();
+
   const { rows } = await pool.query(
     `SELECT id, equipment_id, filename, file_type, file_size, description, uploaded_by, uploaded_at
      FROM equipment_documents WHERE equipment_id = $1 ORDER BY uploaded_at ASC`,
@@ -526,7 +537,7 @@ export async function getDocuments(equipmentId) {
 }
 
 export async function getDocumentData(id) {
-  await initDB();
+
   const { rows } = await pool.query(
     'SELECT id, filename, file_type, file_data FROM equipment_documents WHERE id = $1',
     [id]
@@ -535,7 +546,7 @@ export async function getDocumentData(id) {
 }
 
 export async function deleteDocument(id) {
-  await initDB();
+
   const { rows } = await pool.query(
     'DELETE FROM equipment_documents WHERE id = $1 RETURNING id, filename',
     [id]
@@ -546,7 +557,7 @@ export async function deleteDocument(id) {
 // ─── Maintenance ─────────────────────────────────────────────────────────────
 
 export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) {
-  await initDB();
+
   const conditions = ['1=1'];
   const params = [];
   let i = 1;
@@ -561,7 +572,7 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
 }
 
 export async function createMaintenance(data) {
-  await initDB();
+
   const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType } = data;
   const { rows } = await pool.query(
     `INSERT INTO maintenance_records
@@ -574,7 +585,7 @@ export async function createMaintenance(data) {
 }
 
 export async function updateMaintenance(id, data) {
-  await initDB();
+
   const fields = [];
   const params = [];
   let i = 1;
@@ -592,13 +603,13 @@ export async function updateMaintenance(id, data) {
 }
 
 export async function deleteMaintenance(id) {
-  await initDB();
+
   const { rows } = await pool.query('DELETE FROM maintenance_records WHERE id=$1 RETURNING id', [id]);
   return rows[0] || null;
 }
 
 export async function appendMaintenanceNote(id, noteEntry) {
-  await initDB();
+
   const { rows: cur } = await pool.query('SELECT notes FROM maintenance_records WHERE id=$1', [id]);
   if (!cur[0]) return null;
   const merged = cur[0].notes ? `${noteEntry}\n\n---\n\n${cur[0].notes}` : noteEntry;
@@ -651,7 +662,7 @@ function rowToDoc(row) {
 
 function rowToEvent(row) {
   let changes = [];
-  try { changes = JSON.parse(row.changes || '[]'); } catch {}
+  try { changes = JSON.parse(row.changes || '[]'); } catch (err) { console.error('JSON.parse(changes) failed:', err?.message); }
   return {
     id: row.id,
     equipmentId: row.equipment_id,
@@ -702,7 +713,7 @@ export function rowToEquipment(row) {
 // ─── Sites ────────────────────────────────────────────────────────────────────
 
 export async function getSites() {
-  await initDB();
+
   const { rows } = await pool.query(`
     SELECT s.*, COUNT(e.id)::int AS equipment_count
     FROM sites s
@@ -717,27 +728,33 @@ export async function getSites() {
   }));
 }
 
-export async function createSite({ name, city, country, address, description }) {
-  await initDB();
+export async function createSite({ name, city, country, address, description, latitude, longitude, email, phone }) {
+
+  const lat = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
+  const lng = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+
   const { rows } = await pool.query(
-    `INSERT INTO sites (name, city, country, address, description)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [name, city || '', country || '', address || '', description || '']
+    `INSERT INTO sites (name, city, country, address, description, latitude, longitude, email, phone)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [name, city || '', country || '', address || '', description || '', lat, lng, email || '', phone || '']
   );
   return { ...rows[0], equipmentCount: 0 };
 }
 
-export async function updateSite(id, { name, city, country, address, description }) {
-  await initDB();
+export async function updateSite(id, { name, city, country, address, description, latitude, longitude, email, phone }) {
+
+  const lat = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
+  const lng = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+
   const { rows } = await pool.query(
-    `UPDATE sites SET name=$1, city=$2, country=$3, address=$4, description=$5 WHERE id=$6 RETURNING *`,
-    [name, city || '', country || '', address || '', description || '', id]
+    `UPDATE sites SET name=$1, city=$2, country=$3, address=$4, description=$5, latitude=$6, longitude=$7, email=$8, phone=$9 WHERE id=$10 RETURNING *`,
+    [name, city || '', country || '', address || '', description || '', lat, lng, email || '', phone || '', id]
   );
   return rows[0] || null;
 }
 
 export async function deleteSite(id) {
-  await initDB();
+
   const { rows: linked } = await pool.query('SELECT COUNT(*) FROM equipments WHERE site_id=$1', [id]);
   if (parseInt(linked[0].count, 10) > 0) {
     throw Object.assign(new Error('Ce site possède des équipements. Réaffectez-les avant de supprimer le site.'), { status: 409 });
@@ -747,7 +764,7 @@ export async function deleteSite(id) {
 }
 
 export async function getTransferEvents({ department, from, to, limit = 500 } = {}) {
-  await initDB();
+
   const conditions = ["action = 'Transfert'"];
   const params = [];
   let i = 1;
@@ -763,7 +780,7 @@ export async function getTransferEvents({ department, from, to, limit = 500 } = 
 }
 
 export async function insertActivityLog({ userId, username, userName, action, details, ip }) {
-  await initDB();
+
   await pool.query(
     `INSERT INTO user_activity_log (user_id, username, user_name, action, details, ip)
      VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -772,7 +789,7 @@ export async function insertActivityLog({ userId, username, userName, action, de
 }
 
 export async function upsertSession({ userId, username, name, role, ip, loginAt, lastSeen }) {
-  await initDB();
+
   await pool.query(
     `INSERT INTO user_sessions (user_id, username, name, role, ip, login_at, last_seen)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -785,17 +802,17 @@ export async function upsertSession({ userId, username, name, role, ip, loginAt,
 }
 
 export async function deleteSession(userId) {
-  await initDB();
+
   await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
 }
 
 export async function updateSessionLastSeen(userId) {
-  await initDB();
+
   await pool.query('UPDATE user_sessions SET last_seen = NOW() WHERE user_id = $1', [userId]);
 }
 
 export async function queryActiveSessions() {
-  await initDB();
+
   const { rows } = await pool.query('SELECT * FROM user_sessions ORDER BY last_seen DESC');
   return rows.map(r => ({
     userId: r.user_id, username: r.username, name: r.name,
@@ -806,7 +823,7 @@ export async function queryActiveSessions() {
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
 export async function getChatMessages({ isGlobal, withUserId, groupId, currentUserId, sinceId, limit = 80 }) {
-  await initDB();
+
   let sql, params;
   if (groupId) {
     // Verify membership
@@ -840,7 +857,7 @@ export async function getChatMessages({ isGlobal, withUserId, groupId, currentUs
 }
 
 export async function createChatGroup({ name, createdBy, memberIds }) {
-  await initDB();
+
   const { rows } = await pool.query(
     'INSERT INTO chat_groups (name, created_by) VALUES ($1,$2) RETURNING *',
     [name, createdBy]
@@ -857,7 +874,7 @@ export async function createChatGroup({ name, createdBy, memberIds }) {
 }
 
 export async function getUserGroups(userId) {
-  await initDB();
+
   const { rows } = await pool.query(`
     SELECT g.*, array_agg(DISTINCT gm2.user_id) AS member_ids
     FROM chat_groups g
@@ -870,7 +887,7 @@ export async function getUserGroups(userId) {
 }
 
 export async function sendChatMessage({ senderId, senderName, senderUsername, recipientId, groupId, content }) {
-  await initDB();
+
   const { rows } = await pool.query(
     `INSERT INTO chat_messages (sender_id, sender_name, sender_username, recipient_id, group_id, content)
      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -880,7 +897,7 @@ export async function sendChatMessage({ senderId, senderName, senderUsername, re
 }
 
 export async function markChatRead({ userId, conversationKey, lastReadId }) {
-  await initDB();
+
   await pool.query(
     `INSERT INTO chat_read_markers (user_id, conversation_key, last_read_id)
      VALUES ($1,$2,$3)
@@ -891,7 +908,7 @@ export async function markChatRead({ userId, conversationKey, lastReadId }) {
 }
 
 export async function getChatUnread(userId) {
-  await initDB();
+
   const { rows: g } = await pool.query(
     `SELECT COUNT(*) AS unread FROM chat_messages m
      LEFT JOIN chat_read_markers r ON r.user_id=$1 AND r.conversation_key='global'
@@ -930,7 +947,7 @@ export async function getChatUnread(userId) {
 }
 
 export async function queryActivityLog({ userId, username, dateFrom, dateTo, action, limit = 200 } = {}) {
-  await initDB();
+
   const conditions = [];
   const params = [];
   let i = 1;
@@ -956,7 +973,7 @@ export async function queryActivityLog({ userId, username, dateFrom, dateTo, act
 // ─── Site Visits ──────────────────────────────────────────────────────────────
 
 export async function getVisits({ siteId, status, from, to } = {}) {
-  await initDB();
+
   let q = 'SELECT * FROM site_visits WHERE 1=1';
   const params = [];
   if (siteId) { params.push(siteId); q += ` AND site_id = $${params.length}`; }
@@ -982,7 +999,7 @@ export async function getVisits({ siteId, status, from, to } = {}) {
 }
 
 export async function createVisit({ siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, createdBy, withMaintenance, equipmentIds, maintenanceDesc }) {
-  await initDB();
+
   const { rows } = await pool.query(
     `INSERT INTO site_visits (site_id, site_name, scheduled_date, scheduled_time, technician, purpose, status, notes, created_by, with_maintenance, equipment_ids, maintenance_desc)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
@@ -998,7 +1015,7 @@ export async function createVisit({ siteId, siteName, scheduledDate, scheduledTi
 }
 
 export async function updateVisit(id, { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate }) {
-  await initDB();
+
   const { rows } = await pool.query(
     `UPDATE site_visits SET site_id=$1,site_name=$2,scheduled_date=$3,scheduled_time=$4,technician=$5,purpose=$6,status=$7,notes=$8,with_maintenance=$9,equipment_ids=$10,maintenance_desc=$11,validation_comment=$12,validated_at=$13,validated_by=$14,rescheduled_date=$15 WHERE id=$16 RETURNING *`,
     [siteId, siteName, scheduledDate, scheduledTime||'', technician, purpose, status, notes||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'', validationComment||'', validatedAt||null, validatedBy||'', rescheduledDate||null, id]
@@ -1015,6 +1032,6 @@ export async function updateVisit(id, { siteId, siteName, scheduledDate, schedul
 }
 
 export async function deleteVisit(id) {
-  await initDB();
+
   return pool.query('DELETE FROM site_visits WHERE id=$1', [id]);
 }

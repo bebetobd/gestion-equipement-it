@@ -135,13 +135,22 @@ export function asyncHandler(fn) {
  */
 export function requestLogger(req, res, next) {
   const start = Date.now();
-  const original = res.json;
-  
-  res.json = function(data) {
+  res.on('finish', () => {
     const duration = Date.now() - start;
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
-    return original.call(this, data);
-  };
-  
+  });
   next();
+}
+
+/**
+ * Standardized error response helper
+ * @param {object} res - Express response
+ * @param {number} status - HTTP status code
+ * @param {string} message - Error message
+ * @param {string[]} [errors] - Optional field-level errors
+ */
+export function sendError(res, status, message, errors) {
+  const body = { message };
+  if (errors) body.errors = errors;
+  return res.status(status).json(body);
 }

@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { exec } from 'child_process';
@@ -28,6 +30,11 @@ import {
 import {
   validateUser,
   validateEquipment,
+  validateSite,
+  validateLicense,
+  validateContract,
+  validatePurchase,
+  validateRma,
   validators
 } from './validation.js';
 
@@ -51,6 +58,22 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// ─── Sécurité (Helmet) ──────────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false, // Désactivé pour les tiles Leaflet et les scripts inline de l'API portal
+  crossOriginEmbedderPolicy: false,
+}));
+
+// ─── Rate limiting global ───────────────────────────────────────────────────────
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // max 300 requêtes par fenêtre
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Trop de requêtes. Veuillez réessayer plus tard.' },
+});
+app.use('/api', apiLimiter);
 
 // ─── Rate limiting login ───────────────────────────────────────────────────────
 const loginAttempts = new Map(); // IP → { count, blockedUntil }
@@ -296,7 +319,7 @@ app.get(['/api', '/api/'], (req, res) => {
         '<span>Rôle : <b>' + d.user.role + '</b> &nbsp;|&nbsp; Permissions : ' + (perms || '<em>aucune</em>') + '</span>';
       document.getElementById('loginSection').style.display = 'none';
       document.getElementById('successSection').classList.add('show');
-    } catch { showError('Impossible de joindre le serveur.'); }
+    } catch (err) { console.error('Login API error:', err?.message); showError('Impossible de joindre le serveur.'); }
     finally { btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1rem;height:1rem"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Se connecter'; }
   }
 
@@ -775,9 +798,10 @@ app.get('/api/sites', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/sites', authenticate, requireAdmin, asyncHandler(async (req, res) => {
-  const { name, city, country, address, description } = req.body;
-  if (!name?.trim()) return res.status(400).json({ message: 'Le nom du site est requis.' });
-  const site = await createSite({ name: name.trim(), city, country, address, description });
+  const validation = validateSite(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
+  const { name, city, country, address, description, latitude, longitude, email, phone } = req.body;
+  const site = await createSite({ name: name.trim(), city, country, address, description, latitude, longitude, email, phone });
   logActivity(req.user.id, req.user.username, req.user.name, 'Création site', `Site "${name}" créé`, getClientIp(req));
   res.status(201).json(site);
 }));
@@ -785,9 +809,10 @@ app.post('/api/sites', authenticate, requireAdmin, asyncHandler(async (req, res)
 app.put('/api/sites/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid site ID' });
-  const { name, city, country, address, description } = req.body;
-  if (!name?.trim()) return res.status(400).json({ message: 'Le nom du site est requis.' });
-  const site = await updateSite(id, { name: name.trim(), city, country, address, description });
+  const validation = validateSite(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
+  const { name, city, country, address, description, latitude, longitude, email, phone } = req.body;
+  const site = await updateSite(id, { name: name.trim(), city, country, address, description, latitude, longitude, email, phone });
   if (!site) return res.status(404).json({ message: 'Site introuvable.' });
   logActivity(req.user.id, req.user.username, req.user.name, 'Modification site', `Site "${name}" modifié`, getClientIp(req));
   res.json(site);
@@ -933,6 +958,35 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
     res.json(updated);
   } catch (err) {
     handleError(err, res, 'Erreur lors de la modification.');
+  }
+}));
+
+app.patch('/api/equipments/:id/warranty', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
+  const { warranty } = req.body;
+  if (!warranty || typeof warranty !== 'string') {
+    return res.status(400).json({ message: 'Date de garantie invalide.' });
+  }
+  try {
+    const { rows: oldRows } = await query('SELECT * FROM equipments WHERE id=$1', [id]);
+    if (oldRows.length === 0) return res.status(404).json({ message: 'Équipement introuvable' });
+    const old = rowToEquipment(oldRows[0]);
+    const { rows } = await query('UPDATE equipments SET warranty=$1 WHERE id=$2 RETURNING *', [warranty, id]);
+    if (rows.length === 0) return res.status(404).json({ message: 'Équipement introuvable' });
+    const updated = rowToEquipment(rows[0]);
+    const ip = getClientIp(req);
+    const changes = [{ field: 'warranty', from: old.warranty, to: updated.warranty }];
+    logActivity(req.user.id, req.user.username, req.user.name, 'Renouvellement garantie', `"${updated.name}" — Garantie: ${old.warranty || 'aucune'} → ${updated.warranty}`, ip);
+    logEquipmentEvent({
+      equipmentId: updated.id, equipmentName: updated.name, equipmentType: updated.type,
+      department: updated.department, action: 'Renouvellement garantie',
+      details: `Garantie prolongée jusqu'au ${new Date(warranty).toLocaleDateString('fr-FR')}`,
+      changes, userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+    });
+    res.json(updated);
+  } catch (err) {
+    handleError(err, res, 'Erreur lors du renouvellement de garantie.');
   }
 }));
 
@@ -1398,7 +1452,7 @@ app.get('/api/reports/by-date', authenticate, asyncHandler(async (req, res) => {
 
   res.json(rows.map(row => {
     let changes = [];
-    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    try { changes = JSON.parse(row.changes || '[]'); } catch (err) { console.error('JSON.parse(changes) failed:', err?.message); }
     return {
       id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
       equipmentType: row.equipment_type, department: row.department, action: row.action,
@@ -1494,7 +1548,7 @@ app.get('/api/reports/user-detail', authenticate, asyncHandler(async (req, res) 
   );
   res.json(rows.map(row => {
     let changes = [];
-    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    try { changes = JSON.parse(row.changes || '[]'); } catch (err) { console.error('JSON.parse(changes) failed:', err?.message); }
     return {
       id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
       equipmentType: row.equipment_type, department: row.department, action: row.action,
@@ -1576,7 +1630,7 @@ app.get('/api/reports/site-detail', authenticate, asyncHandler(async (req, res) 
 
   res.json(rows.map(row => {
     let changes = [];
-    try { changes = JSON.parse(row.changes || '[]'); } catch {}
+    try { changes = JSON.parse(row.changes || '[]'); } catch (err) { console.error('JSON.parse(changes) failed:', err?.message); }
     return {
       id: row.id, equipmentId: row.equipment_id, equipmentName: row.equipment_name,
       equipmentType: row.equipment_type, department: row.department, action: row.action,
@@ -1698,7 +1752,12 @@ app.patch('/api/visits/:id', authenticate, requirePermission('ecriture'), asyncH
 }));
 
 app.delete('/api/visits/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
-  await deleteVisit(Number(req.params.id));
+  const id = Number(req.params.id);
+  const visit = await query('SELECT status FROM site_visits WHERE id=$1', [id]);
+  if (visit.rows.length > 0 && (visit.rows[0].status === 'en_cours' || visit.rows[0].status === 'terminé' || visit.rows[0].status === 'annulé')) {
+    return res.status(400).json({ message: 'Impossible de supprimer une visite en cours, terminée ou annulée.' });
+  }
+  await deleteVisit(id);
   res.status(204).end();
 }));
 
@@ -1782,6 +1841,8 @@ app.get('/api/licenses', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/licenses', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const validation = validateLicense(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const { name, vendor, licenseKey, seats, usedSeats, equipmentId, purchaseDate, expiryDate, notes } = req.body;
   const { rows } = await query(
     `INSERT INTO licenses (name, vendor, license_key, seats, used_seats, equipment_id, purchase_date, expiry_date, notes)
@@ -1876,6 +1937,8 @@ app.get('/api/contracts', authenticate, asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 app.post('/api/contracts', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const validation = validateContract(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
     `INSERT INTO maintenance_contracts (title,vendor,contract_number,site_id,equipment_ids,start_date,end_date,amount,currency,scope,contact_name,contact_email,contact_phone,status,notes)
@@ -1904,6 +1967,8 @@ app.get('/api/purchases', authenticate, asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 app.post('/api/purchases', authenticate, asyncHandler(async (req, res) => {
+  const validation = validatePurchase(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
     `INSERT INTO purchase_requests (title,equipment_type,quantity,estimated_cost,currency,priority,justification,requested_by,department,site_id,notes)
@@ -1937,6 +2002,8 @@ app.get('/api/rma', authenticate, asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 app.post('/api/rma', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
+  const validation = validateRma(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
     `INSERT INTO rma_requests (equipment_id,equipment_name,serial_number,vendor,rma_number,reason,shipped_date,received_date,resolution,status,technician,notes)

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import LoginPage from './LoginPage';
 import ITEquipmentManager from './ITEquipmentManager';
+import ErrorBoundary from './ErrorBoundary';
 import { apiUrl } from './config';
 
 interface AuthUser {
@@ -21,22 +22,7 @@ const App = () => {
     setCurrentUser(null);
   };
 
-  // ── Intercepteur global 401 : déconnexion automatique si token expiré ──────
-  useEffect(() => {
-    const original = window.fetch;
-    window.fetch = async (...args) => {
-      const res = await original(...args);
-      if (res.status === 401) {
-        const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
-        // Ne pas déconnecter sur la route login elle-même
-        if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me')) {
-          doLogout();
-        }
-      }
-      return res;
-    };
-    return () => { window.fetch = original; };
-  }, []);
+  // ── Intercepteur global 401 via fetchApi (config.ts) ───────────────────────
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -101,7 +87,11 @@ const App = () => {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  return <ITEquipmentManager currentUser={currentUser} onLogout={handleLogout} />;
+  return (
+    <ErrorBoundary>
+      <ITEquipmentManager currentUser={currentUser} onLogout={handleLogout} />
+    </ErrorBoundary>
+  );
 };
 
 export default App;

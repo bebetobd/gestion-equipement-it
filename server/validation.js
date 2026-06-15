@@ -244,6 +244,91 @@ export function validateEquipment(data) {
  * @param {boolean} isNew - Is this a new user (password required)
  * @returns {object} { valid: boolean, errors: array }
  */
+/**
+ * Validate site data
+ * @param {object} data
+ * @returns {object} { valid: boolean, errors: array }
+ */
+export function validateSite(data) {
+  const errors = [];
+  if (!data.name?.trim()) errors.push('name: Le nom du site est requis.');
+  const nameVal = validators.text(data.name, 200);
+  if (!nameVal.valid) errors.push('name: ' + nameVal.error);
+  if (data.city && !validators.text(data.city, 100).valid) errors.push('city: ' + validators.text(data.city, 100).error);
+  if (data.country && !validators.text(data.country, 100).valid) errors.push('country: ' + validators.text(data.country, 100).error);
+  if (data.latitude != null && data.latitude !== '') {
+    const lat = parseFloat(data.latitude);
+    if (isNaN(lat) || lat < -90 || lat > 90) errors.push('latitude: Doit être une valeur entre -90 et 90.');
+  }
+  if (data.longitude != null && data.longitude !== '') {
+    const lng = parseFloat(data.longitude);
+    if (isNaN(lng) || lng < -180 || lng > 180) errors.push('longitude: Doit être une valeur entre -180 et 180.');
+  }
+  if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errors.push('email: Format email invalide.');
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate license data
+ * @param {object} data
+ * @returns {object} { valid: boolean, errors: array }
+ */
+export function validateLicense(data) {
+  const errors = [];
+  if (!data.name?.trim()) errors.push('name: Le nom de la licence est requis.');
+  if (!data.productKey?.trim()) errors.push('productKey: La clé produit est requise.');
+  const nameVal = validators.text(data.name, 200);
+  if (!nameVal.valid) errors.push('name: ' + nameVal.error);
+  if (data.edition && !validators.text(data.edition, 100).valid) errors.push('edition: ' + validators.text(data.edition, 100).error);
+  if (data.quantity && (isNaN(Number(data.quantity)) || Number(data.quantity) < 1))
+    errors.push('quantity: Doit être un nombre positif.');
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate contract data
+ * @param {object} data
+ * @returns {object} { valid: boolean, errors: array }
+ */
+export function validateContract(data) {
+  const errors = [];
+  if (!data.name?.trim()) errors.push('name: Le nom du contrat est requis.');
+  if (!data.provider?.trim()) errors.push('provider: Le fournisseur est requis.');
+  const nameVal = validators.text(data.name, 200);
+  if (!nameVal.valid) errors.push('name: ' + nameVal.error);
+  if (data.type && !validators.text(data.type, 100).valid) errors.push('type: ' + validators.text(data.type, 100).error);
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate purchase data
+ * @param {object} data
+ * @returns {object} { valid: boolean, errors: array }
+ */
+export function validatePurchase(data) {
+  const errors = [];
+  if (!data.title?.trim()) errors.push('title: Le titre est requis.');
+  const titleVal = validators.text(data.title, 200);
+  if (!titleVal.valid) errors.push('title: ' + titleVal.error);
+  if (data.amount && (isNaN(Number(data.amount)) || Number(data.amount) < 0))
+    errors.push('amount: Montant invalide.');
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate RMA data
+ * @param {object} data
+ * @returns {object} { valid: boolean, errors: array }
+ */
+export function validateRma(data) {
+  const errors = [];
+  if (!data.equipmentName?.trim()) errors.push('equipmentName: Le nom de l\'équipement est requis.');
+  if (!data.issue?.trim()) errors.push('issue: La description du problème est requise.');
+  const nameVal = validators.text(data.equipmentName, 200);
+  if (!nameVal.valid) errors.push('equipmentName: ' + nameVal.error);
+  return { valid: errors.length === 0, errors };
+}
+
 export function validateUser(data, isNew = true) {
   const errors = [];
 

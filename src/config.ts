@@ -2,15 +2,7 @@
  * Frontend configuration and API utilities
  */
 
-// Get API base URL from environment or deduce from current location
-const getApiBaseUrl = () => {
-  const env = import.meta.env.VITE_API_BASE_URL;
-  if (env && env !== '') {
-    return env.replace(/\/$/, '');
-  }
-  // In production, use relative URLs (same domain)
-  return '';
-};
+const getApiBaseUrl = () => '';
 
 export const API_BASE_URL = getApiBaseUrl();
 

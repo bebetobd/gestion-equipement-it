@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Search, Edit, Trash2, Monitor, Wifi, Server, Printer,
   User, Users, Calendar, MapPin, AlertTriangle, CheckCircle,
@@ -161,6 +161,10 @@ interface Site {
   country: string;
   address: string;
   description: string;
+  latitude: number | null;
+  longitude: number | null;
+  email: string;
+  phone: string;
   createdAt: string;
   equipmentCount: number;
 }
@@ -171,6 +175,26 @@ interface SiteForm {
   country: string;
   address: string;
   description: string;
+  latitude: string;
+  longitude: string;
+  email: string;
+  phone: string;
+}
+
+interface SiteStat {
+  site_id: number;
+  site_name: string;
+  city: string;
+  country: string;
+  equipment_count: number;
+  total_events: number;
+  creations: number;
+  modifications: number;
+  transferts: number;
+  interventions: number;
+  reformes: number;
+  suppressions: number;
+  last_activity: string | null;
 }
 
 interface ReformForm {
@@ -229,7 +253,7 @@ const roleDisplay: Record<string, { label: string; classes: string }> = {
   user: { label: 'Utilisateur', classes: 'bg-gray-100 text-gray-700' }
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
+const API_BASE_URL = '';
 
 const API_BASE = `${API_BASE_URL}/api/equipments`;
 const API_USERS = `${API_BASE_URL}/api/users`;
@@ -577,7 +601,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
   const [showSiteModal, setShowSiteModal] = useState(false);
-  const defaultSiteForm: SiteForm = { name: '', city: '', country: '', address: '', description: '' };
+  const defaultSiteForm: SiteForm = { name: '', city: '', country: '', address: '', description: '', latitude: '', longitude: '', email: '', phone: '' };
   const [siteForm, setSiteForm] = useState<SiteForm>(defaultSiteForm);
   const [editingSiteId, setEditingSiteId] = useState<number | null>(null);
   const [siteLoading, setSiteLoading] = useState(false);
@@ -624,6 +648,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [activeSessions, setActiveSessions] = useState<SessionInfo[]>([]);
   const [showWarrantyModule, setShowWarrantyModule] = useState(false);
   const [warrantyRiskFilter, setWarrantyRiskFilter] = useState<'all' | 'expired' | 'critical' | 'warning' | 'ok' | 'unknown'>('all');
+  const [showWarrantyRenewModule, setShowWarrantyRenewModule] = useState(false);
+  const [warrantyRenewSearch, setWarrantyRenewSearch] = useState('');
+  const [warrantyRenewEquipId, setWarrantyRenewEquipId] = useState<number | null>(null);
+  const [warrantyRenewDate, setWarrantyRenewDate] = useState('');
+  const [warrantyRenewSaving, setWarrantyRenewSaving] = useState(false);
   const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
   const [activityUserFilter, setActivityUserFilter] = useState<number | null>(null);
   const [monitoringLoading, setMonitoringLoading] = useState(false);
@@ -732,7 +761,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   interface AnomalyItem { id: number; name: string; type: string; department: string; location: string; ticket_count: number; last_ticket: string; }
   const [showAnomalies, setShowAnomalies] = useState(false);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
-  const fetchAnomalies = async () => { try { const r = await fetch(`${API_BASE_URL}/api/anomalies`, { headers: authHeaders() }); if (r.ok) setAnomalies(await r.json()); } catch {} };
+  const fetchAnomalies = async () => { try { const r = await fetch(`${API_BASE_URL}/api/anomalies`, { headers: authHeaders() }); if (r.ok) setAnomalies(await r.json()); } catch (err) { console.error(err); } };
 
   // ── Ping réseau ────────────────────────────────────────────────────────────
   const [pingResults, setPingResults] = useState<Record<number, boolean | null>>({});
@@ -787,13 +816,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         format: 'CODE128', lineColor: '#000', width: 2, height: 60,
         displayValue: true, fontSize: 12, margin: 10,
       });
-    } catch {}
+    } catch (err) { console.error(err); }
   }, []);
 
   // ── Carte des sites (Leaflet) ──────────────────────────────────────────────
   const [showMap, setShowMap] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
+  const mapInstanceRef = useRef<{ remove: () => void } | null>(null);
 
   // ── Licences logicielles ───────────────────────────────────────────────────
   interface License {
@@ -997,7 +1026,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [reportUserExpanded, setReportUserExpanded] = useState<string | null>(null);
   const [reportUserDetail, setReportUserDetail] = useState<EquipmentEvent[]>([]);
   const [reportUserDetailLoading, setReportUserDetailLoading] = useState(false);
-  const [reportSiteStats, setReportSiteStats] = useState<any[]>([]);
+  const [reportSiteStats, setReportSiteStats] = useState<SiteStat[]>([]);
   const [reportSiteLoading, setReportSiteLoading] = useState(false);
   const [reportSiteFrom, setReportSiteFrom] = useState('');
   const [reportSiteTo, setReportSiteTo] = useState('');
@@ -1034,8 +1063,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const icon = L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png', shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
       const bounds: [number, number][] = [];
       sites.forEach(s => {
-        const lat = (s as any).latitude; const lng = (s as any).longitude;
-        if (lat && lng) {
+        const lat = s.latitude; const lng = s.longitude;
+        if (lat != null && lng != null) {
           const eqCount = equipments.filter(e => e.siteId === s.id).length;
           L.marker([lat, lng], { icon }).addTo(map)
             .bindPopup(`<b>${s.name}</b><br>${s.city}${s.country ? ', ' + s.country : ''}<br>${eqCount} équipement(s)`);
@@ -1044,7 +1073,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       });
       if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
       mapInstanceRef.current = map;
-    }).catch(() => {});
+    }).catch((err) => console.error('Leaflet load error:', err));
     return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
   }, [showMap]);
 
@@ -1135,7 +1164,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/reports/equipment/${equipmentId}`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setReportHistory(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportHistoryLoading(false);
   };
 
@@ -1150,7 +1179,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/reports/by-date?${params}`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setReportDateEvents(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportDateLoading(false);
   };
 
@@ -1165,14 +1194,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     try {
       const r = await fetch(`${API_BASE_URL}/api/chat/users`, { headers: authHeaders() });
       if (r.ok) setChatUsers(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchChatGroups = async () => {
     try {
       const r = await fetch(`${API_BASE_URL}/api/chat/groups`, { headers: authHeaders() });
       if (r.ok) setChatGroups(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchChatMessages = async (conv: 'global' | number, sinceId?: number, groupId?: number) => {
@@ -1200,7 +1229,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       } else {
         setChatMessages(msgs);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
     if (!sinceId) setChatLoading(false);
   };
 
@@ -1208,7 +1237,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     try {
       const r = await fetch(`${API_BASE_URL}/api/chat/unread`, { headers: authHeaders() });
       if (r.ok) setChatUnread(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleSendChatMessage = async (e: React.FormEvent) => {
@@ -1231,7 +1260,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         setChatInput('');
         markChatAsRead(chatConversation, msg.id, chatActiveGroup ?? undefined);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
     setChatSending(false);
   };
 
@@ -1250,7 +1279,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         if (conv === 'global') return { ...prev, global: 0 };
         const dms = { ...prev.dms }; delete dms[conv as number]; return { ...prev, dms };
       });
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const openChatConversation = (conv: 'global' | number) => {
@@ -1283,7 +1312,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         setNewGroupMembers([]);
         openGroupConversation(group.id);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
     setGroupCreating(false);
   };
 
@@ -1295,7 +1324,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/reports/by-department`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setReportDeptStats(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportDeptLoading(false);
   };
 
@@ -1313,7 +1342,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/reports/by-user?${params}`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setReportUserStats(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportUserLoading(false);
   };
 
@@ -1328,7 +1357,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (reportUserDeptFilter) params.set('department', reportUserDeptFilter);
       const res = await fetch(`${API_BASE_URL}/api/reports/user-detail?${params}`, { headers: authHeaders() });
       if (res.ok) setReportUserDetail(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportUserDetailLoading(false);
   };
 
@@ -1345,7 +1374,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/reports/by-site?${params}`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setReportSiteStats(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportSiteLoading(false);
   };
 
@@ -1360,7 +1389,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (reportSiteTypeFilter) params.set('type', reportSiteTypeFilter);
       const res = await fetch(`${API_BASE_URL}/api/reports/site-detail?${params}`, { headers: authHeaders() });
       if (res.ok) setReportSiteDetail(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportSiteDetailLoading(false);
   };
 
@@ -1369,7 +1398,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     try {
       const r = await fetch(`${API_BASE_URL}/api/maintenance?limit=500`, { headers: authHeaders() });
       if (r.ok) setReportMaintenanceAll(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportMaintenanceLoading(false);
   };
 
@@ -1378,7 +1407,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     try {
       const r = await fetch(`${API_BASE_URL}/api/visits`, { headers: authHeaders() });
       if (r.ok) setReportVisitsAll(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setReportVisitsLoading(false);
   };
 
@@ -1473,6 +1502,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     });
   };
 
+  const downloadUserReport = async (username: string, userName: string) => {
+    try {
+      const params = new URLSearchParams({ username });
+      if (reportUserFrom) params.set('from', reportUserFrom);
+      if (reportUserTo) params.set('to', reportUserTo);
+      if (reportUserDeptFilter) params.set('department', reportUserDeptFilter);
+      const res = await fetch(`${API_BASE_URL}/api/reports/user-detail?${params}`, { headers: authHeaders() });
+      if (!res.ok) return;
+      const events: EquipmentEvent[] = await res.json();
+      const rows = events.map(ev => ({
+        'Date': new Date(ev.createdAt).toLocaleString('fr-FR'),
+        'Équipement': ev.equipmentName,
+        'Type': ev.equipmentType,
+        'Département': ev.department,
+        'Action': ev.action,
+        'Détails': ev.details,
+        'Technicien': ev.technician,
+        'Utilisateur': ev.userName,
+      }));
+      await ExportHelpers.exportJsonToXlsx(rows, `rapport-${username}-${Date.now()}.xlsx`, userName);
+    } catch (err) { console.error(err); }
+  };
+
   // ─── Monitoring helpers ────────────────────────────────────────────────────
 
   const formatDuration = (startIso: string) => {
@@ -1509,7 +1561,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/admin/sessions`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setActiveSessions(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchActivities = async (userId?: number | null) => {
@@ -1518,7 +1570,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       const res = await fetch(`${API_BASE_URL}/api/admin/activities${qs}`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) setActivityLogs(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const refreshMonitoring = async () => {
@@ -1822,7 +1874,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     notifiedRef.current.add(tag);
     try {
       new Notification(title, { body, icon: '/icon-192.svg', tag });
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   // Check and fire notifications every 60 s
@@ -2294,7 +2346,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     try {
       const r = await fetch(`${API_BASE_URL}/api/sites`, { headers: authHeaders() });
       if (r.ok) setSites(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleSaveSite = async () => {
@@ -2355,7 +2407,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (filter.to)         params.append('to', filter.to);
       const r = await fetch(`${API_BASE_URL}/api/transfers?${params}`, { headers: authHeaders() });
       if (r.ok) setAllTransfers(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setTransferModuleLoading(false);
   };
 
@@ -2369,7 +2421,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (filter.action)   params.append('action', filter.action);
       const r = await fetch(`${API_BASE_URL}/api/admin/activity-log?${params}`, { headers: authHeaders() });
       if (r.ok) setActivityEntries(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setActivityLogLoading(false);
   };
 
@@ -2383,7 +2435,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       if (filter.to)      params.append('to', filter.to);
       const r = await fetch(`${API_BASE_URL}/api/visits?${params}`, { headers: authHeaders() });
       if (r.ok) setVisits(await r.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     setVisitsLoading(false);
   };
 
@@ -2507,6 +2559,30 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowReformModal(true);
   };
 
+  const renewWarranty = async (equipmentId: number, newDate: string) => {
+    if (!newDate) return;
+    setWarrantyRenewSaving(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/equipments/${equipmentId}/warranty`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ warranty: newDate }),
+      });
+      if (r.status === 401) { handleUnauthorized(); return; }
+      if (!r.ok) throw new Error();
+      const updated = await r.json();
+      setEquipments(prev => prev.map(e => e.id === updated.id ? updated : e));
+      if (selectedEquipment?.id === equipmentId) setSelectedEquipment(updated);
+      setWarrantyRenewSaving(false);
+      setWarrantyRenewEquipId(null);
+      setWarrantyRenewDate('');
+      setToast({ message: `Garantie renouvelée jusqu'au ${new Date(newDate).toLocaleDateString('fr-FR')}.`, type: 'success' });
+    } catch {
+      setWarrantyRenewSaving(false);
+      setToast({ message: 'Impossible de renouveler la garantie.', type: 'error' });
+    }
+  };
+
   const handleReform = async () => {
     if (!reformTarget) return;
     if (!reformForm.reason.trim()) { setToast({ message: 'Veuillez indiquer la raison de la réforme.', type: 'error' }); return; }
@@ -2612,6 +2688,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowActivityLog(false);
     setShowVisitModule(false);
     setShowLicenseModule(false);
+    setShowWarrantyRenewModule(false);
     setShowTrends(false);
     setShowUnifiedCalendar(false);
     setShowMonthlyReport(false);
@@ -2732,7 +2809,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowDetailsModal(true);
   };
 
-  const filteredEquipments = equipments.filter((equipment) => {
+  const filteredEquipments = useMemo(() => equipments.filter((equipment) => {
     const lowerSearch = searchTerm.toLowerCase();
     const matchesSearch =
       equipment.name.toLowerCase().includes(lowerSearch) ||
@@ -2748,7 +2825,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const matchesSite   = selectedSiteIds.length === 0 || (equipment.siteId != null && selectedSiteIds.includes(equipment.siteId as number));
 
     return matchesSearch && matchesType && matchesStatus && matchesSite;
-  });
+  }), [equipments, searchTerm, filterType, filterStatus, selectedSiteIds]);
 
   const getTypeIcon = (type: EquipmentType) => {
     const typeInfo = equipmentTypes.find((t) => t.value === type);
@@ -2940,6 +3017,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {(filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'expired').length + filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'critical').length) > 0 && (
                 <span className="ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold bg-yellow-400">Risque</span>
               )}
+            </button>
+          )}
+          {canWrite && (
+            <button type="button" onClick={() => { closeAllModules(); setShowWarrantyRenewModule(true); }}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <RefreshCcw className="w-3.5 h-3.5 shrink-0" /> Renouv. Garantie
             </button>
           )}
           <button type="button" onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
@@ -3997,7 +4080,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 {/* ── Infos ── */}
                 {detailsTab === 'info' && (
                   <div className="space-y-2 text-sm text-gray-700">
-                    {[
+                    {([
                       ['Type', equipmentTypes.find((t) => t.value === selectedEquipment.type)?.label],
                       ['Quantité', String(selectedEquipment.quantity ?? 1)],
                       ['Localisation', selectedEquipment.location],
@@ -4006,14 +4089,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       ['Adresse IP', maskValue(selectedEquipment.ipAddress) || 'N/A'],
                       ['N° de série', maskValue(selectedEquipment.serialNumber) || 'N/A'],
                       ['Date d\'achat', selectedEquipment.purchaseDate || 'N/A'],
-                      ['Garantie', selectedEquipment.warranty || 'N/A'],
                       ['Dernière maintenance', selectedEquipment.lastMaintenance || 'N/A'],
-                    ].map(([label, value]) => (
+                    ] as [string, string | undefined][]).map(([label, value]) => (
                       <div key={label} className="flex gap-2">
                         <span className="font-semibold w-44 shrink-0 text-gray-600">{label}</span>
                         <span>{value}</span>
                       </div>
                     ))}
+                      <div className="flex gap-2">
+                        <span className="font-semibold w-44 shrink-0 text-gray-600">Garantie</span>
+                        <span>{selectedEquipment.warranty || 'N/A'}</span>
+                      </div>
                     {/* Amortissement */}
                     {(() => {
                       const d = getDepreciation(selectedEquipment);
@@ -4784,7 +4870,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                       setNoteText('');
                                       setShowNoteForm(false);
                                     }
-                                  } catch {}
+                                  } catch (err) { console.error(err); }
                                   setNoteLoading(false);
                                 }}
                                 className="px-4 py-1.5 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a] disabled:opacity-50"
@@ -5953,10 +6039,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-gray-900">Gestion des sites</h2>
-                <p className="text-xs text-white/70">Configurer les sites et localisations</p>
+                <p className="text-xs text-gray-500">Configurer les sites et localisations</p>
               </div>
-              <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
+              <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0" title="Fermer">
+                <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
 
@@ -5973,7 +6059,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <div className="space-y-2">
                   {sites.map(site => (
                     <div key={site.id} className={`rounded-xl border p-3 transition-colors cursor-pointer ${editingSiteId === site.id ? 'border-indigo-400 bg-[#e8f3fc]' : 'border-gray-100 hover:bg-gray-50'}`}
-                      onClick={() => { setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description }); }}>
+                      onClick={() => { setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description, latitude: site.latitude != null ? String(site.latitude) : '', longitude: site.longitude != null ? String(site.longitude) : '', email: site.email || '', phone: site.phone || '' }); }}>
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="font-semibold text-gray-900 text-sm">{site.name}</p>
@@ -5981,9 +6067,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             <MapPin className="w-3 h-3" />{site.city}{site.country ? `, ${site.country}` : ''}
                           </p>
                           {site.address && <p className="text-xs text-gray-400 mt-0.5">{site.address}</p>}
+                          {site.email && <p className="text-xs text-gray-400 mt-0.5">{site.email}</p>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-xs text-[#1a6fa6] font-medium">{site.equipmentCount} équip.</span>
+                          <button onClick={e => { e.stopPropagation(); setEditingSiteId(site.id); setSiteForm({ name: site.name, city: site.city, country: site.country, address: site.address, description: site.description, latitude: site.latitude != null ? String(site.latitude) : '', longitude: site.longitude != null ? String(site.longitude) : '', email: site.email || '', phone: site.phone || '' }); }}
+                            className="text-gray-400 hover:text-[#1a6fa6]" title="Modifier">
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={e => { e.stopPropagation(); handleDeleteSite(site.id); }}
                             className="text-red-400 hover:text-red-600" title="Supprimer">
                             <Trash2 className="w-3.5 h-3.5" />
@@ -5996,7 +6087,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               </div>
 
               {/* Formulaire */}
-              <div className="w-full md:w-72 p-4 shrink-0">
+              <div className="w-full md:w-80 p-4 shrink-0 overflow-y-auto">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
                   {editingSiteId ? 'Modifier le site' : 'Nouveau site'}
                 </p>
@@ -6022,6 +6113,30 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <label className="block text-xs font-medium text-gray-700 mb-1">Adresse</label>
                     <input type="text" value={siteForm.address} onChange={e => setSiteForm(f => ({ ...f, address: e.target.value }))}
                       placeholder="12 rue de la Paix" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Latitude</label>
+                      <input type="text" value={siteForm.latitude} onChange={e => setSiteForm(f => ({ ...f, latitude: e.target.value }))}
+                        placeholder="48.8566" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Longitude</label>
+                      <input type="text" value={siteForm.longitude} onChange={e => setSiteForm(f => ({ ...f, longitude: e.target.value }))}
+                        placeholder="2.3522" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                      <input type="email" value={siteForm.email} onChange={e => setSiteForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder="contact@exemple.fr" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Téléphone</label>
+                      <input type="text" value={siteForm.phone} onChange={e => setSiteForm(f => ({ ...f, phone: e.target.value }))}
+                        placeholder="+33 1 23 45 67 89" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
@@ -6126,6 +6241,103 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <Archive className="w-4 h-4" /> Confirmer la réforme
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warranty renewal module */}
+      {showWarrantyRenewModule && (
+        <div className="fixed top-11 left-0 right-0 bottom-0 z-45 flex flex-col bg-gray-50">
+          <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Renouvellement de garantie</h2>
+                <p className="text-sm text-white/70">Prolonger la garantie d'un équipement</p>
+              </div>
+            </div>
+            <button onClick={() => setShowWarrantyRenewModule(false)}
+              className="text-white/70 hover:text-white p-2"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 overflow-auto p-6">
+            <div className="max-w-4xl mx-auto space-y-4">
+              {/* Search */}
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="text" placeholder="Rechercher un équipement par nom, marque ou modèle…"
+                  value={warrantyRenewSearch}
+                  onChange={e => setWarrantyRenewSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:outline-none" />
+              </div>
+              {/* Equipment list */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="divide-y divide-gray-100">
+                  {equipments
+                    .filter(e => {
+                      if (!warrantyRenewSearch.trim()) return true;
+                      const q = warrantyRenewSearch.toLowerCase();
+                      return e.name.toLowerCase().includes(q) || e.brand?.toLowerCase().includes(q) || e.model?.toLowerCase().includes(q) || e.serialNumber?.toLowerCase().includes(q);
+                    })
+                    .slice(0, 50)
+                    .map(eq => {
+                      const wInfo = getWarrantyInfo(eq.warranty);
+                      const isRenewing = warrantyRenewEquipId === eq.id;
+                      return (
+                        <div key={eq.id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors">
+                          <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                            {getTypeIcon(eq.type)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{eq.name}</p>
+                            <p className="text-xs text-gray-400 truncate">{eq.brand} {eq.model} · {eq.serialNumber || 'N/A'}</p>
+                          </div>
+                          <div className="shrink-0 text-right min-w-[130px]">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${wInfo ? wInfo.color : 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                              {wInfo ? wInfo.label : 'Non renseignée'}
+                            </span>
+                          </div>
+                          {isRenewing ? (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <input type="date" value={warrantyRenewDate}
+                                onChange={e => setWarrantyRenewDate(e.target.value)}
+                                className="w-40 px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                              <button onClick={() => renewWarranty(eq.id, warrantyRenewDate)} disabled={!warrantyRenewDate || warrantyRenewSaving}
+                                className="px-3 py-1.5 bg-[#1a6fa6] text-white rounded-lg text-xs font-medium hover:bg-[#155a8a] disabled:opacity-50 transition-colors">
+                                {warrantyRenewSaving ? '…' : 'Confirmer'}
+                              </button>
+                              <button onClick={() => { setWarrantyRenewEquipId(null); setWarrantyRenewDate(''); }}
+                                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+                                Annuler
+                              </button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setWarrantyRenewEquipId(eq.id); setWarrantyRenewDate(eq.warranty || ''); }}
+                              className="shrink-0 px-3 py-1.5 bg-[#e8f3fc] text-[#1a6fa6] rounded-lg text-xs font-medium hover:bg-[#d0e6f7] transition-colors">
+                              Renouveler
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  {equipments.filter(e => {
+                    if (!warrantyRenewSearch.trim()) return true;
+                    const q = warrantyRenewSearch.toLowerCase();
+                    return e.name.toLowerCase().includes(q) || e.brand?.toLowerCase().includes(q) || e.model?.toLowerCase().includes(q) || e.serialNumber?.toLowerCase().includes(q);
+                  }).length === 0 && (
+                    <div className="text-center py-12 text-gray-400 text-sm">Aucun équipement trouvé.</div>
+                  )}
+                </div>
+              </div>
+              {equipments.filter(e => {
+                if (!warrantyRenewSearch.trim()) return true;
+                const q = warrantyRenewSearch.toLowerCase();
+                return e.name.toLowerCase().includes(q) || e.brand?.toLowerCase().includes(q) || e.model?.toLowerCase().includes(q) || e.serialNumber?.toLowerCase().includes(q);
+              }).length > 50 && (
+                <p className="text-xs text-gray-400 text-center">Affichage des 50 premiers résultats. Utilisez la recherche pour préciser.</p>
+              )}
             </div>
           </div>
         </div>
@@ -6735,9 +6947,16 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                     ))}
                                   </div>
                                 </div>
-                                <div className="text-right text-xs text-gray-400 shrink-0">
-                                  {user.last_action && <p>Dernière action<br />{new Date(user.last_action).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>}
-                                  <ChevronDown className={`w-4 h-4 mx-auto mt-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button onClick={e => { e.stopPropagation(); downloadUserReport(user.username, user.user_name); }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-green-600 transition-colors"
+                                    title="Télécharger le rapport Excel">
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                  <div className="text-right text-xs text-gray-400">
+                                    {user.last_action && <p>Dernière action<br />{new Date(user.last_action).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>}
+                                    <ChevronDown className={`w-4 h-4 ml-auto mt-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                  </div>
                                 </div>
                               </div>
 
@@ -6854,7 +7073,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     <div className="space-y-2">
                       {reportSiteStats.map(site => {
                         const isExpanded = reportSiteExpanded === site.site_id;
-                        const maxEv = Math.max(...reportSiteStats.map((s: any) => s.total_events), 1);
+                        const maxEv = Math.max(...reportSiteStats.map(s => s.total_events), 1);
                         const barW = Math.round((site.total_events / maxEv) * 100);
                         return (
                           <div key={site.site_id} className="rounded-xl border border-gray-100 bg-white overflow-hidden">
@@ -8485,7 +8704,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   <Edit className="w-4 h-4" />
                                 </button>
                               )}
-                              {canModify && v.status !== 'terminé' && v.status !== 'annulé' && (
+                              {canModify && v.status !== 'terminé' && v.status !== 'annulé' && v.status !== 'en_cours' && (
                                 <button onClick={() => deleteVisitRecord(v.id)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-red-500" title="Supprimer">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -8609,22 +8828,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           )}
           </>}
 
-          {/* Visit form inline */}
+          {/* Visit form modal */}
           {showVisitForm && (
-            <div className="flex-1 overflow-auto px-6 pb-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 max-w-lg mx-auto">
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowVisitForm(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6">
                 {/* Form header */}
-                <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-                  <button onClick={() => setShowVisitForm(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 mr-1" title="Retour">
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
+                <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5 text-white" />
+                    <Clock className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-gray-900">{editingVisitId ? 'Modifier la visite' : 'Programmer une visite'}</h3>
                     <p className="text-xs text-gray-400">Renseignez les informations de la visite</p>
                   </div>
+                  <button onClick={() => setShowVisitForm(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title="Fermer">
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
                 {/* Form body */}
@@ -8878,7 +9098,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
 
                 {/* Form footer */}
-                <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+                <div className="flex gap-3 pt-4 border-t border-gray-100">
                   <button onClick={() => setShowVisitForm(false)}
                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
                     Annuler
@@ -9278,11 +9498,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               if (!area) return;
               const w = window.open('', '_blank');
               if (!w) return;
-              w.document.write(`<html><head><title>QR - ${qrEquipment.name}</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">`);
-              w.document.write(area.innerHTML);
-              w.document.write(`<p style="margin-top:12px;font-size:13px;color:#555">${qrEquipment.name} · ${qrEquipment.serialNumber || ''}</p>`);
-              w.document.write('</body></html>');
-              w.document.close();
+              const doc = w.document;
+              const html = doc.createElement('html');
+              const head = doc.createElement('head');
+              const title = doc.createElement('title');
+              title.textContent = 'QR - ' + qrEquipment.name;
+              head.appendChild(title);
+              const body = doc.createElement('body');
+              body.style.cssText = 'display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;';
+              body.appendChild(area.cloneNode(true));
+              const p = doc.createElement('p');
+              p.style.cssText = 'margin-top:12px;font-size:13px;color:#555';
+              p.textContent = qrEquipment.name + ' \u00B7 ' + (qrEquipment.serialNumber || '');
+              body.appendChild(p);
+              html.appendChild(head);
+              html.appendChild(body);
+              doc.appendChild(html);
+              doc.close();
               w.print();
             }}
               className="w-full py-2.5 rounded-xl bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 flex items-center justify-center gap-2">
@@ -10083,8 +10315,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 const canvas = barcodeCanvasRef.current;
                 if (!canvas) return;
                 const w = window.open('');
-                w?.document.write(`<img src="${canvas.toDataURL()}" />`);
-                w?.print();
+                if (!w) return;
+                const img = w.document.createElement('img');
+                img.src = canvas.toDataURL();
+                img.style.cssText = 'display:block;margin:auto;max-width:100%;padding:20px';
+                w.document.body.appendChild(img);
+                w.print();
               }} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">
                 Imprimer
               </button>

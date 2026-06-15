@@ -30,7 +30,6 @@ await fs.writeFile(
 
 console.log('Utilisateurs créés avec succès !');
 console.log('');
-console.log('Identifiants disponibles :');
-usersToCreate.forEach((u) =>
-  console.log(`  Login: ${u.username.padEnd(12)} | Mot de passe: ${u.password.padEnd(12)} | Rôle: ${u.role}`)
-);
+console.log('⚠️  Changez les mots de passe par défaut en production.');
+console.log('   Définissez les variables d\'environnement DEFAULT_ADMIN_PASSWORD,');
+console.log('   DEFAULT_TECH_PASSWORD et DEFAULT_USER_PASSWORD.');
