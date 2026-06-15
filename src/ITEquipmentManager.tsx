@@ -4052,7 +4052,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <p className="text-xs text-gray-400">{selectedEquipment.brand} {selectedEquipment.model}{selectedEquipment.serialNumber ? ` · ${selectedEquipment.serialNumber}` : ''}</p>
                 </div>
                 <button onClick={() => setShowDetailsModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                  <XCircle className="w-5 h-5 text-gray-400" />
+                  <X className="w-5 h-5 text-gray-400" />
                 </button>
               </div>
 
@@ -4356,8 +4356,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
-                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
-                  <XCircle className="w-5 h-5 text-white/80" />
+                <button onClick={() => { setShowMaintenanceModule(false); setShowMaintenanceForm(false); setSelectedMaintenance(null); }} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+                  <X className="w-5 h-5 text-white/70 hover:text-white" />
                 </button>
               </div>
             </div>
@@ -5506,8 +5506,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                   <Download className="w-4 h-4" /> PDF
                 </button>
-                <button onClick={() => setShowWarrantyModule(false)} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
-                  <XCircle className="w-5 h-5 text-white/80" />
+                <button onClick={() => setShowWarrantyModule(false)} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+                  <X className="w-5 h-5 text-white/70 hover:text-white" />
                 </button>
               </div>
             </div>
@@ -5646,8 +5646,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <p className="text-sm text-white/70">{allTransfers.length} transfert(s) enregistré(s)</p>
               </div>
             </div>
-            <button onClick={() => setShowTransferModule(false)} className="p-2 rounded-lg hover:bg-white/15 transition-colors">
-              <XCircle className="w-5 h-5 text-white/80" />
+            <button onClick={() => setShowTransferModule(false)} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+              <X className="w-5 h-5 text-white/70 hover:text-white" />
             </button>
           </div>
 
@@ -6033,16 +6033,18 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       {showSiteModal && (
         <div className="fixed top-11 left-0 right-0 bottom-0 z-50 bg-gray-50 flex flex-col">
             {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-200 shrink-0 bg-white">
-              <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
-                <Globe className="w-5 h-5 text-[#1a6fa6]" />
+            <div className="bg-[#1a6fa6] px-6 py-3 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Globe className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">Gestion des sites</h2>
+                  <p className="text-sm text-white/70">Configurer les sites et localisations</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-gray-900">Gestion des sites</h2>
-                <p className="text-xs text-gray-500">Configurer les sites et localisations</p>
-              </div>
-              <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0" title="Fermer">
-                <X className="w-5 h-5 text-gray-400" />
+              <button onClick={() => setShowSiteModal(false)} className="p-2 rounded-lg hover:bg-white/10 shrink-0" title="Fermer">
+                <X className="w-5 h-5 text-white/70 hover:text-white" />
               </button>
             </div>
 
@@ -6168,15 +6170,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowReformModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]">
             <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 shrink-0">
-              <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                <Archive className="w-5 h-5 text-gray-600" />
+              <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                <Archive className="w-5 h-5 text-[#1a6fa6]" />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-gray-900">Réformer l'équipement</h2>
                 <p className="text-xs text-gray-400 truncate">{reformTarget.name}</p>
               </div>
               <button onClick={() => setShowReformModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
+                <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
@@ -6520,8 +6522,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <p className="text-sm text-white/70">Statistiques et historique du parc</p>
                 </div>
               </div>
-              <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                <XCircle className="w-6 h-6 text-gray-500" />
+              <button onClick={() => setShowReportsModal(false)} className="p-2 rounded-lg hover:bg-white/10">
+                <X className="w-5 h-5 text-white/70 hover:text-white" />
               </button>
             </div>
 
@@ -7371,8 +7373,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <RefreshCcw className="w-3.5 h-3.5" />
                   Actualiser
                 </button>
-                <button onClick={() => setShowMonitoringModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Fermer">
-                  <XCircle className="w-6 h-6 text-gray-500" />
+                <button onClick={() => setShowMonitoringModal(false)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Fermer">
+                  <X className="w-5 h-5 text-white/70 hover:text-white" />
                 </button>
               </div>
             </div>
@@ -7590,8 +7592,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <Plus className="w-4 h-4" /> Ajouter un utilisateur
                 </button>
               )}
-              <button onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                <XCircle className="w-6 h-6 text-gray-500" />
+              <button onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-white/10">
+                <X className="w-5 h-5 text-white/70 hover:text-white" />
               </button>
             </div>
           </div>
@@ -7883,14 +7885,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {/* Header */}
             <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
               <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-white" />
+                <Users className="w-5 h-5 text-[#1a6fa6]" />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-gray-900">Gestion des accès</h2>
                 <p className="text-xs text-gray-400">{accessTarget.name} <span className="font-mono">@{accessTarget.username}</span></p>
               </div>
               <button onClick={() => setShowAccessModal(false)} className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
-                <XCircle className="w-5 h-5 text-gray-400" />
+                <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
 
@@ -8015,8 +8017,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <p className="text-sm text-white/70">{activityEntries.length} entrée(s) affichée(s)</p>
               </div>
             </div>
-            <button onClick={() => setShowActivityLog(false)} className="p-2 rounded-lg hover:bg-gray-100">
-              <XCircle className="w-6 h-6 text-gray-500" />
+            <button onClick={() => setShowActivityLog(false)} className="p-2 rounded-lg hover:bg-white/10">
+              <X className="w-5 h-5 text-white/70 hover:text-white" />
             </button>
           </div>
 
@@ -8238,8 +8240,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <Plus className="w-4 h-4" /> Nouvelle visite
                 </button>
               )}
-              <button onClick={() => setShowVisitModule(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                <XCircle className="w-6 h-6 text-gray-500" />
+              <button onClick={() => setShowVisitModule(false)} className="p-2 rounded-lg hover:bg-white/10">
+                <X className="w-5 h-5 text-white/70 hover:text-white" />
               </button>
             </div>
           </div>
@@ -8835,8 +8837,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6">
                 {/* Form header */}
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5 text-blue-600" />
+                  <div className="w-9 h-9 rounded-xl bg-[#e8f3fc] flex items-center justify-center shrink-0">
+                    <Clock className="w-5 h-5 text-[#1a6fa6]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-gray-900">{editingVisitId ? 'Modifier la visite' : 'Programmer une visite'}</h3>
@@ -9243,7 +9245,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </p>
                 </div>
                 <button onClick={() => setShowChatModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                  <XCircle className="w-5 h-5 text-gray-400" />
+                  <X className="w-5 h-5 text-gray-400" />
                 </button>
               </div>
 
@@ -9471,15 +9473,15 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="absolute inset-0 bg-black/50" onClick={() => setQrEquipment(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 max-w-xs w-full mx-4">
             <div className="flex items-center gap-3 w-full">
-              <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center">
-                <QrCode className="w-5 h-5 text-teal-600" />
+              <div className="w-10 h-10 rounded-xl bg-[#e8f3fc] flex items-center justify-center">
+                <QrCode className="w-5 h-5 text-[#1a6fa6]" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-bold text-gray-900 truncate">{qrEquipment.name}</h3>
                 <p className="text-xs text-gray-400">{qrEquipment.brand} {qrEquipment.model}</p>
               </div>
               <button onClick={() => setQrEquipment(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
-                <XCircle className="w-5 h-5" />
+                <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-3 bg-white rounded-xl border-2 border-gray-100" id="qr-print-area">
@@ -9531,8 +9533,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]">
             {/* Header */}
             <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100">
-              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
-                <Upload className="w-5 h-5 text-green-600" />
+              <div className="w-10 h-10 rounded-xl bg-[#e8f3fc] flex items-center justify-center">
+                <Upload className="w-5 h-5 text-[#1a6fa6]" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-base font-bold text-gray-900">Importer des équipements</h3>
@@ -9542,7 +9544,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 className="flex items-center gap-1.5 text-xs font-semibold text-[#1a6fa6] border border-[#1a6fa6]/30 px-3 py-1.5 rounded-lg hover:bg-[#e8f3fc] transition-colors mr-1" title="Télécharger le modèle CSV">
                 <Download className="w-3.5 h-3.5" /> Template CSV
               </button>
-              <button onClick={() => setShowImportModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><XCircle className="w-5 h-5" /></button>
+              <button onClick={() => setShowImportModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-5 h-5" /></button>
             </div>
             {/* Drop zone */}
             <div className="px-6 pt-5 pb-3">
