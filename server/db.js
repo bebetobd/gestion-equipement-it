@@ -12,9 +12,10 @@ if (!process.env.DATABASE_URL) {
   console.error('⚠️  DATABASE_URL non définie. Voir .env.example');
 }
 
+const isLocal = !process.env.VERCEL_ENV && !process.env.DATABASE_URL?.includes('neon');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
