@@ -37,6 +37,7 @@ export const app = express();
 const allowedOrigins = [
   'https://gestion-equipement-it.vercel.app',
   'http://localhost:5173',
+  'http://localhost:5174',
   'http://localhost:4173',
   'http://localhost:3000',
 ];
@@ -55,6 +56,16 @@ app.use(cors({
 const loginAttempts = new Map(); // IP → { count, blockedUntil }
 const MAX_ATTEMPTS   = 5;
 const BLOCK_MS       = 15 * 60 * 1000; // 15 minutes
+
+// Nettoyer les entrées expirées toutes les 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of loginAttempts) {
+    if (entry.blockedUntil && now >= entry.blockedUntil) {
+      loginAttempts.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000).unref();
 
 function getRateLimit(ip) {
   const now   = Date.now();
@@ -83,6 +94,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(requestLogger);
 
 // ─── API Portal (page HTML d'authentification) ────────────────────────────────
+
+// Simple health check (always works, no DB needed)
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
 
 app.get(['/api', '/api/'], (req, res) => {
   // If the client explicitly wants JSON, return a brief info object
@@ -388,7 +404,8 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
     loginAttempts.delete(ip);
 
     const permissions = user.permissions ?? [];
-    const jwtSecret = process.env.JWT_SECRET || 'gestion-it-secret-2024';
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is not set');
+    const jwtSecret = process.env.JWT_SECRET;
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '8h';
 
     const allowedSiteIds = user.allowed_site_ids ?? [];
@@ -448,6 +465,8 @@ app.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   await deleteSession(req.user.id);
   res.status(204).send();
 }));
+
+
 
 // ─── Admin monitoring routes ──────────────────────────────────────────────────
 
@@ -953,7 +972,7 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid equipment ID' });
 
-  const { toLocation, toDepartment, toSiteId, reason, technicianName, notes, transferQty } = req.body;
+  const { toLocation, toDepartment, toSiteId, reason, technicianName, notes, transferQty, transferRequester, transferResponsible } = req.body;
   if (!toLocation || !toDepartment) {
     return res.status(400).json({ message: 'Nouvelle localisation et département requis.' });
   }
@@ -1031,7 +1050,9 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
     details: `${detailParts.join(' | ')}. Raison: ${reason || 'Non précisée'}${notes ? '. Notes: ' + notes : ''}.`,
     changes,
     technician: technicianName || req.user.name,
-    userId: req.user.id, username: req.user.username, userName: req.user.name, ip
+    userId: req.user.id, username: req.user.username, userName: req.user.name, ip,
+    transferRequester: transferRequester || '',
+    transferResponsible: transferResponsible || '',
   });
   logActivity(req.user.id, req.user.username, req.user.name,
     'Transfert équipement', `"${old.name}"${isPartial ? ` (×${qty})` : ''} transféré vers "${toLocation}"${siteChanged ? ` (${toSiteName})` : ''}`, ip);
@@ -1090,7 +1111,7 @@ app.get('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
-  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName } = req.body;
+  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName, requestType } = req.body;
   if (!failureDesc?.trim()) return res.status(400).json({ message: 'Description de la panne requise.' });
 
   const record = await createMaintenance({
@@ -1098,9 +1119,10 @@ app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
     failureDesc, diagnosis: diagnosis || '', solution: solution || '',
     partsReplaced: partsReplaced || '', technician: technician || '',
     openedBy: req.user.name, priority: priority || 'normale',
-    status: status || 'ouvert',
+    status: requestType === 'assistance' ? 'en_attente' : (status || 'ouvert'),
     visitId: visitId || null,
     siteName: siteName || '',
+    requestType: requestType || 'maintenance',
   });
 
   // Enrich with equipment info if ID provided
@@ -1127,7 +1149,27 @@ app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
   }
 
   logActivity(req.user.id, req.user.username, req.user.name,
-    'Ticket maintenance', `Ticket ouvert: ${failureDesc.substring(0, 60)}`, getClientIp(req));
+    requestType === 'assistance' ? 'Demande assistance' : 'Ticket maintenance',
+    `${requestType === 'assistance' ? 'Demande d\'assistance' : 'Ticket'} ouvert: ${failureDesc.substring(0, 60)}`, getClientIp(req));
+
+  // Notifier les administrateurs/techniciens par email pour les demandes d'assistance
+  if (requestType === 'assistance') {
+    const { rows: techUsers } = await query("SELECT name, username FROM users WHERE role IN ('admin','technicien') AND blocked = FALSE");
+    const notifyEmails = process.env.REPORT_EMAIL ? [process.env.REPORT_EMAIL] : [];
+    for (const u of techUsers) {
+      const mailRes = await sendMail({
+        to: notifyEmails.length ? notifyEmails.join(',') : null,
+        subject: `[Assistance] Nouvelle demande de ${req.user.name}`,
+        html: `<h2>Nouvelle demande d'assistance</h2>
+<p><strong>De :</strong> ${req.user.name} (${req.user.username})</p>
+<p><strong>Description :</strong> ${failureDesc}</p>
+${equipmentId ? `<p><strong>Équipement :</strong> ${record.equipmentName || '#' + equipmentId}</p>` : ''}
+<p><strong>Date :</strong> ${new Date().toLocaleString('fr-FR')}</p>
+<p>Connectez-vous pour prendre en charge cette demande.</p>`
+      }).catch(() => {});
+    }
+  }
+
   res.status(201).json(record);
 }));
 
@@ -1188,6 +1230,9 @@ app.delete('/api/maintenance/:id', authenticate, requirePermission('modification
 app.patch('/api/maintenance/:id/note', authenticate, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid ID' });
+  const { rows: cur } = await query('SELECT status FROM maintenance_records WHERE id=$1', [id]);
+  if (!cur[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  if (cur[0].status === 'résolu') return res.status(403).json({ message: 'Ticket résolu — ajout d\'informations impossible.' });
   const { text } = req.body;
   if (!text?.trim()) return res.status(400).json({ message: 'Texte requis.' });
   const date = new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
@@ -1195,6 +1240,63 @@ app.patch('/api/maintenance/:id/note', authenticate, asyncHandler(async (req, re
   const updated = await appendMaintenanceNote(id, noteEntry);
   if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
   logActivity(req.user.id, req.user.username, req.user.name, 'Info maintenance', `Note ajoutée au ticket #${id}`, getClientIp(req));
+  res.json(updated);
+}));
+
+// ─── Assistance: assigner un technicien ────────────────────────────────────────
+app.patch('/api/maintenance/:id/assign', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide.' });
+  const { rows: cur } = await query('SELECT status, assigned_tech_id FROM maintenance_records WHERE id=$1', [id]);
+  if (!cur[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  if (cur[0].status === 'résolu') return res.status(403).json({ message: 'Ticket déjà résolu.' });
+  const updated = await updateMaintenance(id, { assignedTechId: req.user.id, technician: req.user.name, status: 'en_cours', startedAt: new Date().toISOString() });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Prise en charge', `Technicien "${req.user.name}" a pris en charge le ticket #${id}`, getClientIp(req));
+  res.json(updated);
+}));
+
+// ─── Assistance: confirmer résolution (utilisateur) ────────────────────────────
+app.patch('/api/maintenance/:id/confirm-user', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide.' });
+  const updated = await updateMaintenance(id, { userConfirmed: true });
+  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
+  // Si les deux ont confirmé, fermer le ticket
+  if (updated.userConfirmed && updated.techConfirmed) {
+    await updateMaintenance(id, { status: 'résolu', closedAt: new Date().toISOString() });
+    const final = await updateMaintenance(id, { techConfirmed: true, userConfirmed: true });
+    logActivity(req.user.id, req.user.username, req.user.name, 'Clôture ticket', `Ticket #${id} clôturé — confirmé par l'utilisateur et le technicien`, getClientIp(req));
+    return res.json(final);
+  }
+  logActivity(req.user.id, req.user.username, req.user.name, 'Confirmation utilisateur', `Ticket #${id} confirmé par l'utilisateur`, getClientIp(req));
+  res.json(updated);
+}));
+
+// ─── Assistance: confirmer résolution (technicien) ─────────────────────────────
+app.patch('/api/maintenance/:id/confirm-tech', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide.' });
+  const updated = await updateMaintenance(id, { techConfirmed: true });
+  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
+  if (updated.userConfirmed && updated.techConfirmed) {
+    await updateMaintenance(id, { status: 'résolu', closedAt: new Date().toISOString() });
+    const final = await updateMaintenance(id, { techConfirmed: true, userConfirmed: true });
+    logActivity(req.user.id, req.user.username, req.user.name, 'Clôture ticket', `Ticket #${id} clôturé — confirmé par l'utilisateur et le technicien`, getClientIp(req));
+    return res.json(final);
+  }
+  logActivity(req.user.id, req.user.username, req.user.name, 'Confirmation technicien', `Ticket #${id} confirmé par le technicien`, getClientIp(req));
+  res.json(updated);
+}));
+
+// ─── Assistance: noter le technicien ───────────────────────────────────────────
+app.patch('/api/maintenance/:id/rate', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide.' });
+  const { rating, reviewComment } = req.body;
+  if (!rating || rating < 1 || rating > 5) return res.status(400).json({ message: 'Note entre 1 et 5.' });
+  const updated = await updateMaintenance(id, { rating, reviewComment: reviewComment || '' });
+  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Évaluation', `Ticket #${id} noté ${rating}/5`, getClientIp(req));
   res.json(updated);
 }));
 
@@ -1580,7 +1682,7 @@ app.post('/api/visits', authenticate, requirePermission('ecriture'), asyncHandle
     return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
   }
   const visit = await createVisit({ siteId: Number(siteId), siteName: siteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status: status||'planifié', notes: notes||'', createdBy: req.user.name, withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'' });
-  await logActivity({ userId: req.user.id, username: req.user.username, name: req.user.name, action: 'Visite programmée', details: `Visite sur ${siteName} le ${scheduledDate}`, ip: getClientIp(req) });
+  logActivity(req.user.id, req.user.username, req.user.name, 'Visite programmée', `Visite sur ${siteName} le ${scheduledDate}`, getClientIp(req));
   res.status(201).json(visit);
 }));
 
@@ -1597,7 +1699,7 @@ app.patch('/api/visits/:id', authenticate, requirePermission('ecriture'), asyncH
 
 app.delete('/api/visits/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
   await deleteVisit(Number(req.params.id));
-  res.json({ message: 'Visite supprimée.' });
+  res.status(204).end();
 }));
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────

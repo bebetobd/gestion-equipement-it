@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend (port 4000)",
+      "type": "shell",
+      "command": "node server/server.js",
+      "group": "none",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend (port 5173)",
+      "type": "shell",
+      "command": "npm run dev",
+      "group": "none",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

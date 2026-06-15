@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import LoginPage from './LoginPage';
 import ITEquipmentManager from './ITEquipmentManager';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
-const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+import { apiUrl } from './config';
 
 interface AuthUser {
   id: number;

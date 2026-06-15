@@ -1,4 +1,5 @@
 import pg from 'pg';
+import bcrypt from 'bcryptjs';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,7 +17,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
   max: 5,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+  connectionTimeoutMillis: 10000,
+  keepAlive: true
+});
+
+pool.on('error', (err) => {
+  console.error('PostgreSQL pool error:', err);
 });
 
 let initialized = false;
@@ -24,6 +30,21 @@ let initialized = false;
 async function initDB() {
   if (initialized) return;
 
+  // Don't let initDB failures break the app (tables already exist from prior runs)
+  if (process.env.VERCEL_ENV) {
+    try {
+      await _initDB();
+    } catch (e) {
+      console.error('initDB error (non-fatal):', e?.message || e);
+    }
+    initialized = true;
+    return;
+  }
+  await _initDB();
+  initialized = true;
+}
+
+async function _initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id        SERIAL PRIMARY KEY,
@@ -66,24 +87,25 @@ async function initDB() {
   // Migration: add min_quantity (stock threshold for accessories)
   await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS min_quantity INTEGER NOT NULL DEFAULT 0`);
 
-  // Seed users from JSON if table is empty
-  const { rows: uCount } = await pool.query('SELECT COUNT(*) FROM users');
-  if (parseInt(uCount[0].count, 10) === 0) {
-    try {
-      const data = JSON.parse(
-        await fs.readFile(path.join(__dirname, 'data', 'users.json'), 'utf-8')
-      );
-      for (const u of data) {
-        await pool.query(
-          `INSERT INTO users (id, username, password, name, role, permissions)
-           VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
-          [u.id, u.username, u.password, u.name, u.role, u.permissions ?? ['lecture']]
-        );
-      }
-      await pool.query("SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))");
-    } catch (e) {
-      console.error('Seeding users failed:', e.message);
-    }
+  // Migration: add blocked and allowed_site_ids columns to users
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_site_ids INTEGER[] DEFAULT NULL`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMP DEFAULT NULL`);
+
+  // Seed default users (passwords hashed at runtime)
+  const defaultUsers = [
+    { username:'admin',       password:'admin2024',       role:'admin',       name:'Administrateur',  permissions:['administration','modification','lecture'] },
+    { username:'technicien',  password:'technicien2024',  role:'technicien', name:'Technicien IT',   permissions:['modification','lecture'] },
+    { username:'utilisateur', password:'utilisateur2024', role:'user',       name:'Utilisateur',     permissions:['lecture'] }
+  ];
+  for (const u of defaultUsers) {
+    const hash = await bcrypt.hash(u.password, 10);
+    await pool.query('DELETE FROM users WHERE username = $1', [u.username]);
+    await pool.query(
+      `INSERT INTO users (username, password, name, role, permissions) VALUES ($1,$2,$3,$4,$5)`,
+      [u.username, hash, u.name, u.role, u.permissions]
+    );
   }
 
   // Seed equipments from JSON if table is empty
@@ -163,6 +185,8 @@ async function initDB() {
     CREATE INDEX IF NOT EXISTS idx_equipment_events_department
       ON equipment_events(department)
   `);
+  await pool.query(`ALTER TABLE equipment_events ADD COLUMN IF NOT EXISTS transfer_requester VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE equipment_events ADD COLUMN IF NOT EXISTS transfer_responsible VARCHAR(200) NOT NULL DEFAULT ''`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS equipment_documents (
@@ -232,10 +256,6 @@ async function initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
   // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
   await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
-
-  // Reset admin password (one-time migration)
-  await pool.query(`UPDATE users SET password = $1 WHERE username = 'admin'`,
-    ['$2b$10$bPgxnQv2Rr2HtO2mNyJVLuzGP2YXzVYw9bjFkpn3VcUlQnekeI6hG']);
 
   // Migration: add notes to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
@@ -319,6 +339,12 @@ async function initDB() {
   await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS rescheduled_date DATE`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS visit_id INTEGER REFERENCES site_visits(id) ON DELETE SET NULL`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS site_name VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS request_type VARCHAR(20) NOT NULL DEFAULT 'maintenance'`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS assigned_tech_id INTEGER DEFAULT NULL`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS user_confirmed BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS tech_confirmed BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT NULL`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS review_comment TEXT NOT NULL DEFAULT ''`);
 
   // Licences logicielles
   await pool.query(`
@@ -412,8 +438,6 @@ async function initDB() {
 
   // Webhook Slack/Teams
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS slack_webhook TEXT NOT NULL DEFAULT ''`);
-
-  initialized = true;
 }
 
 export async function query(text, params) {
@@ -421,13 +445,13 @@ export async function query(text, params) {
   return pool.query(text, params);
 }
 
-export async function logEquipmentEvent({ equipmentId, equipmentName, equipmentType, department, action, details, changes = [], technician = '', userId, username, userName, ip }) {
+export async function logEquipmentEvent({ equipmentId, equipmentName, equipmentType, department, action, details, changes = [], technician = '', userId, username, userName, ip, transferRequester = '', transferResponsible = '' }) {
   await initDB();
   return pool.query(
     `INSERT INTO equipment_events
-       (equipment_id, equipment_name, equipment_type, department, action, details, changes, technician, user_id, username, user_name, ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [equipmentId, equipmentName, equipmentType, department, action, details, JSON.stringify(changes), technician, userId, username, userName, ip]
+       (equipment_id, equipment_name, equipment_type, department, action, details, changes, technician, user_id, username, user_name, ip, transfer_requester, transfer_responsible)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [equipmentId, equipmentName, equipmentType, department, action, details, JSON.stringify(changes), technician, userId, username, userName, ip, transferRequester, transferResponsible]
   );
 }
 
@@ -537,13 +561,13 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
 
 export async function createMaintenance(data) {
   await initDB();
-  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName } = data;
+  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType } = data;
   const { rows } = await pool.query(
     `INSERT INTO maintenance_records
-       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name, request_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
-    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '']
+    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '', requestType || 'maintenance']
   );
   return rowToMaintenance(rows[0]);
 }
@@ -553,7 +577,7 @@ export async function updateMaintenance(id, data) {
   const fields = [];
   const params = [];
   let i = 1;
-  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name' };
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name', requestType: 'request_type', assignedTechId: 'assigned_tech_id', userConfirmed: 'user_confirmed', techConfirmed: 'tech_confirmed', rating: 'rating', reviewComment: 'review_comment' };
   for (const [key, col] of Object.entries(map)) {
     if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
   }
@@ -602,6 +626,12 @@ function rowToMaintenance(row) {
     notes: row.notes || '',
     visitId: row.visit_id ?? null,
     siteName: row.site_name || '',
+    requestType: row.request_type || 'maintenance',
+    assignedTechId: row.assigned_tech_id ?? null,
+    userConfirmed: row.user_confirmed ?? false,
+    techConfirmed: row.tech_confirmed ?? false,
+    rating: row.rating ?? null,
+    reviewComment: row.review_comment || '',
   };
 }
 
@@ -636,6 +666,8 @@ function rowToEvent(row) {
     userName: row.user_name,
     ip: row.ip,
     createdAt: row.created_at,
+    transferRequester: row.transfer_requester || '',
+    transferResponsible: row.transfer_responsible || '',
   };
 }
 

@@ -6,14 +6,25 @@ import {
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
-  Moon, Sun, Eye, EyeOff
+  Moon, Sun, Eye, EyeOff, Headset
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { Document as DocxDocument, Packer, Paragraph as DocxParagraph, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, TextRun, HeadingLevel, WidthType } from 'docx';
+import * as ExportHelpers from './utils/exportHelpers';
 import { QRCodeSVG } from 'qrcode.react';
 import JsBarcode from 'jsbarcode';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
+import {
+  TableRow as DocxTableRow,
+  TableCell as DocxTableCell,
+  Paragraph as DocxParagraph,
+  TextRun,
+  Document as DocxDocument,
+  Packer,
+  Table as DocxTable,
+  WidthType,
+  HeadingLevel
+} from 'docx';
 import 'leaflet/dist/leaflet.css';
 
 interface AuthUser {
@@ -106,6 +117,8 @@ interface TransferForm {
   toSiteId: number | null;
   reason: string;
   technicianName: string;
+  transferRequester: string;
+  transferResponsible: string;
   notes: string;
   transferQty: number;
 }
@@ -133,6 +146,12 @@ interface MaintenanceRecord {
   notes: string;
   visitId: number | null;
   siteName: string;
+  requestType: string;
+  assignedTechId: number | null;
+  userConfirmed: boolean;
+  techConfirmed: boolean;
+  rating: number | null;
+  reviewComment: string;
 }
 
 interface Site {
@@ -170,6 +189,7 @@ interface MaintenanceForm {
   technician: string;
   priority: MaintenancePriority;
   status: MaintenanceStatus;
+  requestType: string;
 }
 
 const defaultFormData: EquipmentFormData = {
@@ -512,7 +532,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   // Transfer
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferTarget, setTransferTarget] = useState<Equipment | null>(null);
-  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
+  const [transferForm, setTransferForm] = useState<TransferForm>({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', transferRequester: '', transferResponsible: '', notes: '', transferQty: 1 });
   const [transferLoading, setTransferLoading] = useState(false);
 
   // Documents
@@ -540,7 +560,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceRecord | null>(null);
   const [showMaintenanceForm, setShowMaintenanceForm] = useState(false);
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
-  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert' };
+  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
   const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
   const [maintTechFilter, setMaintTechFilter] = useState<string[]>([]);
@@ -548,6 +568,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [noteLoading, setNoteLoading] = useState(false);
+  const [showAssistanceFilter, setShowAssistanceFilter] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
 
   // Sites
   const [sites, setSites] = useState<Site[]>([]);
@@ -843,41 +867,44 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   // ── Fiche technique PDF ────────────────────────────────────────────────────
-  const generateEquipmentSheet = (e: Equipment) => {
+  const generateEquipmentSheet = async (e: Equipment) => {
+    const { jsPDF, autoTable } = await ExportHelpers.createPdfDocument();
     const doc = new jsPDF();
     doc.setFontSize(18); doc.setTextColor(26, 111, 166);
     doc.text(`Fiche technique — ${e.name}`, 14, 20);
     doc.setFontSize(10); doc.setTextColor(100);
     doc.text(`Générée le ${new Date().toLocaleDateString('fr-FR')} par ${currentUser.name}`, 14, 28);
     const deprec = getDepreciation(e);
-    autoTable(doc, {
-      startY: 35,
-      head: [['Champ', 'Valeur']],
-      body: [
-        ['Nom', e.name],
-        ['Type', e.type],
-        ['Marque', e.brand],
-        ['Modèle', e.model],
-        ['Numéro de série', maskValue(e.serialNumber) || '—'],
-        ['Adresse IP', maskValue(e.ipAddress) || '—'],
-        ['Statut', e.status],
-        ['Localisation', e.location],
-        ['Département', e.department],
-        ['Date d\'achat', e.purchaseDate || '—'],
-        ['Fin de garantie', e.warranty || '—'],
-        ['Dernière maintenance', e.lastMaintenance || '—'],
-        ['Technicien', e.technicianName || '—'],
-        ['Quantité', String(e.quantity)],
-        ...(deprec ? [['Amortissement', `${deprec.pct}% (${deprec.age} ans) — état ${deprec.status}`]] : []),
-      ],
-      theme: 'striped',
-      headStyles: { fillColor: [26, 111, 166] },
-    });
+    if (autoTable) {
+      autoTable(doc, {
+        startY: 35,
+        head: [['Champ', 'Valeur']],
+        body: [
+          ['Nom', e.name],
+          ['Type', e.type],
+          ['Marque', e.brand],
+          ['Modèle', e.model],
+          ['Numéro de série', maskValue(e.serialNumber) || '—'],
+          ['Adresse IP', maskValue(e.ipAddress) || '—'],
+          ['Statut', e.status],
+          ['Localisation', e.location],
+          ['Département', e.department],
+          ['Date d\'achat', e.purchaseDate || '—'],
+          ['Fin de garantie', e.warranty || '—'],
+          ['Dernière maintenance', e.lastMaintenance || '—'],
+          ['Technicien', e.technicianName || '—'],
+          ['Quantité', String(e.quantity)],
+          ...(deprec ? [['Amortissement', `${deprec.pct}% (${deprec.age} ans) — état ${deprec.status}`]] : []),
+        ],
+        theme: 'striped',
+        headStyles: { fillColor: [26, 111, 166] },
+      });
+    }
     if (e.interventionDetails) {
-      const y = (doc as any).lastAutoTable.finalY + 10;
-      doc.setFontSize(11); doc.setTextColor(26, 111, 166); doc.text('Détails intervention', 14, y);
+      const y = (doc as any).lastAutoTable?.finalY || 35;
+      doc.setFontSize(11); doc.setTextColor(26, 111, 166); doc.text('Détails intervention', 14, y + 10);
       doc.setFontSize(10); doc.setTextColor(60);
-      doc.text(doc.splitTextToSize(e.interventionDetails, 180), 14, y + 6);
+      doc.text(doc.splitTextToSize(e.interventionDetails, 180), 14, y + 16);
     }
     doc.save(`fiche-${e.name.replace(/\s+/g, '-')}.pdf`);
   };
@@ -1372,28 +1399,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     visitDate: 'Date visite', interventionDetails: 'Détails intervention',
   };
 
-  const exportReportPdf = (title: string, events: EquipmentEvent[]) => {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    doc.setFontSize(14);
-    doc.text(title, 14, 14);
-    doc.setFontSize(9);
-    doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${events.length} événement(s)`, 14, 21);
-    autoTable(doc, {
-      startY: 26,
+  const exportReportPdf = async (title: string, events: EquipmentEvent[]) => {
+    await ExportHelpers.exportRowsToPdf({
       head: [['Date', 'Équipement', 'Type', 'Département', 'Action', 'Détails', 'Technicien', 'Utilisateur']],
       body: events.map(ev => [
         new Date(ev.createdAt).toLocaleString('fr-FR'),
         ev.equipmentName, ev.equipmentType, ev.department,
         ev.action, ev.details, ev.technician, ev.userName,
       ]),
-      styles: { fontSize: 7, cellPadding: 2 },
-      headStyles: { fillColor: [79, 70, 229] },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
+      filename: `rapport-${Date.now()}.pdf`,
+      title,
+      orientation: 'landscape',
     });
-    doc.save(`rapport-${Date.now()}.pdf`);
   };
 
-  const exportReportExcel = (sheetName: string, events: EquipmentEvent[]) => {
+  const exportReportExcel = async (sheetName: string, events: EquipmentEvent[]) => {
     const rows = events.map(ev => ({
       'Date': new Date(ev.createdAt).toLocaleString('fr-FR'),
       'Équipement': ev.equipmentName,
@@ -1405,37 +1425,25 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       'Utilisateur': ev.userName,
       'IP': ev.ip,
     }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-    XLSX.writeFile(wb, `rapport-${Date.now()}.xlsx`);
+    await ExportHelpers.exportJsonToXlsx(rows, `rapport-${Date.now()}.xlsx`, sheetName);
   };
 
-  const exportDeptPdf = (stats: DeptStat[]) => {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    doc.setFontSize(14); doc.text('Rapport par service', 14, 14);
-    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} service(s)`, 14, 21);
-    autoTable(doc, {
-      startY: 26,
+  const exportDeptPdf = async (stats: DeptStat[]) => {
+    await ExportHelpers.exportRowsToPdf({
       head: [['Service', 'Équipements', 'Total événements', 'Créations', 'Modifications', 'Interventions', 'Suppressions', 'Dernière activité']],
       body: stats.map(d => [
         d.department, d.equipment_count, d.total_events, d.creations,
         d.modifications, d.interventions, d.suppressions,
         d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
       ]),
-      styles: { fontSize: 7, cellPadding: 2 },
-      headStyles: { fillColor: [79, 70, 229] },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
+      filename: `rapport-services-${Date.now()}.pdf`,
+      title: 'Rapport par service',
+      orientation: 'landscape'
     });
-    doc.save(`rapport-services-${Date.now()}.pdf`);
   };
 
-  const exportUserPdf = (stats: UserStat[]) => {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    doc.setFontSize(14); doc.text('Rapport par utilisateur', 14, 14);
-    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} utilisateur(s)`, 14, 21);
-    autoTable(doc, {
-      startY: 26,
+  const exportUserPdf = async (stats: UserStat[]) => {
+    await ExportHelpers.exportRowsToPdf({
       head: [['Utilisateur', 'Login', 'Total', 'Créations', 'Modifications', 'Transferts', 'Suppressions', 'Maintenances', 'Réformes', 'Équip.', 'Services', 'Dernière action']],
       body: stats.map(u => [
         u.user_name, u.username, u.total_actions, u.creations, u.modifications,
@@ -1443,19 +1451,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         u.equipment_count, u.dept_count,
         u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
       ]),
-      styles: { fontSize: 6, cellPadding: 2 },
-      headStyles: { fillColor: [79, 70, 229] },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
+      filename: `rapport-utilisateurs-${Date.now()}.pdf`,
+      title: 'Rapport par utilisateur',
+      orientation: 'landscape'
     });
-    doc.save(`rapport-utilisateurs-${Date.now()}.pdf`);
-  };
+  }
 
-  const exportSitePdf = (stats: any[]) => {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    doc.setFontSize(14); doc.text('Rapport par site', 14, 14);
-    doc.setFontSize(9); doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${stats.length} site(s)`, 14, 21);
-    autoTable(doc, {
-      startY: 26,
+  const exportSitePdf = async (stats: any[]) => {
+    await ExportHelpers.exportRowsToPdf({
       head: [['Site', 'Ville', 'Pays', 'Équipements', 'Total événements', 'Créations', 'Modifications', 'Transferts', 'Interventions', 'Réformes', 'Suppressions', 'Dernière activité']],
       body: stats.map(s => [
         s.site_name, s.city || '—', s.country || '—',
@@ -1463,13 +1466,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         s.transferts, s.interventions, s.reformes, s.suppressions,
         s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
       ]),
-      styles: { fontSize: 6, cellPadding: 2 },
-      headStyles: { fillColor: [79, 70, 229] },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
+      filename: `rapport-sites-${Date.now()}.pdf`,
+      title: 'Rapport par site',
+      orientation: 'landscape',
+      tableOptions: { styles: { fontSize: 6, cellPadding: 2 }, alternateRowStyles: { fillColor: [245, 247, 250] } },
     });
-    doc.save(`rapport-sites-${Date.now()}.pdf`);
   };
-
 
   // ─── Monitoring helpers ────────────────────────────────────────────────────
 
@@ -2129,7 +2131,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     { key: 'interventionDetails', label: 'Détails intervention' },
   ] as const;
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const rows = filteredEquipments.map((e) => {
       const row = Object.fromEntries(
         EXPORT_COLUMNS.map(({ key, label }) => [label, key === 'visited' ? (e[key] ? 'Oui' : 'Non') : (e[key as keyof Equipment] ?? '')])
@@ -2137,10 +2139,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       row['Site'] = e.siteId ? (sites.find(s => s.id === e.siteId)?.name ?? '') : '';
       return row;
     });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Équipements');
-    XLSX.writeFile(wb, 'equipements.xlsx');
+    await ExportHelpers.exportJsonToXlsx(rows, 'equipements.xlsx', 'Équipements');
     setShowExportMenu(false);
   };
 
@@ -2176,7 +2175,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowExportMenu(false);
   };
 
-  const handleExportWarrantyExcel = () => {
+  const handleExportWarrantyExcel = async () => {
     const rows = warrantyVisibleEquipments.map((e) => ({
       ID: e.id,
       Nom: e.name,
@@ -2193,10 +2192,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       'Délai restant': e.warrantyDays != null ? `${e.warrantyDays} j` : 'N/A',
       'Dernière maintenance': e.lastMaintenance,
     }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Garanties');
-    XLSX.writeFile(wb, 'garanties.xlsx');
+    await ExportHelpers.exportJsonToXlsx(rows, 'garanties.xlsx', 'Garanties');
   };
 
   const handleExportWarrantyPdf = () => {
@@ -2234,7 +2230,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openTransferModal = (equipment: Equipment) => {
     setTransferTarget(equipment);
-    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, toSiteId: equipment.siteId ?? null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: equipment.quantity ?? 1 });
+    setTransferForm({ toLocation: equipment.location, toDepartment: equipment.department, toSiteId: equipment.siteId ?? null, reason: 'Réorganisation', technicianName: '', transferRequester: '', transferResponsible: '', notes: '', transferQty: equipment.quantity ?? 1 });
     setShowTransferModal(true);
   };
 
@@ -2603,6 +2599,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const closeAllModules = () => {
+    setShowTransferModal(false);
     setShowTransferModule(false);
     setShowTransferReport(false);
     setShowMaintenanceModule(false);
@@ -2630,6 +2627,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const openMaintenanceModule = () => {
     closeAllModules();
     setShowMaintenanceModule(true);
+    setShowAssistanceFilter(false);
     setSelectedMaintenance(null);
     fetchMaintenance(maintenanceFilter);
   };
@@ -2812,7 +2810,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     : 'Toutes les données disponibles';
 
   const pagedEquipments   = filteredEquipments.slice((equipPage - 1) * PAGE_SIZE, equipPage * PAGE_SIZE);
-  const pagedMaintenance  = maintenanceRecords.slice((maintenancePage - 1) * PAGE_SIZE, maintenancePage * PAGE_SIZE);
+  const assistanceViewRecords = showAssistanceFilter
+    ? maintenanceRecords.filter(m => m.requestType === 'assistance')
+    : maintenanceRecords;
+  const pagedMaintenance  = assistanceViewRecords.slice((maintenancePage - 1) * PAGE_SIZE, maintenancePage * PAGE_SIZE);
   const pagedActivityLogs = activityLogs.slice((activityPage - 1) * PAGE_SIZE, activityPage * PAGE_SIZE);
 
   const warrantyEquipments = equipments.filter((equipment) =>
@@ -2895,30 +2896,34 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
         {/* Nav items — scrollable */}
         <div className="flex items-center h-11 overflow-x-auto flex-1" style={{scrollbarWidth:'none'}}>
-          <button type="button" onClick={() => closeAllModules()}
-            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap font-medium transition-colors">
-            <Monitor className="w-3.5 h-3.5 shrink-0" /> Équipements
-          </button>
+          {!(showWarrantyModule || showUnifiedCalendar || showCalendar) && (
+            <button type="button" onClick={() => closeAllModules()}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap font-medium transition-colors">
+              <Monitor className="w-3.5 h-3.5 shrink-0" /> Équipements
+            </button>
+          )}
           {canWrite && canModify && (
             <button type="button" onClick={() => { closeAllModules(); setShowTransferModule(true); fetchAllTransfers(); }}
-              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
               <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> Transferts
             </button>
           )}
-          {canWrite && (
-            <button type="button" onClick={() => openMaintenanceModule()}
-              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-              <Wrench className="w-3.5 h-3.5 shrink-0" /> Maintenance
-              {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (() => {
-                const total = maintenanceRecords.filter(m => m.status !== 'résolu').length;
-                const hasCritical = maintenanceRecords.some(m => m.priority === 'critique' && m.status !== 'résolu');
-                return <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`}>{total}</span>;
-              })()}
-            </button>
-          )}
+          <button type="button" onClick={() => { closeAllModules(); setMaintForm({ ...defaultMaintenanceForm, requestType: 'assistance' }); setMaintenanceEditId(null); setShowMaintenanceForm(true); setShowMaintenanceModule(true); }}
+            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
+            <Headset className="w-3.5 h-3.5 shrink-0" /> Assistance
+          </button>
+          <button type="button" onClick={() => openMaintenanceModule()}
+            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
+            <Wrench className="w-3.5 h-3.5 shrink-0" /> Maintenance
+            {maintenanceRecords.filter(m => m.status !== 'résolu').length > 0 && (() => {
+              const total = maintenanceRecords.filter(m => m.status !== 'résolu').length;
+              const hasCritical = maintenanceRecords.some(m => m.priority === 'critique' && m.status !== 'résolu');
+              return <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`}>{total}</span>;
+            })()}
+          </button>
           {canWrite && (
             <button type="button" onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
-              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
               <Clock className="w-3.5 h-3.5 shrink-0" /> Visites de site
               {(() => {
                 const todayStr = new Date().toISOString().slice(0,10);
@@ -2938,7 +2943,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </button>
           )}
           <button type="button" onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
             <Calendar className="w-3.5 h-3.5 shrink-0" /> Rapports
           </button>
           <button type="button" onClick={() => { closeAllModules(); setShowUnifiedCalendar(true); }}
@@ -2946,29 +2951,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <LayoutGrid className="w-3.5 h-3.5 shrink-0" /> Calendrier
           </button>
           <button type="button" onClick={() => setShowMap(true)}
-            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
             <MapPin className="w-3.5 h-3.5 shrink-0" /> Carte
           </button>
           {isAdmin && (
             <>
               <button type="button" onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
                 <ClipboardList className="w-3.5 h-3.5 shrink-0" /> Journal
               </button>
               <button type="button" onClick={() => { closeAllModules(); setShowMonitoringModal(true); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
                 <Activity className="w-3.5 h-3.5 shrink-0" /> Monitoring
               </button>
               <button type="button" onClick={() => { fetchUsers(); setShowUserModal(true); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
                 <Users className="w-3.5 h-3.5 shrink-0" /> Utilisateurs
               </button>
               <button type="button" onClick={() => { setSiteForm(defaultSiteForm); setEditingSiteId(null); setShowSiteModal(true); }}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+                className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
                 <Globe className="w-3.5 h-3.5 shrink-0" /> Sites
               </button>
               <button type="button" onClick={downloadBackup}
-                className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors"
+                className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}
                 title="Télécharger une sauvegarde complète JSON">
                 <Download className="w-3.5 h-3.5 shrink-0" /> Sauvegarde
               </button>
@@ -4084,7 +4089,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 {detailsTab === 'history' && (() => {
                   type TimelineEvent = { date: string; label: string; detail: string; dot: string; icon: React.ReactNode };
                   const events: TimelineEvent[] = [];
-                  if (selectedEquipment.purchaseDate) events.push({ date: selectedEquipment.purchaseDate, label: 'Acquisition', detail: `Mis en service${selectedEquipment.department ? ` — ${selectedEquipment.department}` : ''}`, dot: 'bg-[#e8f3fc]0', icon: <Monitor className="w-3 h-3 text-white" /> });
+                  if (selectedEquipment.purchaseDate) events.push({ date: selectedEquipment.purchaseDate, label: 'Acquisition', detail: `Mis en service${selectedEquipment.department ? ` — ${selectedEquipment.department}` : ''}`, dot: 'bg-[#e8f3fc]/20', icon: <Monitor className="w-3 h-3 text-white" /> });
                   transferHistory.forEach(ev => events.push({ date: ev.createdAt, label: 'Transfert', detail: ev.details || '—', dot: 'bg-purple-500', icon: <ArrowRightLeft className="w-3 h-3 text-white" /> }));
                   maintenanceRecords.filter(m => m.equipmentId === selectedEquipment.id).forEach(m => events.push({ date: m.openedAt, label: `Ticket #${m.id} — ${maintenanceStatusLabel[m.status] ?? m.status}`, detail: m.failureDesc || '—', dot: m.status === 'résolu' ? 'bg-green-500' : 'bg-orange-500', icon: <Wrench className="w-3 h-3 text-white" /> }));
                   visits.filter(v => v.equipmentIds?.includes(selectedEquipment.id)).forEach(v => events.push({ date: v.scheduledDate + 'T00:00:00', label: `Visite — ${v.siteName}`, detail: v.purpose || '—', dot: 'bg-blue-500', icon: <Clock className="w-3 h-3 text-white" /> }));
@@ -4173,6 +4178,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <p className="text-xs text-gray-500 mt-1">
                                 {new Date(ev.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
                                 {ev.technician && ` · Technicien : ${ev.technician}`}
+                                {ev.transferRequester && ` · Demandeur : ${ev.transferRequester}`}
+                                {ev.transferResponsible && ` · Responsable : ${ev.transferResponsible}`}
                                 {` · Par ${ev.userName}`}
                               </p>
                             </div>
@@ -4259,7 +4266,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => { setMaintForm(defaultMaintenanceForm); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
+                <button onClick={() => { setMaintForm({ ...defaultMaintenanceForm, requestType: 'maintenance' }); setMaintenanceEditId(null); setShowMaintenanceForm(true); setSelectedMaintenance(null); }}
                   className="inline-flex items-center gap-2 rounded border border-white/30 bg-white/15 px-3 py-1.5 text-sm text-white hover:bg-white/25 font-semibold transition-colors">
                   <Plus className="w-4 h-4" /> Nouveau ticket
                 </button>
@@ -4270,7 +4277,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             </div>
 
             {/* Tabs */}
-            <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white">
+            <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white items-center">
               <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(false); }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && !showKanban ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                 <LayoutList className="w-3.5 h-3.5" /> Liste
@@ -4283,6 +4290,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showMaintenanceReport ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                 Rapport
               </button>
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={() => { setShowAssistanceFilter(v => !v); }}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${showAssistanceFilter ? 'bg-[#1a6fa6] text-white' : 'text-gray-500 hover:text-gray-700 border border-gray-200'}`}>
+                  <Headset className="w-3.5 h-3.5 inline-block mr-1" />
+                  Assistance
+                </button>
+              </div>
             </div>
 
             {/* Stats bar */}
@@ -4327,34 +4341,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               const avgMs = resolved.length ? resolved.reduce((acc, m) => acc + (new Date(m.closedAt!).getTime() - new Date(m.openedAt).getTime()), 0) / resolved.length : 0;
               const avgH = Math.round(avgMs / 3600000);
               const prioColors: Record<string, string> = { critique: 'bg-red-500', haute: 'bg-orange-400', normale: 'bg-blue-400', basse: 'bg-gray-300' };
-              const exportMaintenanceExcel = () => {
-                const wb = XLSX.utils.book_new();
-                // Feuille résumé statut
-                const wsStatus = XLSX.utils.json_to_sheet(byStatus.map(r => ({ Statut: r.label, Nombre: r.count })));
-                XLSX.utils.book_append_sheet(wb, wsStatus, 'Par statut');
-                // Feuille par technicien
-                const wsTech = XLSX.utils.json_to_sheet(
-                  Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => ({
-                    Technicien: t, Total: d.total, Résolus: d.resolved,
-                    'Taux (%)': d.total ? Math.round((d.resolved / d.total) * 100) : 0,
-                  }))
-                );
-                XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
-                // Feuille par équipement
-                const wsEq = XLSX.utils.json_to_sheet(
-                  Object.entries(byEq).sort((a,b) => b[1] - a[1]).map(([eq, cnt]) => ({ Équipement: eq, Tickets: cnt }))
-                );
-                XLSX.utils.book_append_sheet(wb, wsEq, 'Par équipement');
-                // Feuille tous tickets
-                const wsAll = XLSX.utils.json_to_sheet(all.map(m => ({
-                  '#': m.id, Statut: maintenanceStatusLabel[m.status] ?? m.status,
-                  Priorité: m.priority, Équipement: m.equipmentName || '—',
-                  Technicien: m.technician || '—', Description: m.failureDesc,
-                  'Ouvert le': m.openedAt ? new Date(m.openedAt).toLocaleString('fr-FR') : '—',
-                  'Résolu le': m.closedAt ? new Date(m.closedAt).toLocaleString('fr-FR') : '—',
-                })));
-                XLSX.utils.book_append_sheet(wb, wsAll, 'Tous les tickets');
-                XLSX.writeFile(wb, `rapport-maintenance-${Date.now()}.xlsx`);
+              const exportMaintenanceExcel = async () => {
+                const sheets = [];
+                sheets.push({ name: 'Par statut', rows: byStatus.map(r => ({ Statut: r.label, Nombre: r.count })) });
+                sheets.push({ name: 'Par technicien', rows: Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => ({ Technicien: t, Total: d.total, Résolus: d.resolved, 'Taux (%)': d.total ? Math.round((d.resolved / d.total) * 100) : 0 })) });
+                sheets.push({ name: 'Par équipement', rows: Object.entries(byEq).sort((a,b) => b[1] - a[1]).map(([eq, cnt]) => ({ Équipement: eq, Tickets: cnt })) });
+                sheets.push({ name: 'Tous les tickets', rows: all.map(m => ({ '#': m.id, Statut: maintenanceStatusLabel[m.status] ?? m.status, Priorité: m.priority, Équipement: m.equipmentName || '—', Technicien: m.technician || '—', Description: m.failureDesc, 'Ouvert le': m.openedAt ? new Date(m.openedAt).toLocaleDateString('fr-FR') : '—', 'Résolu le': m.closedAt ? new Date(m.closedAt).toLocaleDateString('fr-FR') : '—' })) });
+                await ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-maintenance-${Date.now()}.xlsx`);
               };
 
               const exportMaintenancePdf = () => {
@@ -4648,11 +4641,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <div className={`${selectedMaintenance || showMaintenanceForm ? 'w-2/5 border-r' : 'w-full'} overflow-y-auto`}>
                 {maintenanceLoading ? (
                   <div className="text-center py-12 text-gray-400">Chargement…</div>
-                ) : maintenanceRecords.length === 0 ? (
+                ) : assistanceViewRecords.length === 0 ? (
                   <div className="text-center py-16 text-gray-400">
-                    <Wrench className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="font-medium">Aucun ticket de maintenance</p>
-                    <p className="text-sm mt-1">Cliquez sur "Nouveau ticket" pour en créer un.</p>
+                    <Headset className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">{showAssistanceFilter ? 'Aucune demande d\'assistance' : 'Aucun ticket de maintenance'}</p>
+                    <p className="text-sm mt-1">{showAssistanceFilter ? 'Les demandes d\'assistance apparaîtront ici.' : 'Cliquez sur "Nouveau ticket" pour en créer un.'}</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-100">
@@ -4676,7 +4669,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
                       </div>
                     ))}
-                    <Pagination total={maintenanceRecords.length} page={maintenancePage} onChange={setMaintenancePage} />
+                    <Pagination total={assistanceViewRecords.length} page={maintenancePage} onChange={setMaintenancePage} />
                   </div>
                 )}
               </div>
@@ -4712,15 +4705,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </span>
                       )}
                       {canWrite && selectedMaintenance.status !== 'résolu' && (
-                        <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                        <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status, requestType: selectedMaintenance.requestType }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                           className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1">
                           <Edit className="w-3.5 h-3.5" /> Modifier
                         </button>
                       )}
-                      <button onClick={() => { setShowNoteForm(v => !v); setNoteText(''); }}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-[#1a6fa6]/30 text-[#1a6fa6] hover:bg-[#e8f3fc] flex items-center gap-1">
-                        <Edit className="w-3.5 h-3.5" /> Nouvelle information
-                      </button>
+                      {selectedMaintenance.status !== 'résolu' && (
+                        <button onClick={() => { setShowNoteForm(v => !v); setNoteText(''); }}
+                          className="text-xs px-3 py-1.5 rounded-xl border border-[#1a6fa6]/30 text-[#1a6fa6] hover:bg-[#e8f3fc] flex items-center gap-1">
+                          <Edit className="w-3.5 h-3.5" /> Nouvelle information
+                        </button>
+                      )}
                       {canModify && selectedMaintenance.status !== 'résolu' && (
                         <button onClick={() => handleDeleteMaintenance(selectedMaintenance.id)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 flex items-center gap-1">
@@ -4807,6 +4802,57 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     )}
                   </div>
 
+                  {/* Assistance: assign/confirm/rate */}
+                  {selectedMaintenance.requestType === 'assistance' && (
+                    <div className="mt-4 pt-4 border-t space-y-3">
+                      {selectedMaintenance.status !== 'résolu' && !selectedMaintenance.assignedTechId && (
+                        <button onClick={async () => {
+                          const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}/assign`, { method: 'PATCH', headers: authHeaders() });
+                          if (r.ok) { const u = await r.json(); setMaintenanceRecords(p => p.map(m => m.id === u.id ? u : m)); setSelectedMaintenance(u); }
+                        }}
+                          className="w-full py-2 rounded-xl bg-[#1a6fa6] text-white text-sm font-medium hover:bg-[#155a8a]">
+                          Prendre en charge
+                        </button>
+                      )}
+                      {selectedMaintenance.status !== 'résolu' && selectedMaintenance.assignedTechId && !selectedMaintenance.userConfirmed && !selectedMaintenance.techConfirmed && (
+                        <div className="text-sm text-gray-600 text-center">En attente de résolution…</div>
+                      )}
+                      {selectedMaintenance.status !== 'résolu' && selectedMaintenance.assignedTechId && !selectedMaintenance.techConfirmed && (
+                        <button onClick={async () => {
+                          const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}/confirm-tech`, { method: 'PATCH', headers: authHeaders() });
+                          if (r.ok) { const u = await r.json(); setMaintenanceRecords(p => p.map(m => m.id === u.id ? u : m)); setSelectedMaintenance(u); if (u.userConfirmed && u.techConfirmed) setShowRatingModal(true); }
+                        }}
+                          className="w-full py-2 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700">
+                          Confirmer la résolution (technicien)
+                        </button>
+                      )}
+                      {selectedMaintenance.status !== 'résolu' && selectedMaintenance.assignedTechId && !selectedMaintenance.userConfirmed && selectedMaintenance.techConfirmed && (
+                        <div className="text-sm text-gray-600 text-center">En attente de confirmation de l'utilisateur</div>
+                      )}
+                      {selectedMaintenance.status !== 'résolu' && !selectedMaintenance.userConfirmed && !selectedMaintenance.techConfirmed && (
+                        <button onClick={async () => {
+                          const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}/confirm-user`, { method: 'PATCH', headers: authHeaders() });
+                          if (r.ok) { const u = await r.json(); setMaintenanceRecords(p => p.map(m => m.id === u.id ? u : m)); setSelectedMaintenance(u); if (u.userConfirmed && u.techConfirmed) setShowRatingModal(true); }
+                        }}
+                          className="w-full py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+                          Confirmer la résolution (utilisateur)
+                        </button>
+                      )}
+                      {selectedMaintenance.userConfirmed && selectedMaintenance.techConfirmed && !selectedMaintenance.rating && (
+                        <button onClick={() => setShowRatingModal(true)}
+                          className="w-full py-2 rounded-xl bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
+                          Noter le technicien
+                        </button>
+                      )}
+                      {selectedMaintenance.rating && (
+                        <div className="text-sm text-gray-700 text-center">
+                          Note : {'★'.repeat(selectedMaintenance.rating)}{'☆'.repeat(5 - selectedMaintenance.rating)}
+                          {selectedMaintenance.reviewComment && <p className="text-xs text-gray-500 mt-1">"{selectedMaintenance.reviewComment}"</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Quick status change */}
                   {canWrite && selectedMaintenance.status !== 'résolu' && (
                     <div className="mt-4 pt-4 border-t flex gap-2">
@@ -4816,7 +4862,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           Démarrer la réparation
                         </button>
                       )}
-                      <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu' }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                      <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu', requestType: selectedMaintenance.requestType }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                         className="flex-1 py-2 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700">
                         Marquer comme résolu
                       </button>
@@ -4828,7 +4874,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {/* Form panel */}
               {showMaintenanceForm && (
                 <div className="flex-1 overflow-y-auto p-6">
-                  <h3 className="text-base font-bold text-gray-800 mb-4">{maintenanceEditId ? 'Modifier le ticket' : 'Nouveau ticket de maintenance'}</h3>
+                  <h3 className="text-base font-bold text-gray-800 mb-4">
+                    {maintenanceEditId ? 'Modifier le ticket' : maintenanceForm.requestType === 'assistance' ? 'Nouvelle demande d\'assistance' : 'Nouveau ticket de maintenance'}
+                  </h3>
                   <div className="space-y-4">
                     {!maintenanceEditId && (
                       <div>
@@ -4840,41 +4888,48 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         </select>
                       </div>
                     )}
+                    {maintenanceForm.requestType !== 'assistance' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Priorité</label>
+                        <select value={maintenanceForm.priority} onChange={e => setMaintForm(f => ({ ...f, priority: e.target.value as MaintenancePriority }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
+                          <option value="faible">Faible</option>
+                          <option value="normale">Normale</option>
+                          <option value="haute">Haute</option>
+                          <option value="critique">Critique</option>
+                        </select>
+                      </div>
+                    )}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Priorité</label>
-                      <select value={maintenanceForm.priority} onChange={e => setMaintForm(f => ({ ...f, priority: e.target.value as MaintenancePriority }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]">
-                        <option value="faible">Faible</option>
-                        <option value="normale">Normale</option>
-                        <option value="haute">Haute</option>
-                        <option value="critique">Critique</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Description de la panne *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
                       <textarea rows={3} value={maintenanceForm.failureDesc} onChange={e => setMaintForm(f => ({ ...f, failureDesc: e.target.value }))}
-                        placeholder="Décrivez le problème observé…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                        placeholder={maintenanceForm.requestType === 'assistance' ? 'Décrivez votre besoin…' : 'Décrivez le problème observé…'}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Diagnostic</label>
-                      <textarea rows={3} value={maintenanceForm.diagnosis} onChange={e => setMaintForm(f => ({ ...f, diagnosis: e.target.value }))}
-                        placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Solution / Réparation effectuée</label>
-                      <textarea rows={3} value={maintenanceForm.solution} onChange={e => setMaintForm(f => ({ ...f, solution: e.target.value }))}
-                        placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Pièces remplacées</label>
-                      <input type="text" value={maintenanceForm.partsReplaced} onChange={e => setMaintForm(f => ({ ...f, partsReplaced: e.target.value }))}
-                        placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
-                      <input type="text" value={maintenanceForm.technician} onChange={e => setMaintForm(f => ({ ...f, technician: e.target.value }))}
-                        placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
-                    </div>
+                    {maintenanceForm.requestType !== 'assistance' && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Diagnostic</label>
+                          <textarea rows={3} value={maintenanceForm.diagnosis} onChange={e => setMaintForm(f => ({ ...f, diagnosis: e.target.value }))}
+                            placeholder="Cause identifiée du problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Solution / Réparation effectuée</label>
+                          <textarea rows={3} value={maintenanceForm.solution} onChange={e => setMaintForm(f => ({ ...f, solution: e.target.value }))}
+                            placeholder="Actions effectuées pour résoudre le problème…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Pièces remplacées</label>
+                          <input type="text" value={maintenanceForm.partsReplaced} onChange={e => setMaintForm(f => ({ ...f, partsReplaced: e.target.value }))}
+                            placeholder="Ex: Disque dur, Alimentation, RAM…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Agent responsable</label>
+                          <input type="text" value={maintenanceForm.technician} onChange={e => setMaintForm(f => ({ ...f, technician: e.target.value }))}
+                            placeholder="Nom du technicien" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6]" />
+                        </div>
+                      </>
+                    )}
                     {maintenanceEditId && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
@@ -4892,7 +4947,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-700 hover:bg-gray-50">Annuler</button>
                       <button onClick={handleSaveMaintenance}
                         className="flex-1 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a]">
-                        {maintenanceEditId ? 'Enregistrer' : 'Créer le ticket'}
+                        {maintenanceEditId ? 'Enregistrer' : maintenanceForm.requestType === 'assistance' ? 'Envoyer la demande' : 'Créer le ticket'}
                       </button>
                     </div>
                   </div>
@@ -5564,7 +5619,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button
                 onClick={() => {
                   setTransferTarget(null);
-                  setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', notes: '', transferQty: 1 });
+                  setTransferForm({ toLocation: '', toDepartment: '', toSiteId: null, reason: 'Réorganisation', technicianName: '', transferRequester: '', transferResponsible: '', notes: '', transferQty: 1 });
                   setShowTransferModal(true);
                 }}
                 className="ml-auto px-4 py-2 bg-[#1a6fa6] text-white rounded-xl text-sm hover:bg-[#155a8a] flex items-center gap-2"
@@ -5640,9 +5695,19 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Agent responsable</label>
                     <input type="text" value={transferForm.technicianName} onChange={e => setTransferForm({ ...transferForm, technicianName: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Nom du technicien" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Demandeur du transfert</label>
+                    <input type="text" value={transferForm.transferRequester} onChange={e => setTransferForm({ ...transferForm, transferRequester: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Nom du demandeur" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Responsable du transfert</label>
+                    <input type="text" value={transferForm.transferResponsible} onChange={e => setTransferForm({ ...transferForm, transferResponsible: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] text-sm" placeholder="Nom du responsable" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optionnel)</label>
@@ -5676,7 +5741,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      {['Date', 'Équipement', 'Type', 'De', 'Vers', 'Technicien'].map(h => (
+                      {['Date', 'Équipement', 'Type', 'De', 'Vers', 'Technicien', 'Demandeur', 'Responsable'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
@@ -5720,6 +5785,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             {toDept && <span className="text-gray-400 ml-1">· {toDept}</span>}
                           </td>
                           <td className="px-4 py-3 text-gray-600">{ev.technician || ev.userName}</td>
+                          <td className="px-4 py-3 text-gray-600">{ev.transferRequester || '—'}</td>
+                          <td className="px-4 py-3 text-gray-600">{ev.transferResponsible || '—'}</td>
                         </tr>
                       );
                     })}
@@ -5747,31 +5814,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             const thisMonth = allTransfers.filter(t => new Date(t.createdAt) > new Date(Date.now() - 30*24*3600*1000)).length;
             const maxDept = Math.max(...Object.values(byDestDept), 1);
             const maxType = Math.max(...Object.values(byType), 1);
-            const exportTransferExcel = () => {
-              const wb = XLSX.utils.book_new();
-              const wsDept = XLSX.utils.json_to_sheet(
-                Object.entries(byDestDept).sort((a,b)=>b[1]-a[1]).map(([dept, cnt]) => ({ 'Service destination': dept, Transferts: cnt }))
-              );
-              XLSX.utils.book_append_sheet(wb, wsDept, 'Par service');
-              const wsType = XLSX.utils.json_to_sheet(
-                Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type, cnt]) => ({ 'Type équipement': type, Transferts: cnt }))
-              );
-              XLSX.utils.book_append_sheet(wb, wsType, 'Par type');
-              const wsTech = XLSX.utils.json_to_sheet(
-                Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([tech, cnt]) => ({ Technicien: tech, Transferts: cnt }))
-              );
-              XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
-              const wsAll = XLSX.utils.json_to_sheet(allTransfers.map(ev => {
-                const { fromDept, toDept } = getTransferLocations(ev);
-                return {
-                  Équipement: ev.equipmentName, Type: ev.equipmentType,
-                  'Service source': fromDept || '—', 'Service destination': toDept || '—',
-                  Technicien: ev.technician || ev.userName,
-                  Date: new Date(ev.createdAt).toLocaleDateString('fr-FR'),
-                };
-              }));
-              XLSX.utils.book_append_sheet(wb, wsAll, 'Tous les transferts');
-              XLSX.writeFile(wb, `rapport-transferts-${Date.now()}.xlsx`);
+            const exportTransferExcel = async () => {
+              const sheets = [];
+              sheets.push({ name: 'Par service', rows: Object.entries(byDestDept).sort((a,b)=>b[1]-a[1]).map(([dept, cnt]) => ({ 'Service destination': dept, Transferts: cnt })) });
+              sheets.push({ name: 'Par type', rows: Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type, cnt]) => ({ 'Type équipement': type, Transferts: cnt })) });
+              sheets.push({ name: 'Par technicien', rows: Object.entries(byTech).sort((a,b)=>b[1]-a[1]).map(([tech, cnt]) => ({ Technicien: tech, Transferts: cnt })) });
+              sheets.push({ name: 'Tous les transferts', rows: allTransfers.map(ev => { const { fromDept, toDept } = getTransferLocations(ev); return { Équipement: ev.equipmentName, Type: ev.equipmentType, 'Service source': fromDept || '—', 'Service destination': toDept || '—', Technicien: ev.technician || ev.userName, Demandeur: ev.transferRequester || '—', Responsable: ev.transferResponsible || '—', Date: new Date(ev.createdAt).toLocaleDateString('fr-FR') }; }) });
+              await ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-transferts-${Date.now()}.xlsx`);
             };
 
             const exportTransferPdf = () => {
@@ -6188,11 +6237,25 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Technicien responsable</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Agent responsable</label>
                 <input type="text" value={transferForm.technicianName}
                   onChange={(e) => setTransferForm({ ...transferForm, technicianName: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
                   placeholder="Nom du technicien" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Demandeur du transfert</label>
+                <input type="text" value={transferForm.transferRequester}
+                  onChange={(e) => setTransferForm({ ...transferForm, transferRequester: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
+                  placeholder="Nom du demandeur" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Responsable du transfert</label>
+                <input type="text" value={transferForm.transferResponsible}
+                  onChange={(e) => setTransferForm({ ...transferForm, transferResponsible: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent text-sm"
+                  placeholder="Nom du responsable" />
               </div>
               {transferTarget && (transferTarget.quantity ?? 1) > 1 && (
                 <div>
@@ -6476,7 +6539,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       </button>
                       {reportDeptStats.length > 0 && (
                         <>
-                          <button onClick={() => {
+                          <button onClick={async () => {
                             const rows = reportDeptStats.map(d => ({
                               'Service': d.department,
                               'Équipements': d.equipment_count,
@@ -6487,10 +6550,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               'Suppressions': d.suppressions,
                               'Dernière activité': d.last_activity ? new Date(d.last_activity).toLocaleString('fr-FR') : '—',
                             }));
-                            const ws = XLSX.utils.json_to_sheet(rows);
-                            const wb = XLSX.utils.book_new();
-                            XLSX.utils.book_append_sheet(wb, ws, 'Par service');
-                            XLSX.writeFile(wb, `rapport-services-${Date.now()}.xlsx`);
+                            await ExportHelpers.exportJsonToXlsx(rows, `rapport-services-${Date.now()}.xlsx`, 'Par service');
                           }}
                             className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                             <Download className="w-3.5 h-3.5 text-green-600" /> Excel
@@ -6526,7 +6586,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <span className="text-sm font-bold text-[#155a8a]">{dept.total_events} événements</span>
                             </div>
                             <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
-                              <div className="bg-[#e8f3fc]0 h-2 rounded-full transition-all" style={{ width: `${barWidth}%` }} />
+                              <div className="bg-[#e8f3fc]/20 h-2 rounded-full transition-all" style={{ width: `${barWidth}%` }} />
                             </div>
                             <div className="flex flex-wrap gap-3 text-xs">
                               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />{dept.creations} créations</span>
@@ -6580,7 +6640,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     </button>
                     {reportUserStats.length > 0 && (
                       <>
-                        <button onClick={() => {
+                        <button onClick={async () => {
                           const rows = reportUserStats.map(u => ({
                             'Utilisateur': u.user_name, 'Login': u.username,
                             'Total actions': Number(u.total_actions),
@@ -6592,10 +6652,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             'Services touchés': Number(u.dept_count),
                             'Dernière action': u.last_action ? new Date(u.last_action).toLocaleString('fr-FR') : '—',
                           }));
-                          const ws = XLSX.utils.json_to_sheet(rows);
-                          const wb = XLSX.utils.book_new();
-                          XLSX.utils.book_append_sheet(wb, ws, 'Par utilisateur');
-                          XLSX.writeFile(wb, `rapport-utilisateurs-${Date.now()}.xlsx`);
+                          await ExportHelpers.exportJsonToXlsx(rows, `rapport-utilisateurs-${Date.now()}.xlsx`, 'Par utilisateur');
                         }} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-green-600" /> Excel
                         </button>
@@ -6666,7 +6723,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                   </div>
                                   <div className="flex items-center gap-2 mt-1">
                                     <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                                      <div className="bg-[#e8f3fc]0 h-1.5 rounded-full" style={{ width: `${barW}%` }} />
+                                      <div className="bg-[#e8f3fc]/20 h-1.5 rounded-full" style={{ width: `${barW}%` }} />
                                     </div>
                                     <span className="text-xs font-bold text-[#155a8a] shrink-0">{user.total_actions} actions</span>
                                   </div>
@@ -6763,7 +6820,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     </button>
                     {reportSiteStats.length > 0 && (
                       <>
-                        <button onClick={() => {
+                        <button onClick={async () => {
                           const rows = reportSiteStats.map(s => ({
                             'Site': s.site_name, 'Ville': s.city || '—', 'Pays': s.country || '—',
                             'Équipements': s.equipment_count, 'Total événements': s.total_events,
@@ -6772,10 +6829,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                             'Réformes': s.reformes, 'Suppressions': s.suppressions,
                             'Dernière activité': s.last_activity ? new Date(s.last_activity).toLocaleString('fr-FR') : '—',
                           }));
-                          const ws = XLSX.utils.json_to_sheet(rows);
-                          const wb = XLSX.utils.book_new();
-                          XLSX.utils.book_append_sheet(wb, ws, 'Par site');
-                          XLSX.writeFile(wb, `rapport-sites-${Date.now()}.xlsx`);
+                          await ExportHelpers.exportJsonToXlsx(rows, `rapport-sites-${Date.now()}.xlsx`, 'Par site');
                         }} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
                           <Download className="w-3.5 h-3.5 text-green-600" /> Excel
                         </button>
@@ -6816,7 +6870,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                                    <div className="bg-[#e8f3fc]0 h-1.5 rounded-full" style={{width:`${barW}%`}} />
+                                    <div className="bg-[#e8f3fc]/20 h-1.5 rounded-full" style={{width:`${barW}%`}} />
                                   </div>
                                   <span className="text-xs text-gray-500 shrink-0">{site.total_events} événement(s)</span>
                                 </div>
@@ -7802,7 +7856,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               {activityEntries.length > 0 && (
                 <>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const rows = activityEntries.map(e => ({
                       'Date / Heure': new Date(e.timestamp).toLocaleString('fr-FR'),
                       'Utilisateur': e.name,
@@ -7811,10 +7865,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       'Détails': e.details,
                       'IP': e.ip,
                     }));
-                    const ws = XLSX.utils.json_to_sheet(rows);
-                    const wb = XLSX.utils.book_new();
-                    XLSX.utils.book_append_sheet(wb, ws, 'Journal');
-                    XLSX.writeFile(wb, `journal-activite-${new Date().toISOString().slice(0,10)}.xlsx`);
+                    await ExportHelpers.exportJsonToXlsx(rows, `journal-activite-${new Date().toISOString().slice(0,10)}.xlsx`, 'Journal');
                   }}
                   className="ml-auto inline-flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm hover:bg-green-50"
                 >
@@ -8064,29 +8115,13 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   'reporté':{label:'Reporté',cls:'bg-orange-100 text-orange-700'},
                   'annulé':{label:'Annulé',cls:'bg-red-100 text-red-700'},
                 };
-                const exportVisitsExcel = () => {
-                  const wb = XLSX.utils.book_new();
-                  const wsStatus = XLSX.utils.json_to_sheet(byStatus.map(r => ({
-                    Statut: statusLabels[r.status]?.label ?? r.status, Nombre: r.count,
-                  })));
-                  XLSX.utils.book_append_sheet(wb, wsStatus, 'Par statut');
-                  const wsSite = XLSX.utils.json_to_sheet(bySite.map(r => ({
-                    Site: r.site, Total: r.total, Terminées: r.terminé,
-                    'Dernière visite': r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
-                  })));
-                  XLSX.utils.book_append_sheet(wb, wsSite, 'Par site');
-                  const wsTech = XLSX.utils.json_to_sheet(techRows.map(([t, cnt]) => ({ Technicien: t, Visites: cnt })));
-                  XLSX.utils.book_append_sheet(wb, wsTech, 'Par technicien');
-                  const wsAll = XLSX.utils.json_to_sheet(filteredVisits.map(v => ({
-                    '#': v.id, Site: v.siteName,
-                    Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'),
-                    Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status,
-                    Objectif: v.purpose, 'Avec maintenance': v.withMaintenance ? 'Oui' : 'Non',
-                    Commentaire: v.validationComment || '—', 'Validé par': v.validatedBy || '—',
-                    'Reporté au': v.rescheduledDate ? new Date(v.rescheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—',
-                  })));
-                  XLSX.utils.book_append_sheet(wb, wsAll, 'Toutes les visites');
-                  XLSX.writeFile(wb, `rapport-visites-${Date.now()}.xlsx`);
+                const exportVisitsExcel = async () => {
+                  const sheets = [];
+                  sheets.push({ name: 'Par statut', rows: byStatus.map(r => ({ Statut: statusLabels[r.status]?.label ?? r.status, Nombre: r.count })) });
+                  sheets.push({ name: 'Par site', rows: bySite.map(r => ({ Site: r.site, Total: r.total, Terminées: r.terminé, 'Dernière visite': r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—' })) });
+                  sheets.push({ name: 'Par technicien', rows: techRows.map(([t, cnt]) => ({ Technicien: t, Visites: cnt })) });
+                  sheets.push({ name: 'Toutes les visites', rows: filteredVisits.map(v => ({ '#': v.id, Site: v.siteName, Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'), Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status, Objectif: v.purpose, 'Avec maintenance': v.withMaintenance ? 'Oui' : 'Non', Commentaire: v.validationComment || '—', 'Validé par': v.validatedBy || '—', 'Reporté au': v.rescheduledDate ? new Date(v.rescheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—' })) });
+                  await ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-visites-${Date.now()}.xlsx`);
                 };
 
                 const exportVisitsPdf = () => {
@@ -8250,7 +8285,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                                     <span className="text-xs font-bold text-[#155a8a]">{cnt}</span>
                                   </div>
                                   <div className="bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                                    <div className="h-2.5 rounded-full bg-[#e8f3fc]0 transition-all" style={{width:`${(cnt/maxCnt)*100}%`}} />
+                                    <div className="h-2.5 rounded-full bg-[#e8f3fc]/20 transition-all" style={{width:`${(cnt/maxCnt)*100}%`}} />
                                   </div>
                                 </div>
                               );
@@ -8326,7 +8361,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                     ))}
                   </div>
                   {(() => {
-                    const statusCls: Record<string,string> = { planifié:'bg-[#e8f3fc]0', en_cours:'bg-yellow-500', terminé:'bg-green-500', reporté:'bg-orange-400', annulé:'bg-red-400' };
+                    const statusCls: Record<string,string> = { planifié:'bg-[#e8f3fc]/20', en_cours:'bg-yellow-500', terminé:'bg-green-500', reporté:'bg-orange-400', annulé:'bg-red-400' };
                     const firstDay = new Date(calendarYear, calendarMonth, 1);
                     const startDow = (firstDay.getDay() + 6) % 7; // Lundi = 0
                     const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
@@ -8357,7 +8392,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 </div>
                 {/* Légende */}
                 <div className="px-4 pb-4 flex flex-wrap gap-3">
-                  {[['planifié','bg-[#e8f3fc]0','Planifié'],['en_cours','bg-yellow-500','En cours'],['terminé','bg-green-500','Terminé'],['reporté','bg-orange-400','Reporté'],['annulé','bg-red-400','Annulé']].map(([,cls,label]) => (
+                  {[['planifié','bg-[#e8f3fc]/20','Planifié'],['en_cours','bg-yellow-500','En cours'],['terminé','bg-green-500','Terminé'],['reporté','bg-orange-400','Reporté'],['annulé','bg-red-400','Annulé']].map(([,cls,label]) => (
                     <div key={label} className="flex items-center gap-1.5"><span className={`w-3 h-3 rounded-full ${cls}`} /><span className="text-xs text-gray-500">{label}</span></div>
                   ))}
                 </div>
@@ -9066,7 +9101,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       {toast && (
         <div
           className={`fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium text-white transition-all ${
-            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-[#e8f3fc]0'
+            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-[#e8f3fc]/20'
           }`}
         >
           {toast.type === 'error' && <AlertTriangle className="w-4 h-4 shrink-0" />}
@@ -9097,6 +9132,52 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 onClick={confirmModal.onConfirm}
                 className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium"
               >Confirmer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rating modal */}
+      {showRatingModal && selectedMaintenance && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowRatingModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h3 className="text-base font-bold text-gray-800 mb-2">Noter le technicien</h3>
+            <p className="text-sm text-gray-500 mb-4">{selectedMaintenance.technician || 'Technicien'}</p>
+            <div className="flex justify-center gap-1 mb-4">
+              {[1,2,3,4,5].map(n => (
+                <button key={n} onClick={() => setRatingValue(n)}
+                  className={`w-10 h-10 rounded-full text-xl transition ${n <= ratingValue ? 'text-yellow-400' : 'text-gray-300'}`}>
+                  {n <= ratingValue ? '★' : '☆'}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={reviewComment}
+              onChange={e => setReviewComment(e.target.value)}
+              rows={2}
+              placeholder="Commentaire (optionnel)…"
+              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] mb-4"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setShowRatingModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 text-sm font-medium">
+                Annuler
+              </button>
+              <button onClick={async () => {
+                const r = await fetch(`${API_BASE_URL}/api/maintenance/${selectedMaintenance.id}/rate`, {
+                  method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ rating: ratingValue, reviewComment: reviewComment })
+                });
+                if (r.ok) {
+                  const u = await r.json();
+                  setMaintenanceRecords(p => p.map(m => m.id === u.id ? u : m));
+                  setSelectedMaintenance(u);
+                  setShowRatingModal(false);
+                }
+              }}
+                className="flex-1 px-4 py-2 bg-yellow-500 text-white rounded-xl hover:bg-yellow-600 text-sm font-medium">
+                Envoyer
+              </button>
             </div>
           </div>
         </div>

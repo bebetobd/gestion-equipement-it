@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Monitor, Lock, User, Eye, EyeOff, ShieldAlert, Clock } from 'lucide-react';
+import { apiUrl } from './config';
 
 interface LoginUser {
   id: number;
@@ -12,9 +13,6 @@ interface LoginUser {
 interface LoginPageProps {
   onLogin: (user: LoginUser, token: string) => void;
 }
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
-const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
 
 const LoginPage = ({ onLogin }: LoginPageProps) => {

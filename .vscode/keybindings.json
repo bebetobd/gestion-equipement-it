@@ -1,0 +1,6 @@
+[
+  {
+    "key": "ctrl+shift+c",
+    "command": "claude-vscode.sidebar.open"
+  }
+]

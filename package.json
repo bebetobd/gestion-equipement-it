@@ -10,7 +10,7 @@
     "migrate": "node --env-file=.env server/migrate.js",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "node server/server.js",
+    "start": "node --env-file=.env server/server.js",
     "deploy": "npm run build && npm run start"
   },
   "dependencies": {

@@ -39,7 +39,8 @@ export function authenticate(req, res, next) {
   }
 
   try {
-    const jwtSecret = process.env.JWT_SECRET || 'gestion-it-secret-2024';
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is not set');
+    const jwtSecret = process.env.JWT_SECRET;
     req.user = jwt.verify(token, jwtSecret);
     req.token = token;
 

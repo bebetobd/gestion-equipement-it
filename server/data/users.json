@@ -2,22 +2,34 @@
   {
     "id": 1,
     "username": "admin",
-    "password": "$2b$10$/SrivDmNqjgjV7THKt4jT.YTlOMuLjxts2ls7HxWr3yvoeG9D9da.",
+    "password": "$2b$10$sEMnsqpeuRUXSdMUK2932.bgs2F/U7tvvdTtOPGluNobOyNBUM2P2",
     "role": "admin",
-    "name": "Administrateur"
+    "name": "Administrateur",
+    "permissions": [
+      "administration",
+      "modification",
+      "lecture"
+    ]
   },
   {
     "id": 2,
     "username": "technicien",
-    "password": "$2b$10$QFOgcO/77wefUMIsfx6BQOO/O54s661baZapYd35sH/yR1nY2YDeq",
+    "password": "$2b$10$St798tV/TzrMOOtVaH8cCugHYHkaIpCSjfahgRu349KeYh4Qv.eye",
     "role": "technicien",
-    "name": "Technicien IT"
+    "name": "Technicien IT",
+    "permissions": [
+      "modification",
+      "lecture"
+    ]
   },
   {
     "id": 3,
     "username": "utilisateur",
-    "password": "$2b$10$VkDPbB.nGd2TGfRWi28za.aEevNH4cM/VIfojWf.G2QKX5wCGUAbi",
+    "password": "$2b$10$oisxtohG1gSnuWUn37JGQOZIBobEjN4SH8OlxlTK.LKj4ElZz0t1W",
     "role": "user",
-    "name": "Utilisateur"
+    "name": "Utilisateur",
+    "permissions": [
+      "lecture"
+    ]
   }
 ]
