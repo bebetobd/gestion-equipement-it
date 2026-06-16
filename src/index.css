@@ -9,10 +9,6 @@ html, body, #root {
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  cursor: none;
-}
-input, textarea, select, [contenteditable="true"] {
-  cursor: text;
 }
 
 /* ─── DARK MODE ──────────────────────────────────────────────────────────────── */
