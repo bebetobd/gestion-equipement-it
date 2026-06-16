@@ -1041,8 +1041,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // ── Dark mode ──────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('it-dark-mode') === 'true';
+    const stored = localStorage.getItem('it-dark-mode');
+    if (stored) return stored === 'true';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const [darkModeAuto, setDarkModeAuto] = useState(() => !localStorage.getItem('it-dark-mode'));
+
+  const cycleDarkMode = useCallback(() => {
+    if (darkModeAuto) {
+      setDarkModeAuto(false);
+      setDarkMode(true);
+    } else if (darkMode) {
+      setDarkMode(false);
+    } else {
+      setDarkModeAuto(true);
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      setDarkMode(mq.matches);
+    }
+  }, [darkModeAuto, darkMode]);
 
   // ── Session timeout ────────────────────────────────────────────────────────
   const [showSessionWarning, setShowSessionWarning] = useState(false);
@@ -1089,8 +1105,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('it-dark-mode', String(darkMode));
-  }, [darkMode]);
+    if (!darkModeAuto) {
+      localStorage.setItem('it-dark-mode', String(darkMode));
+    } else {
+      localStorage.removeItem('it-dark-mode');
+    }
+  }, [darkMode, darkModeAuto]);
+
+  // Listen to system preference changes when in auto mode
+  useEffect(() => {
+    if (!darkModeAuto) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setDarkMode(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [darkModeAuto]);
 
   // Session timeout — 25 min warning, 30 min auto-logout
   useEffect(() => {
@@ -1980,9 +2009,9 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         return;
       }
 
-      // D → toggle dark mode
+      // D → cycle dark mode: auto → dark → light → auto
       if (event.key === 'd' || event.key === 'D') {
-        setDarkMode(v => !v);
+        cycleDarkMode();
         return;
       }
 
@@ -3095,10 +3124,10 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             <QrCode className="w-4 h-4" />
           </button>
           {/* Dark mode toggle */}
-          <button onClick={() => setDarkMode(v => !v)}
+          <button onClick={cycleDarkMode}
             className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors"
-            title={darkMode ? 'Mode clair (D)' : 'Mode sombre (D)'}>
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            title={darkModeAuto ? 'Auto (D)' : darkMode ? 'Mode clair (D)' : 'Mode sombre (D)'}>
+            {darkModeAuto ? <Monitor className="w-4 h-4" /> : darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <div className="w-px h-5 bg-white/20 mx-1" />
           <div className="w-7 h-7 rounded-full bg-orange-400 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -3621,6 +3650,41 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <button onClick={() => { setFilterType('all'); setFilterStatus('all'); setSearchTerm(''); }}
                 className="text-xs text-[#1a6fa6] hover:underline px-1">✕ Réinitialiser</button>
             )}
+            {/* Presets */}
+            {(() => {
+              const key = JSON.stringify({ filterType, filterStatus, searchTerm, siteIds: selectedSiteIds });
+              const saved = JSON.parse(localStorage.getItem('it-filter-presets') || '{}');
+              const list = Object.entries(saved) as [string, string][];
+              return (
+                <div className="flex items-center gap-1">
+                  {list.map(([name, val]) => (
+                    <button key={name} onClick={() => {
+                      const p = JSON.parse(val);
+                      setFilterType(p.filterType);
+                      setFilterStatus(p.filterStatus);
+                      setSearchTerm(p.searchTerm);
+                      setSelectedSiteIds(p.siteIds || []);
+                    }}
+                      className={`text-[11px] px-2 py-1 rounded border transition-colors ${key === val ? 'bg-[#e8f3fc] border-[#1a6fa6]/30 text-[#1a6fa6] font-semibold' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      {name}
+                    </button>
+                  ))}
+                  {!list.some(([, v]) => v === key) && filterType !== 'all' && (
+                    <button onClick={() => {
+                      const name = prompt('Nom du preset :');
+                      if (!name) return;
+                      const all = JSON.parse(localStorage.getItem('it-filter-presets') || '{}');
+                      all[name] = key;
+                      localStorage.setItem('it-filter-presets', JSON.stringify(all));
+                      window.location.reload();
+                    }}
+                      className="text-[11px] px-2 py-1 rounded border border-dashed border-gray-300 text-gray-400 hover:text-[#1a6fa6] hover:border-[#1a6fa6]/30 transition-colors">
+                      + Preset
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             {/* Pagination */}
             <div className="ml-auto flex items-center gap-1.5 text-xs text-gray-500">
               <span>{(equipPage-1)*PAGE_SIZE+1}-{Math.min(equipPage*PAGE_SIZE, filteredEquipments.length)} / {filteredEquipments.length}</span>
