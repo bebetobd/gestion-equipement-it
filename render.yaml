@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: gestion-equipement-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: DEFAULT_ADMIN_PASSWORD
+        value: admin2024
+      - key: DEFAULT_TECH_PASSWORD
+        value: technicien2024
+      - key: DEFAULT_USER_PASSWORD
+        value: utilisateur2024
