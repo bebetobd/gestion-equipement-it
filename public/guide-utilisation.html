@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Guide d'utilisation — Gestion Équipements IT</title>
+<style>
+  @page { margin: 2cm; size: A4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1f2937;
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 2cm 1.5cm;
+  }
+  h1 { font-size: 24pt; color: #1a6fa6; margin-bottom: 0.3cm; border-bottom: 3px solid #1a6fa6; padding-bottom: 0.3cm; }
+  h2 { font-size: 16pt; color: #1a6fa6; margin-top: 1cm; margin-bottom: 0.4cm; border-bottom: 1px solid #d1d5db; padding-bottom: 0.2cm; }
+  h3 { font-size: 13pt; color: #374151; margin-top: 0.6cm; margin-bottom: 0.3cm; }
+  h4 { font-size: 11pt; color: #4b5563; margin-top: 0.4cm; margin-bottom: 0.2cm; }
+  p { margin-bottom: 0.3cm; }
+  ul, ol { margin-bottom: 0.3cm; padding-left: 0.6cm; }
+  li { margin-bottom: 0.1cm; }
+  table { width: 100%; border-collapse: collapse; margin: 0.4cm 0; font-size: 10pt; }
+  th, td { border: 1px solid #d1d5db; padding: 0.15cm 0.25cm; text-align: left; }
+  th { background: #1a6fa6; color: white; font-weight: 600; }
+  tr:nth-child(even) { background: #f9fafb; }
+  code { background: #f3f4f6; padding: 0.05cm 0.15cm; border-radius: 0.1cm; font-size: 10pt; }
+  .toc { page-break-after: always; }
+  .toc h2 { border: none; }
+  .toc ul { list-style: none; padding-left: 0; }
+  .toc li { margin-bottom: 0.15cm; }
+  .toc a { color: #1a6fa6; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .header-meta { color: #6b7280; font-size: 10pt; margin-bottom: 0.5cm; }
+  .badge { display: inline-block; background: #1a6fa6; color: white; font-size: 9pt; padding: 0.05cm 0.2cm; border-radius: 0.15cm; margin-right: 0.1cm; }
+  .badge-admin { background: #dc2626; }
+  .badge-tech { background: #f59e0b; }
+  .badge-write { background: #16a34a; }
+  .note { background: #eff6ff; border-left: 3px solid #1a6fa6; padding: 0.3cm; margin: 0.4cm 0; font-size: 10pt; }
+  .warn { background: #fef3c7; border-left: 3px solid #f59e0b; padding: 0.3cm; margin: 0.4cm 0; font-size: 10pt; }
+  .page-break { page-break-before: always; }
+  @media print {
+    body { padding: 0; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>📘 Guide d'utilisation</h1>
+<p class="header-meta">Gestion des Équipements IT — Version 1.0<br>Dernière mise à jour : Juin 2026</p>
+
+<div class="toc">
+<h2>Table des matières</h2>
+<ul>
+  <li><a href="#intro">1. Introduction</a></li>
+  <li><a href="#connexion">2. Connexion &amp; Déconnexion</a></li>
+  <li><a href="#dashboard">3. Tableau de bord</a></li>
+  <li><a href="#equipements">4. Gestion des Équipements</a></li>
+  <li><a href="#maintenance">5. Maintenance &amp; Tickets</a></li>
+  <li><a href="#garanties">6. Garanties</a></li>
+  <li><a href="#visites">7. Visites de Site</a></li>
+  <li><a href="#transferts">8. Transferts d'Équipements</a></li>
+  <li><a href="#licences">9. Licences Logicielles</a></li>
+  <li><a href="#achats">10. Demandes d'Achat</a></li>
+  <li><a href="#rma">11. Retours Garantie (RMA)</a></li>
+  <li><a href="#anomalies">12. Détection d'Anomalies</a></li>
+  <li><a href="#contrats">13. Contrats de Maintenance</a></li>
+  <li><a href="#fournisseurs">14. Fournisseurs</a></li>
+  <li><a href="#sites">15. Gestion des Sites</a></li>
+  <li><a href="#utilisateurs">16. Utilisateurs &amp; Permissions</a></li>
+  <li><a href="#messagerie">17. Messagerie</a></li>
+  <li><a href="#notifications">18. Centre de Notifications</a></li>
+  <li><a href="#rapports">19. Rapports &amp; Export</a></li>
+  <li><a href="#calendrier">20. Calendrier Unifié</a></li>
+  <li><a href="#carte">21. Carte des Sites</a></li>
+  <li><a href="#inventaire">22. Inventaire Physique</a></li>
+  <li><a href="#monitoring">23. Monitoring Temps Réel</a></li>
+  <li><a href="#journal">24. Journal d'Activité</a></li>
+  <li><a href="#tv">25. Dashboard TV</a></li>
+  <li><a href="#recherche">26. Recherche Globale</a></li>
+  <li><a href="#qr">27. QR Code &amp; Barcode</a></li>
+  <li><a href="#parametres">28. Paramètres</a></li>
+  <li><a href="#roles">29. Rôles &amp; Permissions</a></li>
+  <li><a href="#raccourcis">30. Raccourcis Clavier</a></li>
+</ul>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="intro">1. Introduction</h2>
+<p><strong>Gestion Équipements IT</strong> est une application web complète de gestion de parc informatique. Elle permet de :</p>
+<ul>
+  <li>Gérer l'ensemble des équipements (ordinateurs, serveurs, réseaux, imprimantes, etc.)</li>
+  <li>Suivre les maintenances, tickets d'assistance et interventions</li>
+  <li>Gérer les garanties, licences logicielles et contrats de maintenance</li>
+  <li>Planifier et suivre les visites de site</li>
+  <li>Gérer les transferts d'équipements entre sites</li>
+  <li>Créer et approuver des demandes d'achat</li>
+  <li>Gérer les retours garantie (RMA)</li>
+  <li>Détecter automatiquement les anomalies</li>
+  <li>Générer des rapports détaillés et exporter en Excel/PDF</li>
+  <li>Communiquer via la messagerie intégrée</li>
+</ul>
+
+<div class="note">
+<strong>Note :</strong> Les fonctionnalités accessibles dépendent de votre rôle et de vos permissions. Consultez la section <a href="#roles">Rôles &amp; Permissions</a> pour plus de détails.
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="connexion">2. Connexion &amp; Déconnexion</h2>
+
+<h3>2.1 Page de connexion</h3>
+<ul>
+  <li>Ouvrez l'application dans votre navigateur</li>
+  <li>Saisissez votre <strong>nom d'utilisateur</strong> et <strong>mot de passe</strong></li>
+  <li>Cliquez sur <strong>Connexion</strong></li>
+</ul>
+
+<h3>2.2 Session</h3>
+<ul>
+  <li>La session expire après <strong>5 minutes d'inactivité</strong></li>
+  <li>Un avertissement s'affiche avant l'expiration — cliquez sur <strong>Rester connecté</strong> pour prolonger</li>
+  <li>Cliquez sur votre avatar en haut à droite puis <strong>Déconnexion</strong> pour quitter</li>
+</ul>
+
+<div class="warn">
+<strong>Attention :</strong> Après 5 tentatives de connexion échouées, votre compte est temporairement bloqué pendant 15 minutes.
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="dashboard">3. Tableau de bord</h2>
+
+<p>Le tableau de bord est la page principale après connexion. Il affiche :</p>
+
+<h3>3.1 Barre de navigation supérieure</h3>
+<ul>
+  <li><strong>Marque :</strong> « Gestion IT » (clic = retour au dashboard)</li>
+  <li><strong>Boutons de navigation</strong> (défilables) : Équipements, Transferts, Assistance, Maintenance, Visites, Garanties, Renouv. Garantie, Rapports, Calendrier, Carte, Inventaire, TV Dashboard</li>
+  <li><strong>Boutons administrateur :</strong> Journal, Monitoring, Utilisateurs, Sites, Fournisseurs, Sauvegarde</li>
+  <li><strong>Barre d'actions droite :</strong> Recherche (Ctrl+K), Messagerie, Notifications, Ping All, Masquer données sensibles, Scanner QR, Mode sombre, Profil utilisateur, Déconnexion</li>
+</ul>
+
+<h3>3.2 Indicateurs KPI</h3>
+<p>6 cartes cliquables affichant :</p>
+<ul>
+  <li><strong>Total équipements</strong> — clic = afficher tout le parc</li>
+  <li><strong>Actifs</strong> — clic = filtrer les équipements actifs</li>
+  <li><strong>Défaillants</strong> — clic = filtrer les équipements défaillants</li>
+  <li><strong>Tickets ouverts</strong> — clic = ouvrir le module Maintenance</li>
+  <li><strong>Non visités</strong> — clic = afficher les équipements sans visite</li>
+  <li><strong>Visites planifiées</strong> — clic = ouvrir le module Visites</li>
+</ul>
+
+<h3>3.3 Graphiques</h3>
+<ul>
+  <li><strong>Donut :</strong> Répartition des équipements par statut (Actif, Maintenance, Défaillant, Inactif, Réformé)</li>
+  <li><strong>Barres :</strong> Répartition par type (Ordinateur, Réseau, Serveur, Imprimante, Accessoires, Autre)</li>
+</ul>
+
+<h3>3.4 Alertes critiques</h3>
+<ul>
+  <li>Tickets critiques non résolus (rouge)</li>
+  <li>Visites prévues aujourd'hui (bleu)</li>
+  <li>Garanties expirées ou critiques (jaune)</li>
+  <li>Stock bas / accessoires sous seuil minimum (orange)</li>
+</ul>
+
+<h3>3.5 Tâches &amp; Rappels</h3>
+<ul>
+  <li>Créez des tâches avec titre, date d'échéance et technicien assigné</li>
+  <li>Les tâches en retard sont surlignées en rouge</li>
+  <li>Marquez une tâche comme terminée en cliquant sur le cercle</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="equipements">4. Gestion des Équipements</h2>
+
+<h3>4.1 Liste des équipements</h3>
+<ul>
+  <li>Affichage en tableau avec colonnes : type, nom, marque/modèle, IP, localisation, statut, technicien, actions</li>
+  <li><strong>Filtres :</strong> par type (6 types), statut (5 statuts), site (multi-sélection)</li>
+  <li><strong>Recherche :</strong> champ de recherche en temps réel</li>
+  <li><strong>Préréglages de filtres :</strong> sauvegardez et rechargez vos configurations de filtres</li>
+  <li><strong>Pagination :</strong> 50 équipements par page</li>
+</ul>
+
+<h3>4.2 Ajout d'un équipement</h3>
+<p>Cliquez sur <strong>Nouveau</strong> dans la barre d'outils. Remplissez les champs :</p>
+<ul>
+  <li>Champs obligatoires : <strong>Nom</strong>, <strong>Type</strong></li>
+  <li>Champs recommandés : Marque, Modèle, Statut, Site, Localisation, Service</li>
+  <li>Champs optionnels : N° de série, IP, Date d'achat, Garantie, Quantité min., Fournisseur</li>
+</ul>
+
+<h3>4.3 Modification / Suppression</h3>
+<ul>
+  <li>Cliquez sur une ligne pour ouvrir le panneau de détails</li>
+  <li>Utilisez les boutons <strong>Modifier</strong> ou <strong>Supprimer</strong> dans les actions de ligne</li>
+  <li>La suppression est <strong>logique</strong> (corbeille) — possibilité de restaurer</li>
+</ul>
+
+<h3>4.4 Détails d'un équipement</h3>
+<p>Le panneau de détails affiche :</p>
+<ul>
+  <li>Toutes les informations de l'équipement</li>
+  <li><strong>Notes internes :</strong> ajoutez et consultez des notes</li>
+  <li><strong>Historique des transferts</strong></li>
+  <li><strong>Documents :</strong> téléchargez et gérez les documents attachés</li>
+</ul>
+
+<h3>4.5 Actions groupées</h3>
+<ul>
+  <li>Cochez plusieurs équipements avec les cases à cocher</li>
+  <li>Actions disponibles : Changement de statut, Transfert vers un site, Suppression groupée</li>
+</ul>
+
+<h3>4.6 Comparaison d'équipements</h3>
+<ul>
+  <li>Sélectionnez 2 ou 3 équipements</li>
+  <li>Cliquez sur <strong>Comparer</strong> dans la barre flottante</li>
+  <li>Les différences sont surlignées en bleu</li>
+</ul>
+
+<h3>4.7 Import / Export</h3>
+<ul>
+  <li><strong>Import :</strong> depuis Excel (.xlsx) ou CSV — téléchargez le modèle vierge</li>
+  <li><strong>Export :</strong> CSV, Excel (.xlsx) ou PDF</li>
+</ul>
+
+<h3>4.8 Statuts des équipements</h3>
+<table>
+  <tr><th>Statut</th><th>Description</th></tr>
+  <tr><td>Actif</td><td>En service normal</td></tr>
+  <tr><td>Inactif</td><td>Non utilisé mais opérationnel</td></tr>
+  <tr><td>Maintenance</td><td>En cours de réparation</td></tr>
+  <tr><td>Défaillant</td><td>Hors service</td></tr>
+  <tr><td>Réformé</td><td>Retiré du parc définitivement</td></tr>
+</table>
+
+<h3>4.9 Types d'équipements</h3>
+<table>
+  <tr><th>Type</th><th>Exemples</th></tr>
+  <tr><td>Ordinateur</td><td>PC fixe, portable, station de travail</td></tr>
+  <tr><td>Équipement Réseau</td><td>Switch, routeur, borne WiFi, firewall</td></tr>
+  <tr><td>Serveur</td><td>Serveur physique, baie de stockage</td></tr>
+  <tr><td>Imprimante</td><td>Imprimante, photocopieur, scanner</td></tr>
+  <tr><td>Accessoires</td><td>Souris, clavier, hub, écran, onduleur</td></tr>
+  <tr><td>Autre</td><td>Tout équipement non catégorisé</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="maintenance">5. Maintenance &amp; Tickets</h2>
+
+<h3>5.1 Module Maintenance</h3>
+<p>Le module de maintenance permet de gérer l'ensemble des tickets d'intervention.</p>
+
+<h3>5.2 Création d'un ticket</h3>
+<ul>
+  <li>Cliquez sur <strong>Nouveau ticket</strong></li>
+  <li>Sélectionnez le type : <strong>Maintenance</strong> ou <strong>Assistance</strong></li>
+  <li>Remplissez : équipement concerné, description, priorité</li>
+  <li>Assigne éventuellement un technicien</li>
+</ul>
+
+<h3>5.3 Vues disponibles</h3>
+<ul>
+  <li><strong>Liste :</strong> tableau avec filtres par statut, priorité, type</li>
+  <li><strong>Kanban :</strong> colonnes par statut (En attente → Ouvert → En cours → Résolu)</li>
+  <li><strong>Rapport :</strong> statistiques détaillées exportables en Excel</li>
+</ul>
+
+<h3>5.4 Cycle de vie d'un ticket</h3>
+<ol>
+  <li><strong>En attente</strong> — Ticket créé, en attente de prise en charge</li>
+  <li><strong>Ouvert</strong> — Prise en charge par un technicien</li>
+  <li><strong>En cours</strong> — Intervention en cours</li>
+  <li><strong>Résolu</strong> — Problème résolu (avec confirmation utilisateur + technicien)</li>
+</ol>
+
+<h3>5.5 Priorités</h3>
+<table>
+  <tr><th>Priorité</th><th>Délai indicatif</th></tr>
+  <tr><td>Faible</td><td>5 jours ouvrés</td></tr>
+  <tr><td>Normale</td><td>3 jours ouvrés</td></tr>
+  <tr><td>Haute</td><td>24 heures</td></tr>
+  <tr><td>Critique</td><td>4 heures</td></tr>
+</table>
+
+<h3>5.6 Statistiques</h3>
+<ul>
+  <li>Barre de statistiques en haut : tickets par statut</li>
+  <li>Rapport complet avec répartition par technicien, équipement, priorité</li>
+  <li><strong>MTTR</strong> (Mean Time To Resolution) en heures</li>
+  <li>Export Excel multi-feuilles</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="garanties">6. Garanties</h2>
+
+<h3>6.1 Vue d'ensemble</h3>
+<ul>
+  <li>Cartes récapitulatives : Total suivis, Expirée, Critique, Bientôt fin, Non renseignées</li>
+  <li>Filtre par risque : Tous / Expirées / Critiques / Alerte / OK / Non renseignées</li>
+  <li>Tableau par site avec exposition au risque</li>
+</ul>
+
+<h3>6.2 États de garantie</h3>
+<table>
+  <tr><th>État</th><th>Signification</th></tr>
+  <tr><td>OK</td><td>Garantie valide (&gt; 90 jours restants)</td></tr>
+  <tr><td>Alerte</td><td>Expire bientôt (≤ 90 jours)</td></tr>
+  <tr><td>Critique</td><td>Expire très bientôt (≤ 30 jours)</td></tr>
+  <tr><td>Expirée</td><td>Garantie terminée</td></tr>
+  <tr><td>Non renseignée</td><td>Date de garantie non fournie</td></tr>
+</table>
+
+<h3>6.3 Renouvellement de garantie</h3>
+<ul>
+  <li>Module dédié "Renouv. Garantie" dans la navigation</li>
+  <li>Sélectionnez l'équipement et mettez à jour sa date de garantie</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="visites">7. Visites de Site</h2>
+
+<h3>7.1 Gestion des visites</h3>
+<ul>
+  <li>Planifiez une visite : site, technicien, date, heure, objet</li>
+  <li>Associez une maintenance préventive à la visite</li>
+  <li>Statuts : Planifié → En cours → Terminé / Annulé / Reporté</li>
+</ul>
+
+<h3>7.2 Calendrier des visites</h3>
+<ul>
+  <li>Vue mensuelle avec code couleur par statut</li>
+  <li>Cliquez sur un jour pour voir la liste des visites</li>
+  <li>Navigation mois par mois</li>
+</ul>
+
+<h3>7.3 Actions rapides</h3>
+<ul>
+  <li>Marquer comme terminée (avec commentaire de validation)</li>
+  <li>Annuler ou reporter une visite</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="transferts">8. Transferts d'Équipements</h2>
+
+<h3>8.1 Transfert individuel</h3>
+<ul>
+  <li>Depuis la fiche équipement ou le menu Transferts</li>
+  <li>Remplissez : site de destination, localisation, service, motif, technicien</li>
+  <li>L'historique est conservé dans la fiche équipement</li>
+</ul>
+
+<h3>8.2 Transfert groupé</h3>
+<ul>
+  <li>Sélectionnez plusieurs équipements dans la liste</li>
+  <li>Cliquez sur <strong>Transfert</strong> dans la barre d'actions groupées</li>
+  <li>Choisissez le site de destination</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="licences">9. Licences Logicielles</h2>
+
+<h3>9.1 Gestion des licences</h3>
+<ul>
+  <li>Ajoutez une licence : nom, éditeur, clé de licence, nombre de sièges</li>
+  <li>Suivi des sièges utilisés avec barre de progression visuelle</li>
+  <li>Dates d'achat et d'expiration</li>
+  <li>Liez un fournisseur et un équipement</li>
+</ul>
+
+<h3>9.2 Indicateurs</h3>
+<ul>
+  <li><span style="color: #dc2626;">Rouge</span> : Sièges épuisés (≥ 100%)</li>
+  <li><span style="color: #f59e0b;">Orange</span> : Capacité critique (≥ 80%)</li>
+  <li><span style="color: #16a34a;">Vert</span> : Capacité normale</li>
+  <li>Badge "Expirée" ou "Bientôt" sur les cartes</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="achats">10. Demandes d'Achat</h2>
+
+<h3>10.1 Création</h3>
+<ul>
+  <li>Cliquez sur <strong>Nouvelle demande</strong></li>
+  <li>Remplissez : titre, type d'équipement, quantité, coût estimé, priorité, justification, service fournisseur</li>
+</ul>
+
+<h3>10.2 Workflow d'approbation</h3>
+<ul>
+  <li>Statut <strong>En attente</strong> → en attente de décision</li>
+  <li>Les administrateurs peuvent <strong>Approuver</strong> ou <strong>Rejeter</strong> (avec motif)</li>
+  <li>Les demandes sont regroupées par statut dans l'interface</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="rma">11. Retours Garantie (RMA)</h2>
+
+<h3>11.1 Gestion des RMA</h3>
+<ul>
+  <li>Créez une demande RMA : équipement, n° de série, vendeur, motif, n° RMA</li>
+  <li>Suivez les dates d'expédition et de réception</li>
+  <li>Statuts : Ouvert → Expédié → Résolu</li>
+  <li>Liez un fournisseur et un technicien</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="anomalies">12. Détection d'Anomalies</h2>
+
+<h3>12.1 Anomalies automatiques</h3>
+<ul>
+  <li>Le système détecte automatiquement les équipements avec <strong>3 pannes ou plus</strong> dans les 6 derniers mois</li>
+  <li>Affichage : nom, type, service, localisation, nombre de tickets</li>
+  <li>Lien direct vers le module Maintenance pour intervention</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="contrats">13. Contrats de Maintenance</h2>
+
+<h3>13.1 Gestion des contrats</h3>
+<ul>
+  <li>Créez des contrats : titre, fournisseur, n° contrat, site, dates début/fin, montant</li>
+  <li>Indicateurs d'expiration (expiré / expire bientôt)</li>
+  <li>Badge de statut : Actif / Inactif</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="fournisseurs">14. Fournisseurs</h2>
+
+<h3>14.1 Gestion (Administrateur)</h3>
+<ul>
+  <li>Liste des fournisseurs avec coordonnées</li>
+  <li>Création, modification, suppression</li>
+  <li>Vue consolidée : équipements, contrats, achats, licences, RMA liés</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="sites">15. Gestion des Sites</h2>
+
+<h3>15.1 Sites (Administrateur)</h3>
+<ul>
+  <li>Créez et gérez les sites (nom, ville, pays, adresse, coordonnées GPS)</li>
+  <li>Chaque site affiche le nombre d'équipements associés</li>
+  <li>Sélecteur de site dans le dashboard (filtre multi-sélection)</li>
+</ul>
+
+<h3>15.2 Carte interactive</h3>
+<ul>
+  <li>Visualisez tous les sites géolocalisés sur une carte Leaflet</li>
+  <li>Marqueurs cliquables avec informations du site</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="utilisateurs">16. Utilisateurs &amp; Permissions</h2>
+
+<h3>16.1 Gestion (Administrateur)</h3>
+<ul>
+  <li>Créez, modifiez, supprimez des comptes utilisateurs</li>
+  <li>Attribuez un rôle : Administrateur, Technicien, Utilisateur</li>
+  <li>Définissez les permissions et les sites autorisés</li>
+  <li>Bloquez / débloquez un compte</li>
+</ul>
+
+<h3>16.2 Rôles</h3>
+<table>
+  <tr><th>Rôle</th><th>Accès</th></tr>
+  <tr><td>Administrateur</td><td>Accès complet à toutes les fonctionnalités</td></tr>
+  <tr><td>Technicien</td><td>Permissions configurables (lecture, écriture, modification)</td></tr>
+  <tr><td>Utilisateur</td><td>Permissions configurables (lecture, écriture, modification)</td></tr>
+</table>
+
+<h3>16.3 Permissions</h3>
+<table>
+  <tr><th>Permission</th><th>Droits</th></tr>
+  <tr><td>Lecture</td><td>Consulter la liste des équipements</td></tr>
+  <tr><td>Écriture</td><td>Ajouter de nouveaux équipements</td></tr>
+  <tr><td>Modification</td><td>Modifier et supprimer des équipements</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="messagerie">17. Messagerie</h2>
+
+<h3>17.1 Conversations</h3>
+<ul>
+  <li><strong>Globale</strong> : visible par tous les utilisateurs</li>
+  <li><strong>Groupes</strong> : conversations privées créées par les administrateurs</li>
+  <li><strong>Messages directs (DM)</strong> : conversations privées entre deux utilisateurs</li>
+</ul>
+
+<h3>17.2 Utilisation</h3>
+<ul>
+  <li>Cliquez sur l'icône de messagerie (💬) dans la barre d'actions</li>
+  <li>Sélectionnez une conversation dans la liste de gauche</li>
+  <li>Saisissez votre message et appuyez sur <strong>Envoyer</strong></li>
+  <li>Les messages non lus sont signalés par un badge rouge</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="notifications">18. Centre de Notifications</h2>
+
+<ul>
+  <li>Cliquez sur la cloche 🔔 dans la barre d'actions</li>
+  <li>Aperçu rapide des notifications : tickets critiques, garanties expirées, visites du jour, stock bas</li>
+  <li>Cliquez sur <strong>Voir tout</strong> pour le centre complet</li>
+  <li>Marquez comme lu (une ou toutes les notifications)</li>
+  <li>Types : Info (bleu), Avertissement (orange), Erreur (rouge)</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="rapports">19. Rapports &amp; Export</h2>
+
+<h3>19.1 Onglets de rapports</h3>
+<table>
+  <tr><th>Onglet</th><th>Description</th></tr>
+  <tr><td>Parcours équipement</td><td>Timeline complète d'un équipement sélectionné</td></tr>
+  <tr><td>Par date</td><td>Événements filtrés par période, service, type</td></tr>
+  <tr><td>Par service</td><td>Statistiques par département</td></tr>
+  <tr><td>Par utilisateur</td><td>Statistiques par utilisateur</td></tr>
+  <tr><td>Par site</td><td>Statistiques par site</td></tr>
+  <tr><td>Maintenance</td><td>Registre complet des maintenances</td></tr>
+  <tr><td>Visites</td><td>Registre complet des visites</td></tr>
+</table>
+
+<h3>19.2 Formats d'export</h3>
+<table>
+  <tr><th>Format</th><th>Disponible pour</th></tr>
+  <tr><td>Excel (.xlsx)</td><td>Tous les rapports, liste équipements</td></tr>
+  <tr><td>PDF</td><td>Historique équipement, par date, journal</td></tr>
+  <tr><td>CSV</td><td>Liste équipements</td></tr>
+  <tr><td>Multi-sheet Excel</td><td>Rapport maintenance</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="calendrier">20. Calendrier Unifié</h2>
+
+<ul>
+  <li>Vue mensuelle avec tous les événements (maintenances et visites)</li>
+  <li>Légende : Rouge = Maintenance, Bleu = Visites</li>
+  <li>Cliquez sur un jour pour voir la liste des événements</li>
+  <li>Navigation mois par mois / année par année</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="carte">21. Carte des Sites</h2>
+
+<ul>
+  <li>Visualisation de tous les sites sur une carte interactive (Leaflet)</li>
+  <li>Marqueurs positionnés selon les coordonnées GPS</li>
+  <li>Cliquez sur un marqueur pour voir les informations du site</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="inventaire">22. Inventaire Physique</h2>
+
+<ul>
+  <li>Module guidé pour réaliser un inventaire physique</li>
+  <li>Barre de progression (% scanné)</li>
+  <li>Bouton à cocher pour chaque équipement scanné</li>
+  <li>Les équipements scannés passent en vert avec texte barré</li>
+  <li>Bouton <strong>Voir manquants</strong> pour afficher les équipements non scannés</li>
+  <li>Intégration des résultats Ping (en ligne/hors ligne)</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="monitoring">23. Monitoring Temps Réel</h2>
+
+<h3>23.1 Sessions actives</h3>
+<ul>
+  <li>Liste des utilisateurs connectés (en ligne / inactif)</li>
+  <li>Date/heure de connexion, dernière activité, adresse IP</li>
+  <li>Badges de rôle</li>
+</ul>
+
+<h3>23.2 Activité en direct</h3>
+<ul>
+  <li>Flux des actions utilisateurs en temps réel</li>
+  <li>Actualisation automatique toutes les 30 secondes</li>
+  <li>Bouton d'actualisation manuelle</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="journal">24. Journal d'Activité</h2>
+
+<ul>
+  <li>Registre complet de toutes les actions utilisateur</li>
+  <li>Filtres : par utilisateur, type d'action, période</li>
+  <li>Types tracés : Connexion, Déconnexion, Ajout/Modification/Suppression, Transfert, Réforme, Export</li>
+  <li>Export Excel ou PDF</li>
+  <li>Barre de statistiques : total actions, utilisateurs actifs, connexions</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="tv">25. Dashboard TV</h2>
+
+<ul>
+  <li>Affichage plein écran optimisé pour écran large / projecteur</li>
+  <li>8 tuiles KPI : Total, Actifs, Défaillants, Tickets ouverts, Critiques, Garanties exp., Visites planif., Non visités</li>
+  <li>Indicateur "Live" avec point vert clignotant</li>
+  <li>Date et heure actuelles</li>
+  <li>Bannière d'alerte rouge clignotante si tickets critiques</li>
+  <li>Fermeture avec le bouton X</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="recherche">26. Recherche Globale</h2>
+
+<ul>
+  <li>Raccourci : <strong>Ctrl+K</strong></li>
+  <li>Recherche dans : équipements (nom, marque, modèle, n° série, IP, localisation, service), sites (nom, ville, pays)</li>
+  <li>Navigation directe vers l'élément trouvé</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="qr">27. QR Code &amp; Barcode</h2>
+
+<h3>27.1 QR Code</h3>
+<ul>
+  <li>Chaque équipement peut afficher son QR Code</li>
+  <li>Options : visualiser, télécharger, imprimer</li>
+</ul>
+
+<h3>27.2 Barcode (Code-barres)</h3>
+<ul>
+  <li>Génération au format CODE128</li>
+  <li>Téléchargement en PNG</li>
+  <li>Impression directe</li>
+</ul>
+
+<h3>27.3 Scanner QR</h3>
+<ul>
+  <li>Utilisez la caméra de l'appareil pour scanner les QR Codes des équipements</li>
+  <li>Navigation directe vers l'équipement scanné</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="parametres">28. Paramètres</h2>
+
+<h3>28.1 Webhook</h3>
+<ul>
+  <li>Configurez une URL Slack ou Teams pour les notifications</li>
+  <li>Bouton de test pour valider la configuration</li>
+</ul>
+
+<h3>28.2 Masquage des données sensibles</h3>
+<ul>
+  <li>Activez/désactivez le masquage des n° de série, adresses IP, clés de licence</li>
+  <li>Bascule rapide depuis la barre d'actions (icône œil)</li>
+</ul>
+
+<h3>28.3 Rapport RGPD</h3>
+<ul>
+  <li>Générez un PDF de conformité RGPD listant les catégories de données collectées</li>
+</ul>
+
+<h3>28.4 Sauvegarde</h3>
+<ul>
+  <li>Téléchargez une sauvegarde complète de la base de données au format JSON</li>
+  <li>Réservé aux administrateurs</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="roles">29. Rôles &amp; Permissions</h2>
+
+<h3>29.1 Matrice des accès</h3>
+<table>
+  <tr><th>Fonctionnalité</th><th>Admin</th><th>Technicien</th><th>Utilisateur</th></tr>
+  <tr><td>Tableau de bord</td><td>✅</td><td>✅</td><td>✅</td></tr>
+  <tr><td>Liste équipements</td><td>✅</td><td>✅ (si lecture)</td><td>✅ (si lecture)</td></tr>
+  <tr><td>Ajout équipement</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Modification équipement</td><td>✅</td><td>✅ (si modification)</td><td>✅ (si modification)</td></tr>
+  <tr><td>Maintenance</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Visites de site</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Transferts</td><td>✅</td><td>✅ (si écriture + modification)</td><td>✅ (si écriture + modification)</td></tr>
+  <tr><td>Licences</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Demandes d'achat</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>RMA</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Contrats</td><td>✅</td><td>✅ (si écriture)</td><td>✅ (si écriture)</td></tr>
+  <tr><td>Gestion des sites</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Gestion des utilisateurs</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Fournisseurs</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Journal d'activité</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Monitoring</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Sauvegarde</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Corbeille (restauration)</td><td>✅</td><td>✅ (si modification)</td><td>❌</td></tr>
+  <tr><td>Approbation achats</td><td>✅</td><td>❌</td><td>❌</td></tr>
+  <tr><td>Paramètres (webhook, RGPD)</td><td>✅</td><td>❌</td><td>❌</td></tr>
+</table>
+
+<div class="note">
+<strong>Note :</strong> Les permissions (lecture, écriture, modification) sont configurables par utilisateur pour les rôles Technicien et Utilisateur.
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="raccourcis">30. Raccourcis Clavier</h2>
+
+<table>
+  <tr><th>Raccourci</th><th>Action</th><th>Condition</th></tr>
+  <tr><td><code>Ctrl+K</code></td><td>Ouvrir la recherche globale</td><td>Toujours</td></tr>
+  <tr><td><code>N</code></td><td>Nouvel équipement</td><td>Aucun module ouvert + permission écriture</td></tr>
+  <tr><td><code>M</code></td><td>Ouvrir module Maintenance</td><td>Permission écriture</td></tr>
+  <tr><td><code>V</code></td><td>Ouvrir module Visites</td><td>Permission écriture</td></tr>
+  <tr><td><code>G</code></td><td>Ouvrir la messagerie</td><td>Permission écriture</td></tr>
+</table>
+
+<div style="margin-top: 2cm; padding-top: 1cm; border-top: 2px solid #1a6fa6; text-align: center; color: #6b7280; font-size: 10pt;">
+  <p>Guide d'utilisation — Gestion des Équipements IT</p>
+  <p>© 2026 — Tous droits réservés</p>
+</div>
+
+</body>
+</html>

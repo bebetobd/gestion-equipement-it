@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import LoginPage from './LoginPage';
 import ITEquipmentManager from './ITEquipmentManager';
 import ErrorBoundary from './ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 import { apiUrl } from './config';
 
 interface AuthUser {
@@ -89,7 +90,9 @@ const App = () => {
 
   return (
     <ErrorBoundary>
-      <ITEquipmentManager currentUser={currentUser} onLogout={handleLogout} />
+      <ToastProvider>
+        <ITEquipmentManager currentUser={currentUser} onLogout={handleLogout} />
+      </ToastProvider>
     </ErrorBoundary>
   );
 };

@@ -100,7 +100,7 @@ export const validators = {
    * @returns {object} { valid: boolean, error?: string }
    */
   equipmentType(type) {
-    const validTypes = ['ordinateur', 'reseau', 'serveur', 'imprimante'];
+    const validTypes = ['ordinateur', 'reseau', 'serveur', 'imprimante', 'accessoires', 'autre'];
     if (!type || !validTypes.includes(type)) {
       return { valid: false, error: `Equipment type must be one of: ${validTypes.join(', ')}` };
     }
@@ -186,6 +186,7 @@ export function validateEquipment(data) {
   const errors = [];
 
   // Validate required fields
+  if (!data.name?.trim()) errors.push('name: Le nom est requis.');
   const nameVal = validators.text(data.name || '', 200);
   if (!nameVal.valid) errors.push('name: ' + nameVal.error);
 
@@ -236,6 +237,17 @@ export function validateEquipment(data) {
     valid: errors.length === 0,
     errors
   };
+}
+
+export function validateSupplier(data) {
+  const errors = [];
+  if (!data.name?.trim()) errors.push('name: Le nom du fournisseur est requis.');
+  const nameVal = validators.text(data.name, 200);
+  if (!nameVal.valid) errors.push('name: ' + nameVal.error);
+  if (data.email && data.email.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+    errors.push('email: Format d\'email invalide.');
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -323,7 +335,7 @@ export function validatePurchase(data) {
 export function validateRma(data) {
   const errors = [];
   if (!data.equipmentName?.trim()) errors.push('equipmentName: Le nom de l\'équipement est requis.');
-  if (!data.issue?.trim()) errors.push('issue: La description du problème est requise.');
+  if (!data.reason?.trim()) errors.push('reason: La raison du retour est requise.');
   const nameVal = validators.text(data.equipmentName, 200);
   if (!nameVal.valid) errors.push('equipmentName: ' + nameVal.error);
   return { valid: errors.length === 0, errors };

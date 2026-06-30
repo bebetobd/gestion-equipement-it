@@ -122,8 +122,8 @@ async function _initDB() {
           `INSERT INTO equipments
              (id, name, type, brand, model, serial_number, ip_address, location,
               department, status, purchase_date, warranty, last_maintenance,
-              visited, technician_name, visit_date, intervention_details)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+              visited, technician_name, visit_date, intervention_details, supplier_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
            ON CONFLICT DO NOTHING`,
           [
             e.id, e.name, e.type,
@@ -131,7 +131,8 @@ async function _initDB() {
             e.ipAddress ?? '', e.location ?? '', e.department ?? '',
             e.status ?? 'actif', e.purchaseDate ?? '', e.warranty ?? '',
             e.lastMaintenance ?? '', e.visited ?? false,
-            e.technicianName ?? '', e.visitDate ?? '', e.interventionDetails ?? ''
+            e.technicianName ?? '', e.visitDate ?? '', e.interventionDetails ?? '',
+            e.supplierId ?? null
           ]
         );
       }
@@ -155,6 +156,22 @@ async function _initDB() {
 
   // Migration: add site_id to equipments
   await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS site_id INTEGER DEFAULT NULL`);
+
+  // Migration: add supplier_id to equipments
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS supplier_id INTEGER DEFAULT NULL`);
+
+  // Migration: soft-delete column
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+
+  // Soft-delete for all secondary modules
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE maintenance_contracts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE rma_requests ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP DEFAULT NULL`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS equipment_events (
@@ -366,6 +383,9 @@ async function _initDB() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_licenses_expiry ON licenses(expiry_date)`);
 
+  // Migration: add supplier_id to licenses
+  await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS supplier_id INTEGER DEFAULT NULL`);
+
   // Coordonnées géographiques des sites (pour la carte)
   await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION`);
   await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION`);
@@ -396,6 +416,9 @@ async function _initDB() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON maintenance_contracts(end_date)`);
 
+  // Migration: add supplier_id to maintenance_contracts
+  await pool.query(`ALTER TABLE maintenance_contracts ADD COLUMN IF NOT EXISTS supplier_id INTEGER DEFAULT NULL`);
+
   // Demandes d'achat
   await pool.query(`
     CREATE TABLE IF NOT EXISTS purchase_requests (
@@ -420,6 +443,9 @@ async function _initDB() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_status ON purchase_requests(status)`);
 
+  // Migration: add supplier_id to purchase_requests
+  await pool.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS supplier_id INTEGER DEFAULT NULL`);
+
   // Demandes RMA (retour garantie)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS rma_requests (
@@ -439,6 +465,40 @@ async function _initDB() {
       created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // Migration: add supplier_id to rma_requests
+  await pool.query(`ALTER TABLE rma_requests ADD COLUMN IF NOT EXISTS supplier_id INTEGER DEFAULT NULL`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      contact_name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      city TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id            SERIAL PRIMARY KEY,
+      user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      type          VARCHAR(50)  NOT NULL DEFAULT 'info',
+      title         VARCHAR(300) NOT NULL DEFAULT '',
+      message       TEXT         NOT NULL DEFAULT '',
+      related_id    INTEGER,
+      related_type  VARCHAR(50)  NOT NULL DEFAULT '',
+      is_read       BOOLEAN      NOT NULL DEFAULT FALSE,
+      created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, is_read)`);
 
   // Webhook Slack/Teams
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS slack_webhook TEXT NOT NULL DEFAULT ''`);
@@ -565,7 +625,7 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
   if (equipmentId)               { conditions.push(`equipment_id = $${i++}`); params.push(equipmentId); }
   params.push(limit);
   const { rows } = await pool.query(
-    `SELECT * FROM maintenance_records WHERE ${conditions.join(' AND ')} ORDER BY opened_at DESC LIMIT $${i}`,
+    `SELECT * FROM maintenance_records WHERE ${conditions.join(' AND ')} AND deleted_at IS NULL ORDER BY opened_at DESC LIMIT $${i}`,
     params
   );
   return rows.map(rowToMaintenance);
@@ -604,8 +664,8 @@ export async function updateMaintenance(id, data) {
 
 export async function deleteMaintenance(id) {
 
-  const { rows } = await pool.query('DELETE FROM maintenance_records WHERE id=$1 RETURNING id', [id]);
-  return rows[0] || null;
+  const { rows } = await pool.query('UPDATE maintenance_records SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
+  return rows[0] ? rowToMaintenance(rows[0]) : null;
 }
 
 export async function appendMaintenanceNote(id, noteEntry) {
@@ -617,7 +677,7 @@ export async function appendMaintenanceNote(id, noteEntry) {
   return rows[0] ? rowToMaintenance(rows[0]) : null;
 }
 
-function rowToMaintenance(row) {
+export function rowToMaintenance(row) {
   return {
     id: row.id,
     equipmentId: row.equipment_id,
@@ -644,6 +704,7 @@ function rowToMaintenance(row) {
     techConfirmed: row.tech_confirmed ?? false,
     rating: row.rating ?? null,
     reviewComment: row.review_comment || '',
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -705,8 +766,10 @@ export function rowToEquipment(row) {
     interventionDetails: row.intervention_details,
     replacedById: row.replaced_by_id ?? null,
     siteId: row.site_id ?? null,
+    supplierId: row.supplier_id ?? null,
     quantity: row.quantity ?? 1,
     minQuantity: row.min_quantity ?? 0,
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -717,7 +780,8 @@ export async function getSites() {
   const { rows } = await pool.query(`
     SELECT s.*, COUNT(e.id)::int AS equipment_count
     FROM sites s
-    LEFT JOIN equipments e ON e.site_id = s.id
+    LEFT JOIN equipments e ON e.site_id = s.id AND e.deleted_at IS NULL
+    WHERE s.deleted_at IS NULL
     GROUP BY s.id
     ORDER BY s.country, s.city, s.name
   `);
@@ -759,7 +823,7 @@ export async function deleteSite(id) {
   if (parseInt(linked[0].count, 10) > 0) {
     throw Object.assign(new Error('Ce site possède des équipements. Réaffectez-les avant de supprimer le site.'), { status: 409 });
   }
-  const { rows } = await pool.query('DELETE FROM sites WHERE id=$1 RETURNING id', [id]);
+  const { rows } = await pool.query('UPDATE sites SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
   return rows[0] || null;
 }
 
@@ -980,7 +1044,7 @@ export async function getVisits({ siteId, status, from, to } = {}) {
   if (status) { params.push(status); q += ` AND status = $${params.length}`; }
   if (from)   { params.push(from);   q += ` AND scheduled_date >= $${params.length}`; }
   if (to)     { params.push(to);     q += ` AND scheduled_date <= $${params.length}`; }
-  q += ' ORDER BY scheduled_date ASC, scheduled_time ASC';
+  q += ' AND deleted_at IS NULL ORDER BY scheduled_date ASC, scheduled_time ASC';
   const { rows } = await pool.query(q, params);
   return rows.map(r => ({
     id: r.id, siteId: r.site_id, siteName: r.site_name,
@@ -1033,5 +1097,42 @@ export async function updateVisit(id, { siteId, siteName, scheduledDate, schedul
 
 export async function deleteVisit(id) {
 
-  return pool.query('DELETE FROM site_visits WHERE id=$1', [id]);
+  const { rows } = await pool.query('UPDATE site_visits SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
+  return rows[0] || null;
+}
+
+// ── Suppliers ─────────────────────────────────────────────────────────────────
+export async function getSuppliers() {
+  const { rows } = await pool.query('SELECT * FROM suppliers WHERE deleted_at IS NULL ORDER BY name ASC');
+  return rows.map(r => ({
+    id: r.id, name: r.name, contactName: r.contact_name, email: r.email, phone: r.phone,
+    address: r.address, city: r.city, country: r.country, notes: r.notes, createdAt: r.created_at,
+  }));
+}
+
+export async function createSupplier({ name, contactName, email, phone, address, city, country, notes }) {
+  const { rows } = await pool.query(
+    `INSERT INTO suppliers (name, contact_name, email, phone, address, city, country, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [name, contactName||'', email||'', phone||'', address||'', city||'', country||'', notes||'']
+  );
+  const r = rows[0];
+  return { id: r.id, name: r.name, contactName: r.contact_name, email: r.email, phone: r.phone,
+    address: r.address, city: r.city, country: r.country, notes: r.notes, createdAt: r.created_at };
+}
+
+export async function updateSupplier(id, { name, contactName, email, phone, address, city, country, notes }) {
+  const { rows } = await pool.query(
+    `UPDATE suppliers SET name=$1, contact_name=$2, email=$3, phone=$4, address=$5, city=$6, country=$7, notes=$8 WHERE id=$9 RETURNING *`,
+    [name, contactName||'', email||'', phone||'', address||'', city||'', country||'', notes||'', id]
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return { id: r.id, name: r.name, contactName: r.contact_name, email: r.email, phone: r.phone,
+    address: r.address, city: r.city, country: r.country, notes: r.notes, createdAt: r.created_at };
+}
+
+export async function deleteSupplier(id) {
+  const { rows } = await pool.query('UPDATE suppliers SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
+  return rows[0] || null;
 }

@@ -8,7 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { sendMail, sendMonthlyReport } from './mailer.js';
 const execAsync = promisify(exec);
-import { query, rowToEquipment, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen } from './db.js';
+import { query, rowToEquipment, rowToMaintenance, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen, getSuppliers, createSupplier, updateSupplier, deleteSupplier, initDB } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -35,10 +35,13 @@ import {
   validateContract,
   validatePurchase,
   validateRma,
+  validateSupplier,
   validators
 } from './validation.js';
 
 export const app = express();
+
+await initDB();
 
 // ─── CORS restreint ────────────────────────────────────────────────────────────
 const allowedOrigins = [
@@ -649,6 +652,10 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       return res.status(400).json({ message: 'No fields to update' });
     }
 
+    // Audit : récupérer l'état avant modification
+    const { rows: before } = await query('SELECT role, permissions, allowed_site_ids, blocked FROM users WHERE id=$1', [id]);
+    const oldState = before[0] || {};
+
     params.push(id);
     const updateSQL = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, role, permissions, allowed_site_ids`;
 
@@ -658,12 +665,26 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       return res.status(404).json({ message: 'Utilisateur introuvable.' });
     }
 
+    // Audit : construire le détail des changements
+    const changes = [];
+    if (role && role !== oldState.role) changes.push(`role: ${oldState.role||'?'} → ${role}`);
+    if (permissions) {
+      const oldPerms = (oldState.permissions || []).join(', ');
+      const newPerms = permissions.join(', ');
+      if (oldPerms !== newPerms) changes.push(`permissions: [${oldPerms}] → [${newPerms}]`);
+    }
+    if (allowedSiteIds !== undefined) {
+      const oldSites = (oldState.allowed_site_ids || []).join(', ');
+      const newSites = allowedSiteIds.join(', ');
+      if (oldSites !== newSites) changes.push(`sites: [${oldSites}] → [${newSites}]`);
+    }
+
     logActivity(
       req.user.id,
       req.user.username,
       req.user.name,
       'Modification utilisateur',
-      `Compte "${rows[0].username}" modifié`,
+      `Compte "${rows[0].username}" modifié` + (changes.length ? ' — ' + changes.join('; ') : ''),
       getClientIp(req)
     );
 
@@ -747,11 +768,11 @@ app.get('/api/equipments', authenticate, requirePermission('lecture'), asyncHand
     let rows;
     if (req.user.role !== 'admin' && allowedSiteIds.length > 0) {
       ({ rows } = await query(
-        'SELECT * FROM equipments WHERE site_id = ANY($1::integer[]) ORDER BY id',
+        'SELECT * FROM equipments WHERE site_id = ANY($1::integer[]) AND deleted_at IS NULL ORDER BY id',
         [allowedSiteIds]
       ));
     } else {
-      ({ rows } = await query('SELECT * FROM equipments ORDER BY id'));
+      ({ rows } = await query('SELECT * FROM equipments WHERE deleted_at IS NULL ORDER BY id'));
     }
     res.json(rows.map(rowToEquipment));
   } catch (err) {
@@ -761,7 +782,16 @@ app.get('/api/equipments', authenticate, requirePermission('lecture'), asyncHand
 
 app.get('/api/equipments/export', authenticate, requirePermission('lecture'), asyncHandler(async (req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM equipments ORDER BY id');
+    const allowedSiteIds = req.user.allowedSiteIds ?? [];
+    let rows;
+    if (req.user.role !== 'admin' && allowedSiteIds.length > 0) {
+      ({ rows } = await query(
+        'SELECT * FROM equipments WHERE site_id = ANY($1::integer[]) AND deleted_at IS NULL ORDER BY id',
+        [allowedSiteIds]
+      ));
+    } else {
+      ({ rows } = await query('SELECT * FROM equipments WHERE deleted_at IS NULL ORDER BY id'));
+    }
     const equipments = rows.map(rowToEquipment);
 
     logActivity(
@@ -822,13 +852,26 @@ app.delete('/api/sites/:id', authenticate, requireAdmin, asyncHandler(async (req
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'Invalid site ID' });
   try {
-    const deleted = await deleteSite(id);
-    if (!deleted) return res.status(404).json({ message: 'Site introuvable.' });
+    const { rows } = await query('UPDATE sites SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id', [id]);
+    if (!rows[0]) return res.status(404).json({ message: 'Site introuvable.' });
     logActivity(req.user.id, req.user.username, req.user.name, 'Suppression site', `Site #${id} supprimé`, getClientIp(req));
     res.status(204).send();
   } catch (err) {
     res.status(err.status || 500).json({ message: err.message });
   }
+}));
+app.get('/api/sites/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM sites WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/sites/:id/restore', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE sites SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Site introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/sites/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM sites WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
+  res.status(204).end();
 }));
 
 // ─── Equipments ───────────────────────────────────────────────────────────────
@@ -849,8 +892,8 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
       `INSERT INTO equipments
          (name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity, supplier_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
@@ -859,7 +902,8 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
         e.visited || false, e.technicianName || '', e.visitDate || '',
         e.interventionDetails || '', e.siteId || null,
         Math.max(1, parseInt(e.quantity) || 1),
-        Math.max(0, parseInt(e.minQuantity) || 0)
+        Math.max(0, parseInt(e.minQuantity) || 0),
+        e.supplierId || null
       ]
     );
 
@@ -906,8 +950,8 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
          name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
          location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
          last_maintenance=$12, visited=$13, technician_name=$14,
-         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18, min_quantity=$19
-       WHERE id=$20
+         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18, min_quantity=$19, supplier_id=$20
+       WHERE id=$21
        RETURNING *`,
       [
         e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
@@ -917,6 +961,7 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
         e.interventionDetails || '', e.siteId || null,
         Math.max(1, parseInt(e.quantity) || 1),
         Math.max(0, parseInt(e.minQuantity) || 0),
+        e.supplierId || null,
         id
       ]
     );
@@ -929,7 +974,7 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
     const ip = getClientIp(req);
 
     // Compute field-level changes
-    const TRACKED = ['name','type','brand','model','serialNumber','ipAddress','location','department','status','purchaseDate','warranty','lastMaintenance','visited','technicianName','visitDate','interventionDetails'];
+    const TRACKED = ['name','type','brand','model','serialNumber','ipAddress','location','department','status','purchaseDate','warranty','lastMaintenance','visited','technicianName','visitDate','interventionDetails','supplierId'];
     const changes = old ? TRACKED.filter(f => String(old[f]) !== String(updated[f])).map(f => ({ field: f, from: old[f], to: updated[f] })) : [];
 
     // Determine action label
@@ -998,26 +1043,52 @@ app.delete('/api/equipments/:id', authenticate, requirePermission('modification'
 
   try {
     const { rows } = await query(
-      'DELETE FROM equipments WHERE id=$1 RETURNING name',
+      'UPDATE equipments SET deleted_at = NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING name',
       [id]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ message: 'Équipement introuvable' });
+      return res.status(404).json({ message: 'Équipement introuvable ou déjà supprimé' });
     }
 
     const ip = getClientIp(req);
-    logActivity(req.user.id, req.user.username, req.user.name, 'Suppression équipement', `"${rows[0].name}" supprimé`, ip);
+    logActivity(req.user.id, req.user.username, req.user.name, 'Suppression équipement', `"${rows[0].name}" mis à la corbeille`, ip);
     logEquipmentEvent({
       equipmentId: id, equipmentName: rows[0].name, equipmentType: '', department: '',
-      action: 'Suppression', details: `Équipement "${rows[0].name}" supprimé du parc`,
+      action: 'Suppression', details: `Équipement "${rows[0].name}" mis à la corbeille`,
       userId: req.user.id, username: req.user.username, userName: req.user.name, ip
     });
 
-    res.status(204).send();
+    res.json({ message: 'Équipement mis à la corbeille' });
   } catch (err) {
     handleError(err, res, 'Erreur lors de la suppression.');
   }
+}));
+
+// ─── Corbeille : lister, restaurer, supprimer définitivement ──────────────────
+app.get('/api/equipments/deleted', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM equipments WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows.map(rowToEquipment));
+}));
+
+app.post('/api/equipments/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide' });
+  const { rows } = await query('UPDATE equipments SET deleted_at = NULL WHERE id=$1 AND deleted_at IS NOT NULL RETURNING *', [id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Équipement introuvable dans la corbeille' });
+  const ip = getClientIp(req);
+  logActivity(req.user.id, req.user.username, req.user.name, 'Restauration équipement', `"${rows[0].name}" restauré`, ip);
+  res.json(rowToEquipment(rows[0]));
+}));
+
+app.delete('/api/equipments/:id/hard', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide' });
+  const { rows } = await query('DELETE FROM equipments WHERE id=$1 AND deleted_at IS NOT NULL RETURNING name', [id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Équipement introuvable' });
+  const ip = getClientIp(req);
+  logActivity(req.user.id, req.user.username, req.user.name, 'Suppression définitive', `"${rows[0].name}" supprimé définitivement`, ip);
+  res.status(204).send();
 }));
 
 // ─── Transfer ────────────────────────────────────────────────────────────────
@@ -1071,7 +1142,7 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
           technician_name, visit_date, intervention_details, site_id, quantity, min_quantity)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
-        old.name, old.type, old.brand || '', old.model || '', old.serialNumber || '',
+        old.name, old.type, old.brand || '', old.model || '', '', // Nouvel actif : pas de serial (ne pas dupliquer)
         old.ipAddress || '', toLocation, toDepartment, old.status,
         old.purchaseDate || '', old.warranty || '', old.lastMaintenance || '',
         old.visited, old.technicianName || '', old.visitDate || '',
@@ -1112,6 +1183,34 @@ app.post('/api/equipments/:id/transfer', authenticate, requirePermission('modifi
     'Transfert équipement', `"${old.name}"${isPartial ? ` (×${qty})` : ''} transféré vers "${toLocation}"${siteChanged ? ` (${toSiteName})` : ''}`, ip);
 
   res.json(updated);
+}));
+
+// ─── Opérations groupées ───────────────────────────────────────────────────────
+app.post('/api/equipments/bulk/delete', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: 'Liste d\'IDs requise.' });
+  const { rowCount } = await query(`UPDATE equipments SET deleted_at = NOW() WHERE id = ANY($1::integer[]) AND deleted_at IS NULL`, [ids]);
+  logActivity(req.user.id, req.user.username, req.user.name, 'Suppression groupée', `${rowCount} équipements supprimés (IDs: ${ids.join(',')})`, getClientIp(req));
+  res.json({ deleted: rowCount });
+}));
+
+app.post('/api/equipments/bulk/status', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { ids, status } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: 'Liste d\'IDs requise.' });
+  if (!status) return res.status(400).json({ message: 'Statut requis.' });
+  const { rowCount } = await query(`UPDATE equipments SET status = $1 WHERE id = ANY($2::integer[])`, [status, ids]);
+  logActivity(req.user.id, req.user.username, req.user.name, 'Statut groupé', `${rowCount} équipements passés en "${status}"`, getClientIp(req));
+  res.json({ updated: rowCount });
+}));
+
+app.post('/api/equipments/bulk/transfer', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { ids, siteId, siteName } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: 'Liste d\'IDs requise.' });
+  if (!siteId) return res.status(400).json({ message: 'Site de destination requis.' });
+  const siteLabel = siteName || `#${siteId}`;
+  const { rowCount } = await query(`UPDATE equipments SET site_id = $1 WHERE id = ANY($2::integer[])`, [siteId, ids]);
+  logActivity(req.user.id, req.user.username, req.user.name, 'Transfert groupé', `${rowCount} équipements transférés vers ${siteLabel}`, getClientIp(req));
+  res.json({ transferred: rowCount });
 }));
 
 // ─── Documents ────────────────────────────────────────────────────────────────
@@ -1280,6 +1379,19 @@ app.delete('/api/maintenance/:id', authenticate, requirePermission('modification
   logActivity(req.user.id, req.user.username, req.user.name, 'Suppression ticket', `Ticket #${id} supprimé`, getClientIp(req));
   res.status(204).send();
 }));
+app.get('/api/maintenance/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM maintenance_records WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows.map(row => ({...row, deletedAt: row.deleted_at})));
+}));
+app.post('/api/maintenance/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE maintenance_records SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Ticket introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/maintenance/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM maintenance_records WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
+  res.status(204).end();
+}));
 
 app.patch('/api/maintenance/:id/note', authenticate, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
@@ -1313,14 +1425,20 @@ app.patch('/api/maintenance/:id/assign', authenticate, asyncHandler(async (req, 
 app.patch('/api/maintenance/:id/confirm-user', authenticate, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'ID invalide.' });
-  const updated = await updateMaintenance(id, { userConfirmed: true });
-  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
-  // Si les deux ont confirmé, fermer le ticket
-  if (updated.userConfirmed && updated.techConfirmed) {
-    await updateMaintenance(id, { status: 'résolu', closedAt: new Date().toISOString() });
-    const final = await updateMaintenance(id, { techConfirmed: true, userConfirmed: true });
+  // Atomique : évite la race condition où user+tech confirment simultanément
+  const { rows } = await query(`
+    UPDATE maintenance_records
+    SET user_confirmed = TRUE,
+        status = CASE WHEN tech_confirmed = TRUE THEN 'résolu' ELSE status END,
+        closed_at = CASE WHEN tech_confirmed = TRUE THEN NOW() ELSE closed_at END
+    WHERE id = $1
+    RETURNING *
+  `, [id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  const updated = rowToMaintenance(rows[0]);
+  if (updated.status === 'résolu') {
     logActivity(req.user.id, req.user.username, req.user.name, 'Clôture ticket', `Ticket #${id} clôturé — confirmé par l'utilisateur et le technicien`, getClientIp(req));
-    return res.json(final);
+    return res.json(updated);
   }
   logActivity(req.user.id, req.user.username, req.user.name, 'Confirmation utilisateur', `Ticket #${id} confirmé par l'utilisateur`, getClientIp(req));
   res.json(updated);
@@ -1330,13 +1448,19 @@ app.patch('/api/maintenance/:id/confirm-user', authenticate, asyncHandler(async 
 app.patch('/api/maintenance/:id/confirm-tech', authenticate, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'ID invalide.' });
-  const updated = await updateMaintenance(id, { techConfirmed: true });
-  if (!updated) return res.status(404).json({ message: 'Ticket introuvable.' });
-  if (updated.userConfirmed && updated.techConfirmed) {
-    await updateMaintenance(id, { status: 'résolu', closedAt: new Date().toISOString() });
-    const final = await updateMaintenance(id, { techConfirmed: true, userConfirmed: true });
+  const { rows } = await query(`
+    UPDATE maintenance_records
+    SET tech_confirmed = TRUE,
+        status = CASE WHEN user_confirmed = TRUE THEN 'résolu' ELSE status END,
+        closed_at = CASE WHEN user_confirmed = TRUE THEN NOW() ELSE closed_at END
+    WHERE id = $1
+    RETURNING *
+  `, [id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Ticket introuvable.' });
+  const updated = rowToMaintenance(rows[0]);
+  if (updated.status === 'résolu') {
     logActivity(req.user.id, req.user.username, req.user.name, 'Clôture ticket', `Ticket #${id} clôturé — confirmé par l'utilisateur et le technicien`, getClientIp(req));
-    return res.json(final);
+    return res.json(updated);
   }
   logActivity(req.user.id, req.user.username, req.user.name, 'Confirmation technicien', `Ticket #${id} confirmé par le technicien`, getClientIp(req));
   res.json(updated);
@@ -1760,6 +1884,19 @@ app.delete('/api/visits/:id', authenticate, requirePermission('modification'), a
   await deleteVisit(id);
   res.status(204).end();
 }));
+app.get('/api/visits/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM site_visits WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/visits/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE site_visits SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Visite introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/visits/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM site_visits WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
+  res.status(204).end();
+}));
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
 
@@ -1784,7 +1921,7 @@ app.get('/api/reports/trends', authenticate, asyncHandler(async (req, res) => {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
     const to = new Date(year, month, 0).toISOString().slice(0, 10);
     const [events, maint] = await Promise.all([
-      query(`SELECT COUNT(*) as cnt FROM equipment_events WHERE created_at >= $1 AND created_at <= $2 AND action ILIKE '%panne%' OR action ILIKE '%maintenance%'`, [from, to + ' 23:59:59']).catch(() => ({ rows: [{ cnt: '0' }] })),
+      query(`SELECT COUNT(*) as cnt FROM equipment_events WHERE created_at >= $1 AND created_at <= $2 AND (action ILIKE '%panne%' OR action ILIKE '%maintenance%')`, [from, to + ' 23:59:59']).catch(() => ({ rows: [{ cnt: '0' }] })),
       query(`SELECT COUNT(*) as cnt, AVG(EXTRACT(EPOCH FROM (closed_at - opened_at))/3600)::numeric(10,1) as avg_hours FROM maintenance_records WHERE opened_at >= $1 AND opened_at <= $2`, [from, to + ' 23:59:59']).catch(() => ({ rows: [{ cnt: '0', avg_hours: null }] })),
     ]);
     return {
@@ -1798,28 +1935,25 @@ app.get('/api/reports/trends', authenticate, asyncHandler(async (req, res) => {
   res.json(results);
 }));
 
-// ─── Sauvegarde complète (export JSON) ────────────────────────────────────────
-
+// ─── Backup BDD ────────────────────────────────────────────────────────────────
 app.get('/api/backup', authenticate, requireAdmin, asyncHandler(async (req, res) => {
-  const [equip, users, sites, maint, visits, events] = await Promise.all([
-    query('SELECT * FROM equipments ORDER BY id'),
-    query('SELECT id, username, name, role, permissions, allowed_site_ids, blocked FROM users ORDER BY id'),
-    query('SELECT * FROM sites ORDER BY id'),
-    query('SELECT * FROM maintenance_records ORDER BY id'),
-    query('SELECT * FROM site_visits ORDER BY id'),
-    query('SELECT id, equipment_id, equipment_name, action, details, username, user_name, created_at FROM equipment_events ORDER BY id LIMIT 10000'),
-  ]);
-  res.setHeader('Content-Disposition', `attachment; filename="backup-gestion-it-${new Date().toISOString().slice(0,10)}.json"`);
-  res.json({
+  const tables = ['users','equipments','sites','equipment_events','equipment_documents','maintenance_records','user_activity_log','chat_messages','chat_read_markers','chat_groups','chat_group_members','user_sessions','site_visits','licenses','maintenance_contracts','purchase_requests','rma_requests','suppliers','notifications'];
+  const data = {};
+  for (const table of tables) {
+    try {
+      const { rows } = await query(`SELECT * FROM ${table} ORDER BY id`);
+      data[table] = rows;
+    } catch { data[table] = []; }
+  }
+  data._meta = {
     exportedAt: new Date().toISOString(),
     version: '1.0',
-    equipments: equip.rows,
-    users: users.rows,
-    sites: sites.rows,
-    maintenance: maint.rows,
-    visits: visits.rows,
-    events: events.rows,
-  });
+    tableCount: tables.length,
+    recordCount: Object.values(data).reduce((sum, arr) => sum + arr.length, 0),
+  };
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="backup-gestion-it-${new Date().toISOString().slice(0,10)}.json"`);
+  res.json(data);
 }));
 
 // ─── Import CSV template ──────────────────────────────────────────────────────
@@ -1836,7 +1970,7 @@ app.get('/api/equipments/csv-template', authenticate, (req, res) => {
 // ─── Licences logicielles ─────────────────────────────────────────────────────
 
 app.get('/api/licenses', authenticate, asyncHandler(async (req, res) => {
-  const { rows } = await query('SELECT * FROM licenses ORDER BY expiry_date ASC NULLS LAST');
+  const { rows } = await query('SELECT * FROM licenses WHERE deleted_at IS NULL ORDER BY expiry_date ASC NULLS LAST');
   res.json(rows);
 }));
 
@@ -1845,9 +1979,9 @@ app.post('/api/licenses', authenticate, requirePermission('ecriture'), asyncHand
   if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const { name, vendor, licenseKey, seats, usedSeats, equipmentId, purchaseDate, expiryDate, notes } = req.body;
   const { rows } = await query(
-    `INSERT INTO licenses (name, vendor, license_key, seats, used_seats, equipment_id, purchase_date, expiry_date, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '']
+    `INSERT INTO licenses (name, vendor, license_key, seats, used_seats, equipment_id, purchase_date, expiry_date, notes, supplier_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '', req.body.supplierId || null]
   );
   res.status(201).json(rows[0]);
 }));
@@ -1856,15 +1990,28 @@ app.put('/api/licenses/:id', authenticate, requirePermission('modification'), as
   const { id } = req.params;
   const { name, vendor, licenseKey, seats, usedSeats, equipmentId, purchaseDate, expiryDate, notes } = req.body;
   const { rows } = await query(
-    `UPDATE licenses SET name=$1, vendor=$2, license_key=$3, seats=$4, used_seats=$5, equipment_id=$6, purchase_date=$7, expiry_date=$8, notes=$9 WHERE id=$10 RETURNING *`,
-    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '', id]
+    `UPDATE licenses SET name=$1, vendor=$2, license_key=$3, seats=$4, used_seats=$5, equipment_id=$6, purchase_date=$7, expiry_date=$8, notes=$9, supplier_id=$10 WHERE id=$11 RETURNING *`,
+    [name || '', vendor || '', licenseKey || '', seats || 1, usedSeats || 0, equipmentId || null, purchaseDate || null, expiryDate || null, notes || '', req.body.supplierId || null, id]
   );
   if (rows.length === 0) return res.status(404).json({ message: 'Licence introuvable' });
   res.json(rows[0]);
 }));
 
 app.delete('/api/licenses/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
-  await query('DELETE FROM licenses WHERE id = $1', [req.params.id]);
+  await query('UPDATE licenses SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+  res.status(204).end();
+}));
+app.get('/api/licenses/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM licenses WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/licenses/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE licenses SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Licence introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/licenses/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM licenses WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
   res.status(204).end();
 }));
 
@@ -1915,6 +2062,50 @@ app.get('/api/ping/:ip', authenticate, asyncHandler(async (req, res) => {
   }
 }));
 
+// ─── Notifications ──────────────────────────────────────────────────────────────
+app.get('/api/notifications', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100',
+    [req.user.id]
+  );
+  res.json(rows);
+}));
+
+app.get('/api/notifications/unread-count', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    'SELECT COUNT(*)::int AS count FROM notifications WHERE user_id = $1 AND is_read = FALSE',
+    [req.user.id]
+  );
+  res.json({ count: rows[0].count });
+}));
+
+app.patch('/api/notifications/:id/read', authenticate, asyncHandler(async (req, res) => {
+  await query(
+    'UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.user.id]
+  );
+  res.status(204).end();
+}));
+
+app.post('/api/notifications/read-all', authenticate, asyncHandler(async (req, res) => {
+  await query(
+    'UPDATE notifications SET is_read = TRUE WHERE user_id = $1 AND is_read = FALSE',
+    [req.user.id]
+  );
+  res.status(204).end();
+}));
+
+app.post('/api/notifications', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { userId, type, title, message, relatedId, relatedType } = req.body;
+  if (!title?.trim()) return res.status(400).json({ message: 'Titre requis' });
+  const { rows } = await query(
+    `INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [userId || null, type || 'info', title.trim(), message || '', relatedId || null, relatedType || '']
+  );
+  res.status(201).json(rows[0]);
+}));
+
 // ─── Slack / Teams webhook ────────────────────────────────────────────────────
 app.post('/api/notify/webhook', authenticate, requireAdmin, asyncHandler(async (req, res) => {
   const { webhookUrl, message } = req.body;
@@ -1933,7 +2124,7 @@ app.post('/api/notify/webhook', authenticate, requireAdmin, asyncHandler(async (
 
 // ─── Contrats de maintenance ──────────────────────────────────────────────────
 app.get('/api/contracts', authenticate, asyncHandler(async (req, res) => {
-  const { rows } = await query('SELECT * FROM maintenance_contracts ORDER BY end_date ASC NULLS LAST');
+  const { rows } = await query('SELECT * FROM maintenance_contracts WHERE deleted_at IS NULL ORDER BY end_date ASC NULLS LAST');
   res.json(rows);
 }));
 app.post('/api/contracts', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
@@ -1941,29 +2132,42 @@ app.post('/api/contracts', authenticate, requirePermission('ecriture'), asyncHan
   if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
-    `INSERT INTO maintenance_contracts (title,vendor,contract_number,site_id,equipment_ids,start_date,end_date,amount,currency,scope,contact_name,contact_email,contact_phone,status,notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'']
+    `INSERT INTO maintenance_contracts (title,vendor,contract_number,site_id,equipment_ids,start_date,end_date,amount,currency,scope,contact_name,contact_email,contact_phone,status,notes,supplier_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'',f.supplierId||null]
   );
   res.status(201).json(rows[0]);
 }));
 app.put('/api/contracts/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
   const f = req.body;
   const { rows } = await query(
-    `UPDATE maintenance_contracts SET title=$1,vendor=$2,contract_number=$3,site_id=$4,equipment_ids=$5,start_date=$6,end_date=$7,amount=$8,currency=$9,scope=$10,contact_name=$11,contact_email=$12,contact_phone=$13,status=$14,notes=$15 WHERE id=$16 RETURNING *`,
-    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'',req.params.id]
+    `UPDATE maintenance_contracts SET title=$1,vendor=$2,contract_number=$3,site_id=$4,equipment_ids=$5,start_date=$6,end_date=$7,amount=$8,currency=$9,scope=$10,contact_name=$11,contact_email=$12,contact_phone=$13,status=$14,notes=$15,supplier_id=$16 WHERE id=$17 RETURNING *`,
+    [f.title||'',f.vendor||'',f.contractNumber||'',f.siteId||null,f.equipmentIds||[],f.startDate||null,f.endDate||null,f.amount||null,f.currency||'XOF',f.scope||'',f.contactName||'',f.contactEmail||'',f.contactPhone||'',f.status||'actif',f.notes||'',f.supplierId||null,req.params.id]
   );
   if (!rows.length) return res.status(404).json({ message: 'Contrat introuvable' });
   res.json(rows[0]);
 }));
 app.delete('/api/contracts/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
-  await query('DELETE FROM maintenance_contracts WHERE id=$1', [req.params.id]);
+  await query('UPDATE maintenance_contracts SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+  res.status(204).end();
+}));
+app.get('/api/contracts/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM maintenance_contracts WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/contracts/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE maintenance_contracts SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Contrat introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/contracts/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM maintenance_contracts WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
   res.status(204).end();
 }));
 
 // ─── Demandes d'achat ─────────────────────────────────────────────────────────
 app.get('/api/purchases', authenticate, asyncHandler(async (req, res) => {
-  const { rows } = await query('SELECT * FROM purchase_requests ORDER BY created_at DESC');
+  const { rows } = await query('SELECT * FROM purchase_requests WHERE deleted_at IS NULL ORDER BY created_at DESC');
   res.json(rows);
 }));
 app.post('/api/purchases', authenticate, asyncHandler(async (req, res) => {
@@ -1971,9 +2175,9 @@ app.post('/api/purchases', authenticate, asyncHandler(async (req, res) => {
   if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
-    `INSERT INTO purchase_requests (title,equipment_type,quantity,estimated_cost,currency,priority,justification,requested_by,department,site_id,notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [f.title||'',f.equipmentType||'ordinateur',f.quantity||1,f.estimatedCost||null,f.currency||'XOF',f.priority||'normale',f.justification||'',f.requestedBy||req.user.name,f.department||'',f.siteId||null,f.notes||'']
+    `INSERT INTO purchase_requests (title,equipment_type,quantity,estimated_cost,currency,priority,justification,requested_by,department,site_id,notes,supplier_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [f.title||'',f.equipmentType||'ordinateur',f.quantity||1,f.estimatedCost||null,f.currency||'XOF',f.priority||'normale',f.justification||'',f.requestedBy||req.user.name,f.department||'',f.siteId||null,f.notes||'',f.supplierId||null]
   );
   res.status(201).json(rows[0]);
 }));
@@ -1992,13 +2196,26 @@ app.patch('/api/purchases/:id/reject', authenticate, requireAdmin, asyncHandler(
   res.json(rows[0]);
 }));
 app.delete('/api/purchases/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
-  await query('DELETE FROM purchase_requests WHERE id=$1', [req.params.id]);
+  await query('UPDATE purchase_requests SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+  res.status(204).end();
+}));
+app.get('/api/purchases/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM purchase_requests WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/purchases/:id/restore', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE purchase_requests SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Demande introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/purchases/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM purchase_requests WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
   res.status(204).end();
 }));
 
 // ─── RMA ──────────────────────────────────────────────────────────────────────
 app.get('/api/rma', authenticate, asyncHandler(async (req, res) => {
-  const { rows } = await query('SELECT * FROM rma_requests ORDER BY created_at DESC');
+  const { rows } = await query('SELECT * FROM rma_requests WHERE deleted_at IS NULL ORDER BY created_at DESC');
   res.json(rows);
 }));
 app.post('/api/rma', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
@@ -2006,22 +2223,35 @@ app.post('/api/rma', authenticate, requirePermission('ecriture'), asyncHandler(a
   if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
   const f = req.body;
   const { rows } = await query(
-    `INSERT INTO rma_requests (equipment_id,equipment_name,serial_number,vendor,rma_number,reason,shipped_date,received_date,resolution,status,technician,notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'']
+    `INSERT INTO rma_requests (equipment_id,equipment_name,serial_number,vendor,rma_number,reason,shipped_date,received_date,resolution,status,technician,notes,supplier_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'',f.supplierId||null]
   );
   res.status(201).json(rows[0]);
 }));
 app.put('/api/rma/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
   const f = req.body;
   const { rows } = await query(
-    `UPDATE rma_requests SET equipment_id=$1,equipment_name=$2,serial_number=$3,vendor=$4,rma_number=$5,reason=$6,shipped_date=$7,received_date=$8,resolution=$9,status=$10,technician=$11,notes=$12 WHERE id=$13 RETURNING *`,
-    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'',req.params.id]
+    `UPDATE rma_requests SET equipment_id=$1,equipment_name=$2,serial_number=$3,vendor=$4,rma_number=$5,reason=$6,shipped_date=$7,received_date=$8,resolution=$9,status=$10,technician=$11,notes=$12,supplier_id=$13 WHERE id=$14 RETURNING *`,
+    [f.equipmentId||null,f.equipmentName||'',f.serialNumber||'',f.vendor||'',f.rmaNumber||'',f.reason||'',f.shippedDate||null,f.receivedDate||null,f.resolution||'',f.status||'ouvert',f.technician||'',f.notes||'',f.supplierId||null,req.params.id]
   );
   res.json(rows[0]);
 }));
 app.delete('/api/rma/:id', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
-  await query('DELETE FROM rma_requests WHERE id=$1', [req.params.id]);
+  await query('UPDATE rma_requests SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+  res.status(204).end();
+}));
+app.get('/api/rma/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM rma_requests WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/rma/:id/restore', authenticate, requirePermission('modification'), asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE rma_requests SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Demande RMA introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/rma/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM rma_requests WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
   res.status(204).end();
 }));
 
@@ -2050,6 +2280,42 @@ app.get('/api/anomalies', authenticate, asyncHandler(async (req, res) => {
     LIMIT 20
   `);
   res.json(rows);
+}));
+
+// ─── Suppliers ─────────────────────────────────────────────────────────────────
+app.get('/api/suppliers', authenticate, asyncHandler(async (req, res) => {
+  const suppliers = await getSuppliers();
+  res.json(suppliers);
+}));
+app.post('/api/suppliers', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const validation = validateSupplier(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
+  const supplier = await createSupplier(req.body);
+  res.status(201).json(supplier);
+}));
+app.put('/api/suppliers/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const validation = validateSupplier(req.body);
+  if (!validation.valid) return res.status(400).json({ message: validation.errors.join('; ') });
+  const supplier = await updateSupplier(Number(req.params.id), req.body);
+  if (!supplier) return res.status(404).json({ message: 'Fournisseur introuvable.' });
+  res.json(supplier);
+}));
+app.delete('/api/suppliers/:id', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('UPDATE suppliers SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+  res.status(204).end();
+}));
+app.get('/api/suppliers/deleted', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM suppliers WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+  res.json(rows);
+}));
+app.post('/api/suppliers/:id/restore', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await query('UPDATE suppliers SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Fournisseur introuvable dans la corbeille.' });
+  res.json(rows[0]);
+}));
+app.delete('/api/suppliers/:id/hard', authenticate, requireAdmin, asyncHandler(async (req, res) => {
+  await query('DELETE FROM suppliers WHERE id = $1 AND deleted_at IS NOT NULL', [req.params.id]);
+  res.status(204).end();
 }));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
