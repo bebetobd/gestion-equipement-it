@@ -465,13 +465,15 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
 
     res.json({
       token,
+      mustChangePassword: user.must_change_password ?? false,
       user: {
         id: user.id,
         username: user.username,
         name: user.name,
         role: user.role,
         permissions,
-        allowedSiteIds
+        allowedSiteIds,
+        mustChangePassword: user.must_change_password ?? false,
       }
     });
   } catch (err) {
@@ -492,7 +494,30 @@ app.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   res.status(204).send();
 }));
 
+app.post('/api/auth/change-password', authenticate, asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
 
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: 'Les deux mots de passe sont requis.' });
+  }
+
+  const passwordVal = validators.password(newPassword);
+  if (!passwordVal.valid) {
+    return res.status(400).json({ message: passwordVal.error });
+  }
+
+  const { rows } = await query('SELECT password FROM users WHERE id=$1', [req.user.id]);
+  if (!rows[0]) return res.status(404).json({ message: 'Utilisateur introuvable.' });
+
+  const valid = await bcrypt.compare(currentPassword, rows[0].password);
+  if (!valid) return res.status(400).json({ message: 'Mot de passe actuel incorrect.' });
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await query('UPDATE users SET password=$1, must_change_password=FALSE WHERE id=$2', [hashed, req.user.id]);
+
+  logActivity(req.user.id, req.user.username, req.user.name, 'Changement mot de passe', 'Mot de passe modifié', getClientIp(req));
+  res.json({ message: 'Mot de passe modifié avec succès.' });
+}));
 
 // ─── Admin monitoring routes ──────────────────────────────────────────────────
 
@@ -550,8 +575,8 @@ app.post('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res)
     const safeSites = Array.isArray(allowedSiteIds) ? allowedSiteIds.map(Number).filter(Boolean) : [];
 
     const { rows } = await query(
-      `INSERT INTO users (username, name, role, password, permissions, allowed_site_ids)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO users (username, name, role, password, permissions, allowed_site_ids, must_change_password)
+       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
        RETURNING id, username, name, role, permissions, allowed_site_ids`,
       [username.trim(), name.trim(), role, hashed, safePerms, safeSites]
     );

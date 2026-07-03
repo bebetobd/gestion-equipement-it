@@ -11,6 +11,7 @@ interface AuthUser {
   name: string;
   role: string;
   permissions: string[];
+  mustChangePassword?: boolean;
 }
 
 const App = () => {

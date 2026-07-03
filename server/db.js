@@ -273,6 +273,8 @@ async function _initDB() {
 
   // Migration: add blocked flag to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
+  // Migration: force password change on first login
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`);
   // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
   await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
 
