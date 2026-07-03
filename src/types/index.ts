@@ -119,6 +119,9 @@ export interface MaintenanceRecord {
   techConfirmed: boolean;
   rating: number | null;
   reviewComment: string;
+  callerName: string;
+  callerPhone: string;
+  callerReport: string;
 }
 
 export interface Site {
@@ -181,6 +184,9 @@ export interface MaintenanceForm {
   priority: MaintenancePriority;
   status: MaintenanceStatus;
   requestType: string;
+  callerName: string;
+  callerPhone: string;
+  callerReport: string;
 }
 
 export interface UserAccount {

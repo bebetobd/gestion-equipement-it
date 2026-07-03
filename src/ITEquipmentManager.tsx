@@ -158,6 +158,9 @@ interface MaintenanceRecord {
   techConfirmed: boolean;
   rating: number | null;
   reviewComment: string;
+  callerName: string;
+  callerPhone: string;
+  callerReport: string;
 }
 
 interface Site {
@@ -220,6 +223,9 @@ interface MaintenanceForm {
   priority: MaintenancePriority;
   status: MaintenanceStatus;
   requestType: string;
+  callerName: string;
+  callerPhone: string;
+  callerReport: string;
 }
 
 const defaultFormData: EquipmentFormData = {
@@ -590,7 +596,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceRecord | null>(null);
   const [showMaintenanceForm, setShowMaintenanceForm] = useState(false);
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
-  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance' };
+  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance', callerName: '', callerPhone: '', callerReport: '' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
   const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
   const [maintTechFilter, setMaintTechFilter] = useState<string[]>([]);

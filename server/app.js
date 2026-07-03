@@ -1264,7 +1264,7 @@ app.get('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
-  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName, requestType } = req.body;
+  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName, requestType, callerName, callerPhone, callerReport } = req.body;
   if (!failureDesc?.trim()) return res.status(400).json({ message: 'Description de la panne requise.' });
 
   const record = await createMaintenance({
@@ -1276,6 +1276,7 @@ app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
     visitId: visitId || null,
     siteName: siteName || '',
     requestType: requestType || 'maintenance',
+    callerName: callerName || '', callerPhone: callerPhone || '', callerReport: callerReport || '',
   });
 
   // Enrich with equipment info if ID provided
@@ -1337,9 +1338,9 @@ app.put('/api/maintenance/:id', authenticate, asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Un ticket résolu ne peut plus être modifié.' });
   }
 
-  const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc } = req.body;
+  const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc, callerName, callerPhone, callerReport } = req.body;
 
-  const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority };
+  const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority, callerName, callerPhone, callerReport };
   if (status) {
     updates.status = status;
     if (status === 'en_cours' && req.body.startedAt === undefined) updates.startedAt = new Date().toISOString();

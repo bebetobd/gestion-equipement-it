@@ -276,6 +276,11 @@ async function _initDB() {
   // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
   await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
 
+  // Migration: add caller info to maintenance_records
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS caller_name VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS caller_phone VARCHAR(50) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS caller_report TEXT NOT NULL DEFAULT ''`);
+
   // Migration: add notes to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
 
@@ -633,13 +638,13 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
 
 export async function createMaintenance(data) {
 
-  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType } = data;
+  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType, callerName, callerPhone, callerReport } = data;
   const { rows } = await pool.query(
     `INSERT INTO maintenance_records
-       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name, request_type)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name, request_type, caller_name, caller_phone, caller_report)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
-    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '', requestType || 'maintenance']
+    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '', requestType || 'maintenance', callerName || '', callerPhone || '', callerReport || '']
   );
   return rowToMaintenance(rows[0]);
 }
@@ -649,7 +654,7 @@ export async function updateMaintenance(id, data) {
   const fields = [];
   const params = [];
   let i = 1;
-  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name', requestType: 'request_type', assignedTechId: 'assigned_tech_id', userConfirmed: 'user_confirmed', techConfirmed: 'tech_confirmed', rating: 'rating', reviewComment: 'review_comment' };
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name', requestType: 'request_type', assignedTechId: 'assigned_tech_id', userConfirmed: 'user_confirmed', techConfirmed: 'tech_confirmed', rating: 'rating', reviewComment: 'review_comment', callerName: 'caller_name', callerPhone: 'caller_phone', callerReport: 'caller_report' };
   for (const [key, col] of Object.entries(map)) {
     if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
   }
@@ -704,6 +709,9 @@ export function rowToMaintenance(row) {
     techConfirmed: row.tech_confirmed ?? false,
     rating: row.rating ?? null,
     reviewComment: row.review_comment || '',
+    callerName: row.caller_name || '',
+    callerPhone: row.caller_phone || '',
+    callerReport: row.caller_report || '',
     deletedAt: row.deleted_at ?? null,
   };
 }

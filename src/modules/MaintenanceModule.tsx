@@ -59,7 +59,8 @@ const maintenancePriorityStyle: Record<string, string> = {
 
 const defaultMaintenanceForm: MaintenanceForm = {
   equipmentId: null, failureDesc: '', diagnosis: '', solution: '',
-  partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance'
+  partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance',
+  callerName: '', callerPhone: '', callerReport: ''
 };
 
 const fmtDate = (iso: string | null) => iso
@@ -349,7 +350,7 @@ export default function MaintenanceModule({
           sheets.push({ name: 'Par statut', rows: byStatus.map(r => ({ Statut: r.label, Nombre: r.count })) });
           sheets.push({ name: 'Par technicien', rows: Object.entries(byTech).sort((a,b) => b[1].total - a[1].total).map(([t, d]) => ({ Technicien: t, Total: d.total, Résolus: d.resolved, 'Taux (%)': d.total ? Math.round((d.resolved / d.total) * 100) : 0 })) });
           sheets.push({ name: 'Par équipement', rows: Object.entries(byEq).sort((a,b) => b[1] - a[1]).map(([eq, cnt]) => ({ Équipement: eq, Tickets: cnt })) });
-          sheets.push({ name: 'Tous les tickets', rows: all.map(m => ({ '#': m.id, Statut: maintenanceStatusLabel[m.status] ?? m.status, Priorité: m.priority, Équipement: m.equipmentName || '—', Technicien: m.technician || '—', Description: m.failureDesc, 'Ouvert le': m.openedAt ? new Date(m.openedAt).toLocaleDateString('fr-FR') : '—', 'Résolu le': m.closedAt ? new Date(m.closedAt).toLocaleDateString('fr-FR') : '—' })) });
+          sheets.push({ name: 'Tous les tickets', rows: all.map(m => ({ '#': m.id, Statut: maintenanceStatusLabel[m.status] ?? m.status, Priorité: m.priority, Équipement: m.equipmentName || '—', Technicien: m.technician || '—', Description: m.failureDesc, Appelant: m.callerName || '—', Tél: m.callerPhone || '—', 'Ouvert le': m.openedAt ? new Date(m.openedAt).toLocaleDateString('fr-FR') : '—', 'Résolu le': m.closedAt ? new Date(m.closedAt).toLocaleDateString('fr-FR') : '—' })) });
           await ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-maintenance-${Date.now()}.xlsx`);
         };
 
@@ -405,7 +406,7 @@ export default function MaintenanceModule({
             new DocxTable({ rows: [makeHdr(['Équipement','Tickets']), ...Object.entries(byEq).sort((a,b) => b[1]-a[1]).slice(0,10).map(([eq,cnt]) => makeRow([eq, String(cnt)]))] }),
             new DocxParagraph({ text: '' }),
             new DocxParagraph({ text: 'Tous les tickets', heading: HeadingLevel.HEADING_2 }),
-            new DocxTable({ rows: [makeHdr(['#','Statut','Priorité','Équipement','Technicien','Description']), ...all.map(m => makeRow([String(m.id), maintenanceStatusLabel[m.status] ?? m.status, m.priority, m.equipmentName || '—', m.technician || '—', m.failureDesc || '—']))] }),
+            new DocxTable({ rows: [makeHdr(['#','Statut','Priorité','Équipement','Technicien','Description','Appelant']), ...all.map(m => makeRow([String(m.id), maintenanceStatusLabel[m.status] ?? m.status, m.priority, m.equipmentName || '—', m.technician || '—', m.failureDesc || '—', m.callerName || '—']))] }),
           ];
           const doc = new DocxDocument({ sections: [{ children }] });
           const blob = await Packer.toBlob(doc);
@@ -592,6 +593,7 @@ export default function MaintenanceModule({
                           <span className="text-xs text-gray-400 font-mono">#{m.id}</span>
                         </div>
                         <p className="text-sm font-semibold text-gray-800 mb-1 line-clamp-2">{m.failureDesc || '—'}</p>
+                        {m.callerName && <p className="text-xs text-purple-600 truncate"><Headset className="w-3 h-3 inline mr-0.5" />{m.callerName}</p>}
                         {m.equipmentName && <p className="text-xs text-[#1a6fa6] font-medium truncate">{m.equipmentName}</p>}
                         {m.technician && (
                           <div className="flex items-center gap-1.5 mt-2">
@@ -647,6 +649,7 @@ export default function MaintenanceModule({
                       <span className="text-xs text-gray-400 shrink-0">#{ticket.id}</span>
                     </div>
                     <p className="text-sm font-medium text-gray-800 line-clamp-2">{ticket.failureDesc}</p>
+                    {ticket.callerName && <p className="text-xs text-purple-600 mt-1 flex items-center gap-1"><Headset className="w-3 h-3" />{ticket.callerName}{ticket.callerPhone ? ` — ${ticket.callerPhone}` : ''}</p>}
                     {ticket.equipmentName && <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Monitor className="w-3 h-3" />{ticket.equipmentName}</p>}
                     {ticket.visitId && <p className="text-xs text-blue-600 mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />Lié à une visite{ticket.siteName ? ` — ${ticket.siteName}` : ''}</p>}
                     <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
@@ -688,7 +691,7 @@ export default function MaintenanceModule({
                     </span>
                   )}
                   {canWrite && selectedMaintenance.status !== 'résolu' && (
-                    <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status, requestType: selectedMaintenance.requestType }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                    <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status, requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                       className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1 transition-colors">
                       <Edit className="w-3.5 h-3.5" /> Modifier
                     </button>
@@ -710,6 +713,18 @@ export default function MaintenanceModule({
 
               {/* Timeline */}
               <div className="space-y-4">
+                {selectedMaintenance.callerName && (
+                  <div className="rounded-xl border border-purple-100 bg-gradient-to-br from-purple-50 to-pink-50 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white shadow-sm"><Headset className="w-3 h-3" /></div>
+                      <span className="text-sm font-semibold text-gray-700">Appelant</span>
+                    </div>
+                    <p className="text-sm text-gray-700"><strong>Nom :</strong> {selectedMaintenance.callerName}</p>
+                    {selectedMaintenance.callerPhone && <p className="text-sm text-gray-700"><strong>Téléphone :</strong> {selectedMaintenance.callerPhone}</p>}
+                    {selectedMaintenance.callerReport && <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap"><strong>Signalé :</strong> {selectedMaintenance.callerReport}</p>}
+                  </div>
+                )}
+
                 <Section icon={<AlertTriangle className="w-4 h-4 text-red-500" />} title="Description de la panne" color="red">
                   <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedMaintenance.failureDesc || <em className="text-gray-400">Non renseigné</em>}</p>
                   <p className="text-xs text-gray-400 mt-2">Signalé le {fmtDate(selectedMaintenance.openedAt)} par {selectedMaintenance.openedBy}</p>
@@ -820,7 +835,7 @@ export default function MaintenanceModule({
                       Démarrer la réparation
                     </button>
                   )}
-                  <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu', requestType: selectedMaintenance.requestType }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                  <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu', requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                     className="flex-1 py-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-semibold hover:from-green-700 hover:to-emerald-700 shadow-sm transition-all">
                     Marquer comme résolu
                   </button>
@@ -853,6 +868,26 @@ export default function MaintenanceModule({
                       </select>
                     </div>
                   )}
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Appelant</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">Nom de l'appelant</label>
+                        <input type="text" value={maintenanceForm.callerName} onChange={e => setMaintForm(f => ({ ...f, callerName: e.target.value }))}
+                          placeholder="Qui a appelé ?" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">Téléphone</label>
+                        <input type="text" value={maintenanceForm.callerPhone} onChange={e => setMaintForm(f => ({ ...f, callerPhone: e.target.value }))}
+                          placeholder="Numéro de rappel" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none" />
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Ce qu'il a signalé</label>
+                      <textarea rows={2} value={maintenanceForm.callerReport} onChange={e => setMaintForm(f => ({ ...f, callerReport: e.target.value }))}
+                        placeholder="Problème rapporté par l'appelant…" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none resize-none" />
+                    </div>
+                  </div>
                   {maintenanceForm.requestType !== 'assistance' && (
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">Priorité</label>
