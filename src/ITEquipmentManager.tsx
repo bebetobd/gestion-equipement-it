@@ -5890,53 +5890,58 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         </div>
       )}
 
-      <ReportsModule
-        onClose={() => setShowReportsModal(false)}
-        equipments={equipments}
-        isAdmin={isAdmin}
-        onUnauthorized={handleUnauthorized}
-        userAllowedSiteIds={userAllowedSiteIds}
-      />
+      {showReportsModal && (
+        <ReportsModule
+          onClose={() => setShowReportsModal(false)}
+          equipments={equipments}
+          isAdmin={isAdmin}
+          onUnauthorized={handleUnauthorized}
+          userAllowedSiteIds={userAllowedSiteIds}
+        />
+      )}
 
+      {showMonitoringModal && (
+        <MonitoringModule
+          onClose={() => setShowMonitoringModal(false)}
+          onUnauthorized={handleUnauthorized}
+        />
+      )}
 
-      <MonitoringModule
-        onClose={() => setShowMonitoringModal(false)}
-        onUnauthorized={handleUnauthorized}
-      />
+      {showUserModal && (
+        <UsersModule
+          userAccounts={userAccounts}
+          sites={sites}
+          currentUserId={currentUser.id}
+          onClose={() => setShowUserModal(false)}
+          onRefresh={fetchUsers}
+          onToast={setToast}
+          onUnauthorized={handleUnauthorized}
+        />
+      )}
 
+      {showActivityLog && (
+        <ActivityLogModule
+          onClose={() => setShowActivityLog(false)}
+          userAccounts={userAccounts}
+        />
+      )}
 
-      <UsersModule
-        userAccounts={userAccounts}
-        sites={sites}
-        currentUserId={currentUser.id}
-        onClose={() => setShowUserModal(false)}
-        onRefresh={fetchUsers}
-        onToast={setToast}
-        onUnauthorized={handleUnauthorized}
-      />
-
-
-
-      <ActivityLogModule
-        onClose={() => setShowActivityLog(false)}
-        userAccounts={userAccounts}
-      />
-
-
-      <VisitsModule
-        visits={visits}
-        sites={sites}
-        equipments={equipments}
-        maintenanceRecords={maintenanceRecords}
-        canWrite={canWrite}
-        canModify={canModify}
-        userName={currentUser.name}
-        userAllowedSiteIds={userAllowedSiteIds}
-        onClose={() => setShowVisitModule(false)}
-        onUpdateVisits={(data) => setVisits(data)}
-        onRefreshMaintenance={() => fetchMaintenance()}
-        onToast={setToast}
-      />
+      {showVisitModule && (
+        <VisitsModule
+          visits={visits}
+          sites={sites}
+          equipments={equipments}
+          maintenanceRecords={maintenanceRecords}
+          canWrite={canWrite}
+          canModify={canModify}
+          userName={currentUser.name}
+          userAllowedSiteIds={userAllowedSiteIds}
+          onClose={() => setShowVisitModule(false)}
+          onUpdateVisits={(data) => setVisits(data)}
+          onRefreshMaintenance={() => fetchMaintenance()}
+          onToast={setToast}
+        />
+      )}
 
 
       {/* ══ Chat ════════════════════════════════════════════════════════════════ */}
