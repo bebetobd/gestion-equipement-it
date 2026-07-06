@@ -6,7 +6,7 @@ import {
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
-  Moon, Sun, Eye, EyeOff, Headset
+  Moon, Sun, Eye, EyeOff, Headset, Zap
 } from 'lucide-react';
 import * as ExportHelpers from './utils/exportHelpers';
 import { QRCodeSVG } from 'qrcode.react';
@@ -20,6 +20,7 @@ import MonitoringModule from './modules/MonitoringModule';
 import UsersModule from './modules/UsersModule';
 import ActivityLogModule from './modules/ActivityLogModule';
 import VisitsModule from './modules/VisitsModule';
+import AssistanceModal from './components/AssistanceModal';
 import {
   TableRow as DocxTableRow,
   TableCell as DocxTableCell,
@@ -96,12 +97,15 @@ interface Equipment {
   lastMaintenance: string;
   visited: boolean;
   technicianName: string;
+  userName?: string;
   visitDate: string;
   interventionDetails: string;
   replacedById?: number | null;
   siteId?: number | null;
   quantity: number;
   minQuantity: number;
+  activeCount?: number;
+  defectCount?: number;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -243,11 +247,14 @@ const defaultFormData: EquipmentFormData = {
   lastMaintenance: '',
   visited: false,
   technicianName: '',
+  userName: '',
   visitDate: '',
   interventionDetails: '',
   siteId: null,
   quantity: 1,
   minQuantity: 0,
+  activeCount: 1,
+  defectCount: 0,
 };
 
 const equipmentTypes = [
@@ -590,6 +597,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // Maintenance
   const [showMaintenanceModule, setShowMaintenanceModule] = useState(false);
+  const [showAssistanceModal, setShowAssistanceModal] = useState(false);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceFilter, setMaintenanceFilter] = useState<string>('all');
@@ -3026,7 +3034,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> Transferts
             </button>
           )}
-          <button type="button" onClick={() => { closeAllModules(); setMaintForm({ ...defaultMaintenanceForm, requestType: 'assistance' }); setMaintenanceEditId(null); setShowMaintenanceForm(true); setShowMaintenanceModule(true); }}
+          <button type="button" onClick={() => { closeAllModules(); setShowAssistanceModal(true); }}
             className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
             <Headset className="w-3.5 h-3.5 shrink-0" /> Assistance
           </button>
@@ -3326,41 +3334,51 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           </div>
         )}
 
-        {/* ── KPI Cards ── */}
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <p className="font-semibold text-slate-900">Statistiques affichées</p>
-              <p className="text-xs text-slate-500">{kpiContextLabel} · {filterTypeLabel} · {filterStatusLabel} · {filteredEquipments.length} équipement(s)</p>
+        {/* ── Hero Dashboard Banner ── */}
+        <div className="mb-6 rounded-2xl overflow-hidden bling-gradient relative">
+          <div className="absolute inset-0 bling-particles pointer-events-none"></div>
+          <div className="relative px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center backdrop-blur-sm border border-white/10">
+                <Monitor className="w-5.5 h-5.5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight">Tableau de bord IT</h1>
+                <p className="text-white/50 text-xs mt-0.5">{selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) sélectionné(s)` : 'Tous les sites'} · {filteredEquipments.length} équipement(s)</p>
+              </div>
             </div>
-            <div className="text-xs text-slate-500">Actualisation automatique toutes les 30 s</div>
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden sm:block">
+                <p className="text-white/40 text-[10px] uppercase tracking-wider">Dernière mise à jour</p>
+                <p className="text-white text-sm font-semibold tabular-nums">{new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+              </div>
+              <div className={`w-2.5 h-2.5 rounded-full ${maintenanceLoading ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'} shadow-lg ${maintenanceLoading ? 'shadow-amber-400/50' : 'shadow-emerald-400/50'}`}></div>
+              <button onClick={() => { fetchEquipments(); fetchMaintenance('all'); fetchVisits({ siteId:'', status:'', from:'', to:'' }); }}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium backdrop-blur-sm border border-white/10 transition-all duration-200 hover:scale-105 active:scale-95 flex items-center gap-2">
+                <RefreshCcw className={`w-3.5 h-3.5 ${maintenanceLoading ? 'animate-spin' : ''}`} /> Actualiser
+              </button>
+            </div>
           </div>
         </div>
-        <div className="mb-2 flex items-center justify-between px-1">
-          <span className="text-xs text-gray-400 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block"></span>
-            Données en direct et filtrées en fonction du site sélectionné
-          </span>
-          <button onClick={() => { fetchEquipments(); fetchMaintenance('all'); fetchVisits({ siteId:'', status:'', from:'', to:'' }); }}
-            className="text-xs text-[#1a6fa6] hover:text-[#0d4a73] flex items-center gap-1 font-medium">
-            <RefreshCcw className="w-3 h-3" /> Actualiser maintenant
-          </button>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+
+        {/* ── KPI Cards — Bento Grid ── */}
+        <div className="mb-6 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
             {
               label: 'Total équipements',
               value: kpiStats.total,
               icon: <Monitor className="w-5 h-5 text-[#1a6fa6]" />,
-              bg: 'bg-[#e8f3fc]',
-              sub: selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s) filtré(s)` : 'Tous sites confondus',
+              iconBg: 'bg-gradient-to-br from-[#e8f3fc] to-[#cfe2f9]',
+              barGradient: 'from-[#1a6fa6] to-[#0d4a73]',
+              sub: selectedSiteIds.length > 0 ? `${selectedSiteIds.length} site(s)` : 'Tous sites',
               onClick: () => closeAllModules(),
             },
             {
               label: 'Actifs',
               value: kpiStats.actifs,
-              icon: <CheckCircle className="w-5 h-5 text-green-500" />,
-              bg: 'bg-green-50',
+              icon: <CheckCircle className="w-5 h-5 text-emerald-500" />,
+              iconBg: 'bg-gradient-to-br from-emerald-50 to-emerald-100',
+              barGradient: 'from-emerald-400 to-green-500',
               sub: `${kpiStats.reformes} réformé(s)`,
               onClick: () => { setFilterStatus('actif'); closeAllModules(); },
             },
@@ -3368,7 +3386,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               label: 'Défaillants',
               value: kpiStats.defaillants,
               icon: <AlertTriangle className="w-5 h-5 text-red-500" />,
-              bg: 'bg-red-50',
+              iconBg: 'bg-gradient-to-br from-red-50 to-red-100',
+              barGradient: 'from-red-400 to-rose-500',
               sub: 'Panne ou maintenance',
               onClick: () => { setFilterStatus('defaillant'); closeAllModules(); },
             },
@@ -3376,15 +3395,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               label: 'Tickets ouverts',
               value: kpiStats.ticketsOuverts,
               icon: <Wrench className="w-5 h-5 text-amber-500" />,
-              bg: 'bg-amber-50',
-              sub: `${kpiStats.ticketsCritiques} critique(s) urgents`,
+              iconBg: 'bg-gradient-to-br from-amber-50 to-amber-100',
+              barGradient: 'from-amber-400 to-orange-500',
+              sub: kpiStats.ticketsCritiques > 0 ? `🔴 ${kpiStats.ticketsCritiques} critique(s)` : 'Aucun critique',
               onClick: openMaintenanceModule,
             },
             {
               label: 'Non visités',
               value: kpiStats.nonVisites,
               icon: <XCircle className="w-5 h-5 text-rose-500" />,
-              bg: 'bg-rose-50',
+              iconBg: 'bg-gradient-to-br from-rose-50 to-rose-100',
+              barGradient: 'from-rose-400 to-pink-500',
               sub: 'Sans passage technicien',
               onClick: () => closeAllModules(),
             },
@@ -3392,26 +3413,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               label: 'Visites planifiées',
               value: kpiStats.visitesPlannifiees,
               icon: <Calendar className="w-5 h-5 text-blue-500" />,
-              bg: 'bg-blue-50',
+              iconBg: 'bg-gradient-to-br from-blue-50 to-blue-100',
+              barGradient: 'from-blue-400 to-indigo-500',
               sub: kpiStats.visitesToday > 0 ? `⚡ ${kpiStats.visitesToday} aujourd'hui` : kpiStats.visitesEnCours > 0 ? `${kpiStats.visitesEnCours} en cours` : 'Interventions à venir',
               onClick: () => { closeAllModules(); setShowVisitModule(true); fetchVisits(); },
             },
-          ].map(({ label, value, icon, bg, sub, onClick }) => (
+          ].map(({ label, value, icon, iconBg, barGradient, sub, onClick }) => (
             <div key={label} onClick={onClick}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md hover:border-[#1a6fa6]/30 transition-all group">
-              <div className="flex items-center justify-between mb-2">
-                <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform`}>{icon}</div>
-                <p className="text-2xl font-bold text-gray-900">{value}</p>
+              className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-4 cursor-pointer transition-all duration-300 group relative overflow-hidden bling-shine hover:-translate-y-1 hover:shadow-lg hover:border-transparent active:scale-[0.97]">
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300`}>
+                  {icon}
+                </div>
+                <p className="text-2xl font-bold text-gray-900 tabular-nums bling-count">{value}</p>
               </div>
-              <p className="text-xs font-semibold text-gray-700 leading-tight">{label}</p>
-              <p className={`text-xs mt-0.5 truncate ${sub.startsWith('⚡') ? 'text-blue-600 font-semibold' : 'text-gray-400'}`}>{sub}</p>
+              <p className="text-xs font-semibold text-gray-600 leading-tight mb-1">{label}</p>
+              <p className={`text-xs truncate ${sub.startsWith('⚡') || sub.startsWith('🔴') ? 'text-blue-600 font-semibold' : 'text-gray-400'}`}>{sub}</p>
+              <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${barGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
             </div>
           ))}
         </div>
 
-        {/* ── Graphiques Dashboard ── */}
+        {/* ── Graphiques Dashboard — Enhanced ── */}
         {filteredEquipments.length > 0 && (() => {
-          // Donut chart — statuts
           const statusData = [
             { key: 'actif',        label: 'Actif',        color: '#22c55e', count: filteredEquipments.filter(e => e.status === 'actif').length },
             { key: 'maintenance',  label: 'Maintenance',  color: '#f59e0b', count: filteredEquipments.filter(e => e.status === 'maintenance').length },
@@ -3420,7 +3444,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             { key: 'réformé',      label: 'Réformé',      color: '#a855f7', count: filteredEquipments.filter(e => e.status === 'réformé').length },
           ].filter(d => d.count > 0);
           const total = statusData.reduce((s, d) => s + d.count, 0);
-          // Build donut arcs
           const r = 48; const cx = 64; const cy = 64; const sw = 20;
           let cumAngle = -Math.PI / 2;
           const arcs = statusData.map(d => {
@@ -3433,8 +3456,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             const large = angle > Math.PI ? 1 : 0;
             return { ...d, d: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`, angle };
           });
-
-          // Bar chart — types
           const typeData = [
             { key: 'ordinateur', label: 'Ordi.', color: '#1a6fa6', count: filteredEquipments.filter(e => e.type === 'ordinateur').length },
             { key: 'reseau',     label: 'Réseau', color: '#06b6d4', count: filteredEquipments.filter(e => e.type === 'reseau').length },
@@ -3446,57 +3467,147 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
           const maxCount = Math.max(...typeData.map(d => d.count), 1);
           const barH = 80; const barW = 28; const gap = 8;
           const chartW = typeData.length * (barW + gap);
-
           return (
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Donut — statuts */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <h3 className="text-sm font-bold text-gray-900 mb-4">Répartition par statut</h3>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-5 bling-lift">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#1a6fa6]"></span>
+                  Répartition par statut
+                </h3>
                 <div className="flex items-center gap-6">
                   <svg width="128" height="128" viewBox="0 0 128 128" style={{flexShrink:0}}>
                     {arcs.map((arc, i) => (
                       <path key={i} d={arc.d} fill="none" stroke={arc.color} strokeWidth={sw}
-                        strokeLinecap="butt" opacity={0.9} />
+                        strokeLinecap="round" opacity="0.9"
+                        style={{ animation: `dashIn 0.6s ease-out ${i * 0.1}s both` }} />
                     ))}
-                    <text x="64" y="60" textAnchor="middle" fill="#374151" fontSize="18" fontWeight="bold">{total}</text>
-                    <text x="64" y="76" textAnchor="middle" fill="#9ca3af" fontSize="10">équip.</text>
+                    <text x={cx} y={cy - 4} textAnchor="middle" className="fill-gray-900 text-lg font-bold">{total}</text>
+                    <text x={cx} y={cy + 12} textAnchor="middle" className="fill-gray-400 text-[10px]">Équip.</text>
                   </svg>
-                  <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                    {arcs.map(d => (
-                      <div key={d.key} className="flex items-center gap-2 min-w-0">
-                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{backgroundColor: d.color}} />
-                        <span className="text-xs text-gray-600 flex-1 truncate">{d.label}</span>
-                        <span className="text-xs font-bold text-gray-900 tabular-nums">{d.count}</span>
-                        <span className="text-xs text-gray-400 tabular-nums w-9 text-right">{Math.round(d.count/total*100)}%</span>
+                  <div className="flex flex-col gap-2 flex-1">
+                    {arcs.map((arc, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: arc.color }}></span>
+                        <span className="text-xs text-gray-600 flex-1 truncate">{arc.label}</span>
+                        <span className="text-xs font-bold text-gray-900">{arc.count}</span>
+                        <span className="text-[10px] text-gray-400 w-10 text-right">{Math.round(arc.count / total * 100)}%</span>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
 
-              {/* Barres — types */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <h3 className="text-sm font-bold text-gray-900 mb-4">Équipements par type</h3>
-                <div className="flex items-end gap-1 overflow-x-auto" style={{height: barH + 40}}>
-                  <svg width={Math.max(chartW + 16, 200)} height={barH + 36} viewBox={`0 0 ${Math.max(chartW + 16, 200)} ${barH + 36}`} style={{overflow:'visible'}}>
-                    {typeData.map((d, i) => {
-                      const bh = Math.max(4, Math.round((d.count / maxCount) * barH));
-                      const x = 8 + i * (barW + gap);
-                      const y = barH - bh;
-                      return (
-                        <g key={d.key}>
-                          <rect x={x} y={y} width={barW} height={bh} rx="4" fill={d.color} opacity={0.85} />
-                          <text x={x + barW/2} y={y - 4} textAnchor="middle" fill="#374151" fontSize="11" fontWeight="bold">{d.count}</text>
-                          <text x={x + barW/2} y={barH + 14} textAnchor="middle" fill="#6b7280" fontSize="9">{d.label}</text>
-                        </g>
-                      );
-                    })}
-                  </svg>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-5 bling-lift">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  Équipements par type
+                </h3>
+                <div className="flex items-end gap-2" style={{ height: 120, minWidth: chartW }}>
+                  {typeData.map((d, i) => (
+                    <div key={d.key} className="flex flex-col items-center gap-1" style={{ width: barW }}>
+                      <span className="text-[10px] font-bold text-gray-700">{d.count}</span>
+                      <div className="w-full rounded-t-lg transition-all duration-500" style={{
+                        height: (d.count / maxCount) * barH,
+                        background: `linear-gradient(to top, ${d.color}, ${d.color}dd)`,
+                        animation: `barGrow 0.5s ease-out ${i * 0.08}s both`
+                      }}></div>
+                      <span className="text-[10px] text-gray-500 leading-tight text-center">{d.label}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           );
         })()}
+
+        {/* ── Activity Feed + Quick Actions ── */}
+        {filteredMaintenance.length > 0 && (
+        <div className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100/80 overflow-hidden bling-lift">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[#1a6fa6]" />
+                <h3 className="text-sm font-bold text-gray-900">Activité récente</h3>
+              </div>
+              <span className="text-[10px] text-gray-400 uppercase tracking-wider">Derniers tickets</span>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {filteredMaintenance.slice(0, 5).map((m, i) => {
+                const prioColor = m.priority === 'critique' ? 'bg-red-500' : m.priority === 'haute' ? 'bg-orange-400' : m.priority === 'normale' ? 'bg-blue-400' : 'bg-gray-300';
+                const statusIcon = m.status === 'résolu' ? '✓' : m.status === 'en_cours' ? '◐' : '○';
+                return (
+                  <div key={m.id || i} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/50 transition-colors cursor-pointer"
+                    onClick={() => { if (canWrite) { setSelectedMaintenance(m); setShowMaintenanceForm(true); setMaintenanceEditId(m.id); setMaintForm({ equipmentId: m.equipmentId, failureDesc: m.failureDesc || '', diagnosis: m.diagnosis || '', solution: m.solution || '', partsReplaced: m.partsReplaced || '', technician: m.technician || '', priority: m.priority || 'normale', status: m.status || 'ouvert', requestType: m.requestType || 'maintenance', callerName: m.callerName || '', callerPhone: m.callerPhone || '', callerReport: m.callerReport || '' }); } }}>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 ${prioColor}`}>
+                      {statusIcon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{m.failureDesc || 'Ticket #' + m.id}</p>
+                      <p className="text-xs text-gray-400 truncate">{m.technician || 'Non assigné'} · {m.equipmentId ? `Équip. #${m.equipmentId}` : ''}</p>
+                    </div>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${m.status === 'résolu' ? 'bg-green-100 text-green-700' : m.status === 'en_cours' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {m.status === 'résolu' ? 'Résolu' : m.status === 'en_cours' ? 'En cours' : 'Ouvert'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 overflow-hidden bling-lift">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-amber-500" />
+                <h3 className="text-sm font-bold text-gray-900">Actions rapides</h3>
+              </div>
+            </div>
+            <div className="p-4 space-y-2">
+              <button onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-left transition-all group">
+                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Calendar className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Nouvelle visite</p>
+                  <p className="text-xs text-gray-400">Planifier une intervention</p>
+                </div>
+              </button>
+              <button onClick={openMaintenanceModule}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-left transition-all group">
+                <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Wrench className="w-4 h-4 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Signaler panne</p>
+                  <p className="text-xs text-gray-400">Créer un ticket maintenance</p>
+                </div>
+              </button>
+              <button onClick={() => { closeAllModules(); setShowAssistanceModal(true); }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-left transition-all group">
+                <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Headset className="w-4 h-4 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Assistance</p>
+                  <p className="text-xs text-gray-400">Support rapide utilisateur</p>
+                </div>
+              </button>
+              {canWrite && (
+                <button onClick={openNewEquipmentForm}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-left transition-all group">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Plus className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Ajouter équipement</p>
+                    <p className="text-xs text-gray-400">Enregistrer un nouvel actif</p>
+                  </div>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        )}
 
         {/* ── Widget Tâches/Rappels ── */}
         {canWrite && (() => {
@@ -3970,10 +4081,60 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="number"
                       min={1}
                       value={formData.quantity}
-                      onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                      onChange={(e) => {
+                        const qty = Math.max(1, parseInt(e.target.value) || 1);
+                        setFormData({
+                          ...formData,
+                          quantity: qty,
+                          activeCount: Math.min(formData.activeCount ?? qty, qty)
+                        });
+                      }}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
+                  {(formData.quantity ?? 1) > 1 && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nombre actifs
+                          <span className="ml-1 text-xs text-green-500 font-normal">(en service)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={formData.quantity}
+                          value={formData.activeCount ?? formData.quantity}
+                          onChange={(e) => setFormData({ ...formData, activeCount: Math.min(Math.max(0, parseInt(e.target.value) || 0), formData.quantity) })}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nombre en panne
+                          <span className="ml-1 text-xs text-red-500 font-normal">(défaillants)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={formData.quantity - (formData.activeCount ?? formData.quantity)}
+                          value={formData.defectCount ?? 0}
+                          onChange={(e) => setFormData({ ...formData, defectCount: Math.min(Math.max(0, parseInt(e.target.value) || 0), formData.quantity - (formData.activeCount ?? formData.quantity)) })}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
+                        />
+                      </div>
+                      <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-gray-600">Inactifs</span>
+                          <span className="text-lg font-bold text-gray-900">{formData.quantity - (formData.activeCount ?? formData.quantity) - (formData.defectCount ?? 0)}</span>
+                        </div>
+                        <div className="flex gap-3 text-xs text-gray-400">
+                          <span>✅ {formData.activeCount ?? formData.quantity} actifs</span>
+                          <span>🔴 {formData.defectCount ?? 0} en panne</span>
+                          <span>⬛ {formData.quantity - (formData.activeCount ?? formData.quantity) - (formData.defectCount ?? 0)} inactifs</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {formData.type === 'accessoires' && (
                     <div>
@@ -4053,6 +4214,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       value={formData.lastMaintenance}
                       onChange={(e) => setFormData({ ...formData, lastMaintenance: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Utilisateur de l'équipement</label>
+                    <input
+                      type="text"
+                      value={formData.userName}
+                      onChange={(e) => setFormData({ ...formData, userName: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
+                      placeholder="Nom de l'utilisateur"
                     />
                   </div>
                 </div>
@@ -4412,6 +4584,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         )}
       </div>
 
+      {showMaintenanceModule && (
       <MaintenanceModule
         onClose={() => setShowMaintenanceModule(false)}
         onUnauthorized={handleUnauthorized}
@@ -4427,6 +4600,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         onRefresh={fetchMaintenance}
         onRefreshEquipment={fetchEquipments}
       />
+      )}
+
+      {showAssistanceModal && (
+        <AssistanceModal
+          equipments={equipments}
+          sites={sites}
+          onClose={() => setShowAssistanceModal(false)}
+          onToast={setToast}
+          onSaved={fetchMaintenance}
+        />
+      )}
 
 
       {/* ══ Module Licences logicielles ══════════════════════════════════ */}

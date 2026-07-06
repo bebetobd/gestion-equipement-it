@@ -852,7 +852,7 @@ export default function MaintenanceModule({
                   <Wrench className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-gray-800">{maintenanceEditId ? 'Modifier le ticket' : maintenanceForm.requestType === 'assistance' ? 'Nouvelle demande d\'assistance' : 'Nouveau ticket de maintenance'}</h3>
+                  <h3 className="text-sm font-bold text-gray-800">{maintenanceEditId ? 'Modifier le ticket' : maintenanceForm.requestType === 'assistance' ? 'Nouvelle demande d\'assistance' : maintenanceForm.requestType === 'maintenance_preventive' ? 'Nouveau ticket de maintenance préventive' : 'Nouveau ticket de maintenance corrective'}</h3>
                   <p className="text-xs text-gray-400">{maintenanceEditId ? 'Modifier les informations du ticket' : 'Remplir les informations ci-dessous'}</p>
                 </div>
               </div>
@@ -860,11 +860,32 @@ export default function MaintenanceModule({
                 <div className="space-y-3.5">
                   {!maintenanceEditId && (
                     <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Site</label>
+                      <select value={maintenanceForm.siteId ?? ''} onChange={e => { const siteId = e.target.value ? Number(e.target.value) : null; setMaintForm(f => ({ ...f, siteId, equipmentId: null })); }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none">
+                        <option value="">— Tous les sites —</option>
+                        {sites.map(s => <option key={s.id} value={s.id}>{s.name}{s.city ? (' — ' + s.city) : ''}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {!maintenanceEditId && (
+                    <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">Équipement concerné</label>
                       <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
                         className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none">
                         <option value="">— Sélectionner un équipement —</option>
-                        {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
+                        {equipments.filter(eq => !maintenanceForm.siteId || eq.siteId === maintenanceForm.siteId).map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {!maintenanceEditId && (
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Type de maintenance</label>
+                      <select value={maintenanceForm.requestType} onChange={e => setMaintForm(f => ({ ...f, requestType: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none">
+                        <option value="maintenance">Maintenance corrective</option>
+                        <option value="maintenance_preventive">Maintenance préventive</option>
+                        <option value="assistance">Assistance</option>
                       </select>
                     </div>
                   )}
@@ -903,7 +924,7 @@ export default function MaintenanceModule({
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Description <span className="text-red-500">*</span></label>
                     <textarea rows={3} value={maintenanceForm.failureDesc} onChange={e => setMaintForm(f => ({ ...f, failureDesc: e.target.value }))}
-                      placeholder={maintenanceForm.requestType === 'assistance' ? 'Décrivez votre besoin…' : 'Décrivez le problème observé…'}
+                      placeholder={maintenanceForm.requestType === 'assistance' ? 'Décrivez votre besoin…' : maintenanceForm.requestType === 'maintenance_preventive' ? 'Décrivez la maintenance préventive à effectuer…' : 'Décrivez le problème observé…'}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none resize-none" />
                   </div>
                   {maintenanceForm.requestType !== 'assistance' && (

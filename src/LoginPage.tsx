@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Lock, User, Eye, EyeOff, ShieldAlert, Clock, KeyRound } from 'lucide-react';
+import { Monitor, Lock, User, Eye, EyeOff, ShieldAlert, Clock, KeyRound, ChevronRight, Sparkles } from 'lucide-react';
 import { apiUrl } from './config';
 
 interface LoginUser {
@@ -25,7 +25,6 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   const [minutesLeft, setMinutesLeft] = useState(0);
   const [countdown, setCountdown]   = useState(0);
 
-  // ── Changement de mot de passe obligatoire ──────────────────────────────────
   const [mustChangePwd, setMustChangePwd] = useState(false);
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [pendingUser, setPendingUser] = useState<LoginUser | null>(null);
@@ -37,7 +36,6 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   const [changePwdError, setChangePwdError] = useState<string | null>(null);
   const [changePwdSuccess, setChangePwdSuccess] = useState(false);
 
-  // Décompte si compte bloqué
   useEffect(() => {
     if (!blocked || countdown <= 0) return;
     const id = setInterval(() => {
@@ -67,7 +65,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       const data = await response.json();
 
       if (response.status === 403 && data.accountBlocked) {
-        setError(data.message || 'Votre compte a été désactivé. Contactez l\'administrateur.');
+        setError(data.message || "Votre compte a été désactivé. Contactez l'administrateur.");
         return;
       }
 
@@ -152,62 +150,72 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
   if (mustChangePwd) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
+      <div className="min-h-screen bling-gradient flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute inset-0 overflow-hidden bling-particles"></div>
+        <div className="absolute top-20 left-20 w-2 h-2 bg-amber-400 rounded-full opacity-60" style={{animation:'float 6s ease-in-out infinite'}}></div>
+        <div className="absolute top-40 right-32 w-1.5 h-1.5 bg-blue-400 rounded-full opacity-40" style={{animation:'float 8s ease-in-out infinite 1s'}}></div>
+        <div className="absolute bottom-32 left-1/3 w-1 h-1 bg-purple-400 rounded-full opacity-50" style={{animation:'float 7s ease-in-out infinite 2s'}}></div>
+        <style>{`@keyframes float{0%,100%{transform:translateY(0) scale(1);opacity:0.6}50%{transform:translateY(-20px) scale(1.5);opacity:1}}`}</style>
+        <div className="w-full max-w-md relative z-10 animate-slideUp">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-500 rounded-2xl shadow-lg mb-4 ring-4 ring-amber-500/30">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 rounded-2xl shadow-lg shadow-amber-500/30 mb-4 relative">
               <KeyRound className="w-8 h-8 text-white" />
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center border-2 border-slate-900">
+                <span className="text-[8px] text-white font-bold">!</span>
+              </div>
             </div>
             <h1 className="text-2xl font-bold text-white">Changement de mot de passe</h1>
-            <p className="text-amber-300 mt-1 text-sm">Première connexion — vous devez changer votre mot de passe</p>
+            <p className="text-amber-300/80 mt-1 text-sm">Première connexion — vous devez changer votre mot de passe</p>
           </div>
-          <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <div className="bling-glass rounded-2xl shadow-2xl shadow-black/20 p-8 bling-shine">
             {changePwdSuccess ? (
-              <div className="text-center py-6">
-                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              <div className="text-center py-6 animate-scaleIn">
+                <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4 bling-pulse" style={{boxShadow:'0 0 20px rgba(34,197,94,0.3)'}}>
+                  <svg className="w-8 h-8 text-green-600 bling-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                 </div>
-                <p className="text-sm font-semibold text-green-700">Mot de passe modifié avec succès !</p>
-                <p className="text-xs text-gray-400 mt-1">Redirection vers l'application…</p>
+                <p className="text-sm font-bold text-green-700">Mot de passe modifié !</p>
+                <p className="text-xs text-gray-400 mt-1">Redirection…</p>
               </div>
             ) : (
               <div className="space-y-4">
                 {changePwdError && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{changePwdError}</div>
+                  <div className="rounded-xl bg-red-50 border border-red-200/60 px-4 py-3 text-sm text-red-700 flex items-center gap-2 animate-slideDown">
+                    <ShieldAlert className="w-4 h-4 shrink-0" /> {changePwdError}
+                  </div>
                 )}
                 <p className="text-sm text-gray-600">
-                  <strong>{pendingUser?.name}</strong>, pour des raisons de sécurité, vous devez définir un nouveau mot de passe avant de continuer.
+                  <strong>{pendingUser?.name}</strong>, pour des raisons de sécurité, vous devez définir un nouveau mot de passe.
                 </p>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Nouveau mot de passe</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Nouveau mot de passe</label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input type={showNewPwd ? 'text' : 'password'} value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
                       placeholder="Minimum 6 caractères"
-                      className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none" />
+                      className="w-full pl-11 pr-11 py-3 bg-gray-50/80 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-amber-500/40 focus:border-amber-400 outline-none transition-all bling-focus" />
                     <button type="button" onClick={() => setShowNewPwd(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabIndex={-1}>
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors" tabIndex={-1}>
                       {showNewPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Confirmer le mot de passe</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Confirmer</label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input type={showConfirmPwd ? 'text' : 'password'} value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
                       placeholder="Retaper le mot de passe"
-                      className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none" />
+                      className="w-full pl-11 pr-11 py-3 bg-gray-50/80 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-amber-500/40 focus:border-amber-400 outline-none transition-all bling-focus" />
                     <button type="button" onClick={() => setShowConfirmPwd(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabIndex={-1}>
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors" tabIndex={-1}>
                       {showConfirmPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 <button onClick={handleChangePassword} disabled={changingPwd}
-                  className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+                  className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:via-orange-600 hover:to-red-600 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 flex items-center justify-center gap-2 text-sm bling-bounce">
                   {changingPwd ? (
                     <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Changement…</>
                   ) : 'Changer le mot de passe'}
@@ -221,24 +229,37 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bling-gradient flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Animated background particles */}
+      <div className="absolute inset-0 overflow-hidden bling-particles">
+        <div className="absolute top-20 left-[15%] w-2 h-2 bg-blue-400 rounded-full opacity-50" style={{animation:'float 6s ease-in-out infinite'}}></div>
+        <div className="absolute top-[30%] right-[10%] w-1.5 h-1.5 bg-purple-400 rounded-full opacity-40" style={{animation:'float 8s ease-in-out infinite 1s'}}></div>
+        <div className="absolute bottom-[20%] left-[25%] w-1 h-1 bg-cyan-400 rounded-full opacity-60" style={{animation:'float 7s ease-in-out infinite 2s'}}></div>
+        <div className="absolute top-[60%] right-[30%] w-2.5 h-2.5 bg-pink-400 rounded-full opacity-30" style={{animation:'float 9s ease-in-out infinite 0.5s'}}></div>
+        <div className="absolute bottom-[40%] left-[60%] w-1 h-1 bg-emerald-400 rounded-full opacity-50" style={{animation:'float 6.5s ease-in-out infinite 3s'}}></div>
+        <div className="absolute top-[15%] left-[55%] w-1.5 h-1.5 bg-amber-400 rounded-full opacity-40" style={{animation:'float 7.5s ease-in-out infinite 1.5s'}}></div>
+      </div>
+      <style>{`@keyframes float{0%,100%{transform:translateY(0) scale(1);opacity:0.6}50%{transform:translateY(-20px) scale(1.5);opacity:1}}`}</style>
 
+      <div className="w-full max-w-md relative z-10">
         {/* Logo / En-tête */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl shadow-lg mb-4 ring-4 ring-blue-500/30">
+        <div className="text-center mb-8 animate-slideUp">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 rounded-2xl shadow-lg shadow-blue-500/30 mb-4 relative bling-pulse">
             <Monitor className="w-8 h-8 text-white" />
+            <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full flex items-center justify-center">
+              <Sparkles className="w-2.5 h-2.5 text-white" />
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-white">Gestion Équipements IT</h1>
-          <p className="text-blue-300 mt-1 text-sm">Identifiez-vous pour accéder à l'application</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Gestion Équipements IT</h1>
+          <p className="text-blue-300/60 mt-1.5 text-sm">Identifiez-vous pour accéder à l'application</p>
         </div>
 
         {/* Carte login */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
+        <div className="bling-glass rounded-2xl shadow-2xl shadow-black/20 p-8 bling-shine animate-slideUp" style={{animationDelay:'0.1s'}}>
 
           {/* Bannière bloquée */}
           {blocked && (
-            <div className="mb-5 rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
+            <div className="mb-5 rounded-xl bg-red-50 border border-red-200/60 p-4 flex items-start gap-3 animate-slideDown">
               <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-red-700">Accès temporairement bloqué</p>
@@ -252,12 +273,11 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-
             {/* Identifiant */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Identifiant</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
                   value={username}
@@ -266,16 +286,16 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
                   autoComplete="username"
                   autoFocus
                   disabled={blocked}
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition disabled:bg-gray-50 disabled:text-gray-400"
+                  className="w-full pl-11 pr-4 py-3 bg-gray-50/80 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-400 bling-focus"
                 />
               </div>
             </div>
 
             {/* Mot de passe */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Mot de passe</label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
@@ -283,10 +303,10 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
                   placeholder="Votre mot de passe"
                   autoComplete="current-password"
                   disabled={blocked}
-                  className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition disabled:bg-gray-50 disabled:text-gray-400"
+                  className="w-full pl-11 pr-11 py-3 bg-gray-50/80 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-400 bling-focus"
                 />
                 <button type="button" onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabIndex={-1}>
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors" tabIndex={-1}>
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
@@ -294,38 +314,40 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
             {/* Erreur + tentatives restantes */}
             {error && !blocked && (
-              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                <p>{error}</p>
-                {remaining !== null && remaining > 0 && (
-                  <p className="mt-1 text-xs font-medium text-red-500">
-                    {remaining} tentative{remaining > 1 ? 's' : ''} restante{remaining > 1 ? 's' : ''} avant blocage temporaire.
-                  </p>
-                )}
+              <div className="rounded-xl bg-red-50 border border-red-200/60 px-4 py-3 text-sm text-red-700 flex items-start gap-2 animate-slideDown">
+                <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <p>{error}</p>
+                  {remaining !== null && remaining > 0 && (
+                    <p className="mt-1 text-xs font-medium text-red-500">
+                      {remaining} tentative{remaining > 1 ? 's' : ''} restante{remaining > 1 ? 's' : ''} avant blocage temporaire.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Bouton */}
             <button type="submit" disabled={loading || blocked}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+              className="w-full bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 hover:from-blue-600 hover:via-blue-700 hover:to-indigo-700 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/25 hover:shadow-xl hover:shadow-blue-600/40 flex items-center justify-center gap-2 text-sm bling-bounce">
               {loading ? (
                 <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Connexion…</>
               ) : blocked ? (
                 <><Clock className="w-4 h-4" /> Accès bloqué</>
               ) : (
-                'Se connecter'
+                <>Se connecter <ChevronRight className="w-4 h-4" /></>
               )}
             </button>
-
           </form>
 
           {/* Pied de carte */}
-          <div className="mt-6 pt-4 border-t border-gray-100 flex items-center gap-2 text-xs text-gray-400">
+          <div className="mt-6 pt-4 border-t border-white/20 flex items-center gap-2 text-xs text-gray-400">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
             Accès réservé au personnel autorisé. Toute tentative non autorisée est enregistrée.
           </div>
         </div>
 
-        <p className="text-center text-xs text-blue-400 mt-4 opacity-60">
+        <p className="text-center text-xs text-blue-300/40 mt-4">
           {minutesLeft > 0 ? '' : 'Système sécurisé · Authentification requise'}
         </p>
       </div>

@@ -187,6 +187,7 @@ export interface MaintenanceForm {
   callerName: string;
   callerPhone: string;
   callerReport: string;
+  siteId?: number | null;
 }
 
 export interface UserAccount {
