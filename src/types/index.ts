@@ -41,6 +41,7 @@ export interface SiteVisit {
 
 export interface Equipment {
   id: number;
+  reference?: string;
   name: string;
   type: EquipmentType;
   brand: string;

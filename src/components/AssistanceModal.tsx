@@ -106,7 +106,7 @@ export default function AssistanceModal({ equipments, sites, onClose, onToast, o
               <option value="">— Sélectionner un équipement —</option>
               {equipments.filter(eq => !form.siteId || eq.siteId === form.siteId).map((eq) => (
                 <option key={eq.id} value={eq.id}>
-                  {eq.name} ({eq.location})
+                  {eq.reference ? `[${eq.reference}] ` : ''}{eq.name} ({eq.location})
                 </option>
               ))}
             </select>

@@ -915,13 +915,13 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
   try {
     const { rows } = await query(
       `INSERT INTO equipments
-         (name, type, brand, model, serial_number, ip_address, location, department,
+         (reference, name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
           technician_name, visit_date, intervention_details, site_id, quantity, min_quantity, supplier_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING *`,
       [
-        e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
+        e.reference || '', e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',
@@ -972,14 +972,14 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
 
     const { rows } = await query(
       `UPDATE equipments SET
-         name=$1, type=$2, brand=$3, model=$4, serial_number=$5, ip_address=$6,
-         location=$7, department=$8, status=$9, purchase_date=$10, warranty=$11,
-         last_maintenance=$12, visited=$13, technician_name=$14,
-         visit_date=$15, intervention_details=$16, site_id=$17, quantity=$18, min_quantity=$19, supplier_id=$20
-       WHERE id=$21
+         reference=$1, name=$2, type=$3, brand=$4, model=$5, serial_number=$6, ip_address=$7,
+         location=$8, department=$9, status=$10, purchase_date=$11, warranty=$12,
+         last_maintenance=$13, visited=$14, technician_name=$15,
+         visit_date=$16, intervention_details=$17, site_id=$18, quantity=$19, min_quantity=$20, supplier_id=$21
+       WHERE id=$22
        RETURNING *`,
       [
-        e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
+        e.reference || '', e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
         e.ipAddress || '', e.location || '', e.department || '', e.status || 'actif',
         e.purchaseDate || '', e.warranty || '', e.lastMaintenance || '',
         e.visited || false, e.technicianName || '', e.visitDate || '',

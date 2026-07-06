@@ -88,6 +88,9 @@ async function _initDB() {
   // Migration: add min_quantity (stock threshold for accessories)
   await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS min_quantity INTEGER NOT NULL DEFAULT 0`);
 
+  // Migration: add reference
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS reference VARCHAR(50) NOT NULL DEFAULT ''`);
+
   // Migration: add blocked and allowed_site_ids columns to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_site_ids INTEGER[] DEFAULT NULL`);
@@ -758,6 +761,7 @@ function rowToEvent(row) {
 export function rowToEquipment(row) {
   return {
     id: row.id,
+    reference: row.reference || '',
     name: row.name,
     type: row.type,
     brand: row.brand,

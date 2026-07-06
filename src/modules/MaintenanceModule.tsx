@@ -874,7 +874,7 @@ export default function MaintenanceModule({
                       <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
                         className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none">
                         <option value="">— Sélectionner un équipement —</option>
-                        {equipments.filter(eq => !maintenanceForm.siteId || eq.siteId === maintenanceForm.siteId).map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.location})</option>)}
+                        {equipments.filter(eq => !maintenanceForm.siteId || eq.siteId === maintenanceForm.siteId).map(eq => <option key={eq.id} value={eq.id}>{eq.reference ? `[${eq.reference}] ` : ''}{eq.name} ({eq.location})</option>)}
                       </select>
                     </div>
                   )}
