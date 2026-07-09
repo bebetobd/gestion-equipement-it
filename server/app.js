@@ -917,8 +917,8 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
       `INSERT INTO equipments
          (reference, name, type, brand, model, serial_number, ip_address, location, department,
           status, purchase_date, warranty, last_maintenance, visited,
-          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity, supplier_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          technician_name, visit_date, intervention_details, site_id, quantity, min_quantity, supplier_id, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING *`,
       [
         e.reference || '', e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
@@ -928,7 +928,7 @@ app.post('/api/equipments', authenticate, requirePermission('ecriture'), asyncHa
         e.interventionDetails || '', e.siteId || null,
         Math.max(1, parseInt(e.quantity) || 1),
         Math.max(0, parseInt(e.minQuantity) || 0),
-        e.supplierId || null
+        e.supplierId || null, e.comment || ''
       ]
     );
 
@@ -975,8 +975,8 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
          reference=$1, name=$2, type=$3, brand=$4, model=$5, serial_number=$6, ip_address=$7,
          location=$8, department=$9, status=$10, purchase_date=$11, warranty=$12,
          last_maintenance=$13, visited=$14, technician_name=$15,
-         visit_date=$16, intervention_details=$17, site_id=$18, quantity=$19, min_quantity=$20, supplier_id=$21
-       WHERE id=$22
+         visit_date=$16, intervention_details=$17, site_id=$18, quantity=$19, min_quantity=$20, supplier_id=$21, comment=$22
+       WHERE id=$23
        RETURNING *`,
       [
         e.reference || '', e.name, e.type, e.brand || '', e.model || '', e.serialNumber || '',
@@ -986,7 +986,7 @@ app.put('/api/equipments/:id', authenticate, requirePermission('modification'), 
         e.interventionDetails || '', e.siteId || null,
         Math.max(1, parseInt(e.quantity) || 1),
         Math.max(0, parseInt(e.minQuantity) || 0),
-        e.supplierId || null,
+        e.supplierId || null, e.comment || '',
         id
       ]
     );
@@ -1289,49 +1289,64 @@ app.get('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
-  const { equipmentId, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName, requestType, callerName, callerPhone, callerReport } = req.body;
+  const { equipmentId, equipmentIds, failureDesc, priority, technician, diagnosis, solution, partsReplaced, status, visitId, siteName, requestType, callerName, callerPhone, callerReport, photos } = req.body;
   if (!failureDesc?.trim()) return res.status(400).json({ message: 'Description de la panne requise.' });
 
-  const record = await createMaintenance({
-    equipmentId: equipmentId || null,
-    failureDesc, diagnosis: diagnosis || '', solution: solution || '',
-    partsReplaced: partsReplaced || '', technician: technician || '',
-    openedBy: req.user.name, priority: priority || 'normale',
-    status: requestType === 'assistance' ? 'en_attente' : (status || 'ouvert'),
-    visitId: visitId || null,
-    siteName: siteName || '',
-    requestType: requestType || 'maintenance',
-    callerName: callerName || '', callerPhone: callerPhone || '', callerReport: callerReport || '',
-  });
+  // Multi-equipment: create one record per equipment
+  const eqIds = (equipmentIds && equipmentIds.length > 0) ? equipmentIds : (equipmentId ? [equipmentId] : []);
+  const createdRecords = [];
 
-  // Enrich with equipment info if ID provided
-  if (equipmentId) {
-    const { rows } = await query('SELECT name, type, department FROM equipments WHERE id=$1', [equipmentId]);
-    if (rows[0]) {
-      await query(
-        'UPDATE maintenance_records SET equipment_name=$1, equipment_type=$2, department=$3 WHERE id=$4',
-        [rows[0].name, rows[0].type, rows[0].department, record.id]
-      );
-      record.equipmentName = rows[0].name;
-      record.equipmentType = rows[0].type;
-      record.department = rows[0].department;
-      // Set equipment status to maintenance
-      await query("UPDATE equipments SET status='maintenance' WHERE id=$1", [equipmentId]);
-      await logEquipmentEvent({
-        equipmentId, equipmentName: rows[0].name, equipmentType: rows[0].type,
-        department: rows[0].department, action: 'Maintenance',
-        details: `Ticket de maintenance ouvert — Panne: ${failureDesc}`,
-        technician: technician || '', userId: req.user.id,
-        username: req.user.username, userName: req.user.name, ip: getClientIp(req)
+  if (eqIds.length > 0) {
+    for (const eqId of eqIds) {
+      const record = await createMaintenance({
+        equipmentId: eqId, equipmentIds: eqIds,
+        failureDesc, diagnosis: diagnosis || '', solution: solution || '',
+        partsReplaced: partsReplaced || '', technician: technician || '',
+        openedBy: req.user.name, priority: priority || 'normale',
+        status: requestType === 'assistance' ? 'en_attente' : (status || 'ouvert'),
+        visitId: visitId || null, siteName: siteName || '',
+        requestType: requestType || 'maintenance',
+        callerName: callerName || '', callerPhone: callerPhone || '', callerReport: callerReport || '',
+        photos: photos || [],
       });
+      const { rows } = await query('SELECT name, type, department FROM equipments WHERE id=$1', [eqId]);
+      if (rows[0]) {
+        await query('UPDATE maintenance_records SET equipment_name=$1, equipment_type=$2, department=$3 WHERE id=$4', [rows[0].name, rows[0].type, rows[0].department, record.id]);
+        record.equipmentName = rows[0].name;
+        record.equipmentType = rows[0].type;
+        record.department = rows[0].department;
+        await query("UPDATE equipments SET status='maintenance' WHERE id=$1", [eqId]);
+        await logEquipmentEvent({
+          equipmentId: eqId, equipmentName: rows[0].name, equipmentType: rows[0].type,
+          department: rows[0].department, action: 'Maintenance',
+          details: `Ticket de maintenance ouvert — Panne: ${failureDesc}`,
+          technician: technician || '', userId: req.user.id,
+          username: req.user.username, userName: req.user.name, ip: getClientIp(req)
+        });
+      }
+      createdRecords.push(record);
     }
+  } else {
+    const record = await createMaintenance({
+      equipmentId: null, equipmentIds: [],
+      failureDesc, diagnosis: diagnosis || '', solution: solution || '',
+      partsReplaced: partsReplaced || '', technician: technician || '',
+      openedBy: req.user.name, priority: priority || 'normale',
+      status: requestType === 'assistance' ? 'en_attente' : (status || 'ouvert'),
+      visitId: visitId || null, siteName: siteName || '',
+      requestType: requestType || 'maintenance',
+      callerName: callerName || '', callerPhone: callerPhone || '', callerReport: callerReport || '',
+      photos: photos || [],
+    });
+    createdRecords.push(record);
   }
+
+  const record = createdRecords[0];
 
   logActivity(req.user.id, req.user.username, req.user.name,
     requestType === 'assistance' ? 'Demande assistance' : 'Ticket maintenance',
     `${requestType === 'assistance' ? 'Demande d\'assistance' : 'Ticket'} ouvert: ${failureDesc.substring(0, 60)}`, getClientIp(req));
 
-  // Notifier les administrateurs/techniciens par email pour les demandes d'assistance
   if (requestType === 'assistance') {
     const { rows: techUsers } = await query("SELECT name, username FROM users WHERE role IN ('admin','technicien') AND blocked = FALSE");
     const notifyEmails = process.env.REPORT_EMAIL ? [process.env.REPORT_EMAIL] : [];
@@ -1342,7 +1357,7 @@ app.post('/api/maintenance', authenticate, asyncHandler(async (req, res) => {
         html: `<h2>Nouvelle demande d'assistance</h2>
 <p><strong>De :</strong> ${req.user.name} (${req.user.username})</p>
 <p><strong>Description :</strong> ${failureDesc}</p>
-${equipmentId ? `<p><strong>Équipement :</strong> ${record.equipmentName || '#' + equipmentId}</p>` : ''}
+${record.equipmentName ? `<p><strong>Équipement :</strong> ${record.equipmentName}</p>` : ''}
 <p><strong>Date :</strong> ${new Date().toLocaleString('fr-FR')}</p>
 <p>Connectez-vous pour prendre en charge cette demande.</p>`
       }).catch(() => {});
@@ -1363,9 +1378,9 @@ app.put('/api/maintenance/:id', authenticate, asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Un ticket résolu ne peut plus être modifié.' });
   }
 
-  const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc, callerName, callerPhone, callerReport } = req.body;
+  const { status, diagnosis, solution, partsReplaced, technician, priority, failureDesc, callerName, callerPhone, callerReport, photos } = req.body;
 
-  const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority, callerName, callerPhone, callerReport };
+  const updates = { failureDesc, diagnosis, solution, partsReplaced, technician, priority, callerName, callerPhone, callerReport, photos };
   if (status) {
     updates.status = status;
     if (status === 'en_cours' && req.body.startedAt === undefined) updates.startedAt = new Date().toISOString();
@@ -1881,22 +1896,22 @@ app.get('/api/visits', authenticate, asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/visits', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
-  const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc } = req.body;
+  const { siteId, siteName, visitSiteId, visitSiteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc } = req.body;
   if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
     return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
   }
-  const visit = await createVisit({ siteId: Number(siteId), siteName: siteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status: status||'planifié', notes: notes||'', createdBy: req.user.name, withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'' });
+  const visit = await createVisit({ siteId: Number(siteId), siteName: siteName||'', visitSiteId: visitSiteId ? Number(visitSiteId) : null, visitSiteName: visitSiteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status: status||'planifié', notes: notes||'', createdBy: req.user.name, withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'' });
   logActivity(req.user.id, req.user.username, req.user.name, 'Visite programmée', `Visite sur ${siteName} le ${scheduledDate}`, getClientIp(req));
   res.status(201).json(visit);
 }));
 
 app.patch('/api/visits/:id', authenticate, requirePermission('ecriture'), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
-  const { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate } = req.body;
+  const { siteId, siteName, visitSiteId, visitSiteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate } = req.body;
   if (!siteId || !scheduledDate || !technician?.trim() || !purpose?.trim()) {
     return res.status(400).json({ message: 'Site, date, technicien et objet sont obligatoires.' });
   }
-  const visit = await updateVisit(id, { siteId: Number(siteId), siteName: siteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status, notes: notes||'', withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'', validationComment: validationComment||'', validatedAt: validatedAt||null, validatedBy: validatedBy||req.user.name, rescheduledDate: rescheduledDate||null });
+  const visit = await updateVisit(id, { siteId: Number(siteId), siteName: siteName||'', visitSiteId: visitSiteId ? Number(visitSiteId) : null, visitSiteName: visitSiteName||'', scheduledDate, scheduledTime: scheduledTime||'', technician: technician.trim(), purpose: purpose.trim(), status, notes: notes||'', withMaintenance: !!withMaintenance, equipmentIds: equipmentIds||[], maintenanceDesc: maintenanceDesc||'', validationComment: validationComment||'', validatedAt: validatedAt||null, validatedBy: validatedBy||req.user.name, rescheduledDate: rescheduledDate||null });
   if (!visit) return res.status(404).json({ message: 'Visite introuvable.' });
   res.json(visit);
 }));

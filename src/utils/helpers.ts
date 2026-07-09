@@ -36,7 +36,7 @@ export const getActionStyle = (action: string): string => {
 
 export const getDepreciation = (equipment: Equipment) => {
   if (!equipment.purchaseDate) return null;
-  const years: Record<EquipmentType, number> = { ordinateur: 4, serveur: 5, reseau: 6, imprimante: 5, accessoires: 3, autre: 5 };
+  const years: Record<EquipmentType, number> = { ordinateur: 4, serveur: 5, reseau: 6, imprimante: 5, scanner: 5, accessoires: 3, autre: 5 };
   const lifespan = years[equipment.type] ?? 5;
   const age = (Date.now() - new Date(equipment.purchaseDate).getTime()) / (365.25 * 86400000);
   const pct = Math.max(0, Math.min(100, Math.round((1 - age / lifespan) * 100)));

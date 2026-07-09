@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Clock, Plus, Trash2, LayoutList, Calendar, Search, RefreshCcw, ChevronLeft, FileText, Download, X, Eye, Edit, Filter, AlertTriangle, CheckCircle, ArrowUpRight, Check, Loader, Wrench, Monitor, XCircle, Globe, ChevronRight } from 'lucide-react';
+import { Clock, Plus, Trash2, LayoutList, Calendar, Search, RefreshCcw, ChevronLeft, FileText, Download, X, Eye, Edit, Filter, AlertTriangle, CheckCircle, ArrowUpRight, Check, Loader, Wrench, Monitor, XCircle, Globe, ChevronRight, MapPin } from 'lucide-react';
 import { ModuleShell } from '../components/ModuleShell';
 import * as ExportHelpers from '../utils/exportHelpers';
 import { authHeaders, formatDateTime } from '../utils/helpers';
@@ -41,7 +41,7 @@ function Pagination({ total, page, onChange }: { total: number; page: number; on
   return <SharedPagination currentPage={page} totalPages={totalPages} totalItems={total} pageSize={PAGE_SIZE} onPageChange={onChange} />;
 }
 
-const defaultVisitForm = { siteId: null as number | null, scheduledDate: '', scheduledTime: '', technician: '', purpose: '', status: 'planifié' as VisitStatus, notes: '', withMaintenance: false, equipmentIds: [] as number[], maintenanceDesc: '' };
+const defaultVisitForm = { siteId: null as number | null, siteName: '', visitSiteId: null as number | null, visitSiteName: '', scheduledDate: '', scheduledTime: '', technician: '', purpose: '', status: 'planifié' as VisitStatus, notes: '', withMaintenance: false, equipmentIds: [] as number[], maintenanceDesc: '' };
 
 const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite, canModify, userName, userAllowedSiteIds, onClose, onUpdateVisits, onRefreshMaintenance, onToast }: VisitsModuleProps) => {
   const [visitSearch, setVisitSearch] = useState('');
@@ -59,6 +59,8 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
   const [showEqDropdown, setShowEqDropdown] = useState(false);
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [showVisitSiteDropdown, setShowVisitSiteDropdown] = useState(false);
+  const [visitSiteSearchQuery, setVisitSiteSearchQuery] = useState('');
+  const [showVisitSiteSearchDropdown, setShowVisitSiteSearchDropdown] = useState(false);
   const [visitTechFilter, setVisitTechFilter] = useState<string[]>([]);
   const [showVisitsTrash, setShowVisitsTrash] = useState(false);
   const [deletedVisits, setDeletedVisits] = useState<any[]>([]);
@@ -81,15 +83,17 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
   };
 
   const saveVisit = async () => {
-    if (!visitForm.siteId) { onToast({ message: 'Veuillez sélectionner un site.', type: 'error' }); return; }
+    if (!visitForm.siteId && !visitForm.siteName.trim()) { onToast({ message: 'Veuillez sélectionner un site ou saisir un nom de lieu.', type: 'error' }); return; }
     if (!visitForm.scheduledDate) { onToast({ message: 'Veuillez choisir une date.', type: 'error' }); return; }
     if (!visitForm.technician.trim()) { onToast({ message: 'Veuillez indiquer le technicien.', type: 'error' }); return; }
     if (!visitForm.purpose.trim()) { onToast({ message: "Veuillez indiquer l'objet de la visite.", type: 'error' }); return; }
     setVisitSaving(true);
     try {
-      const site = sites.find(s => s.id === visitForm.siteId);
-      const siteName = site?.name ?? '';
-      const body = { ...visitForm, siteName };
+      const site = visitForm.siteId ? sites.find(s => s.id === visitForm.siteId) : null;
+      const siteName = site?.name ?? visitForm.siteName.trim();
+      const visitSite = visitForm.visitSiteId ? sites.find(s => s.id === visitForm.visitSiteId) : null;
+      const visitSiteName = visitSite?.name ?? visitForm.visitSiteName.trim();
+      const body = { ...visitForm, siteName, visitSiteName };
       const url = editingVisitId ? `${API_BASE_URL}/api/visits/${editingVisitId}` : `${API_BASE_URL}/api/visits`;
       const method = editingVisitId ? 'PATCH' : 'POST';
       const r = await fetch(url, { method, headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -204,13 +208,13 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
 
   const siteFilteredVisits = useMemo(() => {
     if (userAllowedSiteIds.length === 0) return visits;
-    return visits.filter(v => v.siteId != null && userAllowedSiteIds.includes(v.siteId));
+    return visits.filter(v => v.siteId == null || userAllowedSiteIds.includes(v.siteId));
   }, [visits, userAllowedSiteIds]);
 
   const filteredVisitsAll = siteFilteredVisits.filter(v => {
     if (!visitSearch) return true;
     const q = visitSearch.toLowerCase();
-    return v.siteName?.toLowerCase().includes(q) || v.technician?.toLowerCase().includes(q) || v.purpose?.toLowerCase().includes(q);
+    return v.siteName?.toLowerCase().includes(q) || v.visitSiteName?.toLowerCase().includes(q) || v.technician?.toLowerCase().includes(q) || v.purpose?.toLowerCase().includes(q);
   });
   const pagedVisits = filteredVisitsAll.slice((visitPage - 1) * PAGE_SIZE, visitPage * PAGE_SIZE);
 
@@ -333,7 +337,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
               sheets.push({ name: 'Par statut', rows: byStatus.map(r => ({ Statut: statusLabels[r.status]?.label ?? r.status, Nombre: r.count })) });
               sheets.push({ name: 'Par site', rows: bySite.map(r => ({ Site: r.site, Total: r.total, Terminées: r.terminé, 'Dernière visite': r.lastDate !== '—' ? new Date(r.lastDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—' })) });
               sheets.push({ name: 'Par technicien', rows: techRows.map(([t, cnt]) => ({ Technicien: t, Visites: cnt })) });
-              sheets.push({ name: 'Toutes les visites', rows: filteredVisits.map(v => ({ '#': v.id, Site: v.siteName, Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'), Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status, Objectif: v.purpose, 'Avec maintenance': v.withMaintenance ? 'Oui' : 'Non', Commentaire: v.validationComment || '—', 'Validé par': v.validatedBy || '—', 'Reporté au': v.rescheduledDate ? new Date(v.rescheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—' })) });
+              sheets.push({ name: 'Toutes les visites', rows: filteredVisits.map(v => ({ '#': v.id, 'Site de départ': v.siteName, 'Site visité': v.visitSiteName || '', Date: new Date(v.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR'), Technicien: v.technician, Statut: statusLabels[v.status]?.label ?? v.status, Objectif: v.purpose, 'Avec maintenance': v.withMaintenance ? 'Oui' : 'Non', Commentaire: v.validationComment || '—', 'Validé par': v.validatedBy || '—', 'Reporté au': v.rescheduledDate ? new Date(v.rescheduledDate + 'T00:00:00').toLocaleDateString('fr-FR') : '—' })) });
               await ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-visites-${Date.now()}.xlsx`);
             };
             const exportVisitsPdf = () => {
@@ -398,7 +402,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                 new DocxTable({ rows: [makeHdr(['Technicien','Nombre de visites']), ...techRows.map(([t, cnt]) => makeRow([t, String(cnt)]))] }),
                 new DocxParagraph({ text: '' }),
                 new DocxParagraph({ text: 'Détail de toutes les visites', heading: HeadingLevel.HEADING_2 }),
-                new DocxTable({ rows: [makeHdr(['#','Site','Date','Technicien','Statut','Objectif','Maintenance']), ...filteredVisits.map(v => makeRow([String(v.id), v.siteName, new Date(v.scheduledDate+'T00:00:00').toLocaleDateString('fr-FR'), v.technician, statusLabels[v.status]?.label ?? v.status, v.purpose, v.withMaintenance ? 'Oui' : 'Non']))] }),
+                new DocxTable({ rows: [makeHdr(['#','Site départ','Site visité','Date','Technicien','Statut','Objectif','Maintenance']), ...filteredVisits.map(v => makeRow([String(v.id), v.siteName, v.visitSiteName || '—', new Date(v.scheduledDate+'T00:00:00').toLocaleDateString('fr-FR'), v.technician, statusLabels[v.status]?.label ?? v.status, v.purpose, v.withMaintenance ? 'Oui' : 'Non']))] }),
               ];
               const doc = new DocxDocument({ sections: [{ children }] });
               const blob = await Packer.toBlob(doc);
@@ -582,9 +586,9 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                       <div className={`text-xs font-bold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-gradient-to-br from-[#1a6fa6] to-blue-700 text-white shadow-sm' : 'text-gray-600'}`}>{day}</div>
                       <div className="space-y-0.5">
                         {dayVisits.slice(0,3).map(v => (
-                          <div key={v.id} onClick={() => setVisitActionDialog(null)} title={`${v.siteName} — ${v.technician}`}
+                          <div key={v.id} onClick={() => setVisitActionDialog(null)} title={`${v.siteName}${v.visitSiteName ? ' → ' + v.visitSiteName : ''} — ${v.technician}`}
                             className={`text-xs px-1.5 py-0.5 rounded-md text-white truncate cursor-default ${statusCls[v.status] ?? 'bg-gray-400'}`}>
-                            {v.siteName}
+                            {v.siteName}{v.visitSiteName ? ` → ${v.visitSiteName}` : ''}
                           </div>
                         ))}
                         {dayVisits.length > 3 && <div className="text-xs text-gray-400 text-center">+{dayVisits.length-3}</div>}
@@ -617,7 +621,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {['Date', 'Heure', 'Site', 'Technicien', 'Objet', 'Maint.', 'Statut', 'Actions'].map(h => (
+                  {['Date', 'Heure', 'Site de départ', 'Site visité', 'Technicien', 'Objet', 'Maint.', 'Statut', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -638,6 +642,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                       </td>
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.scheduledTime || '—'}</td>
                       <td className="px-4 py-3 text-gray-800 font-medium">{v.siteName}</td>
+                      <td className="px-4 py-3 text-gray-700">{v.visitSiteName || '—'}</td>
                       <td className="px-4 py-3 text-gray-700">{v.technician}</td>
                       <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={v.purpose}>{v.purpose}</td>
                       <td className="px-4 py-3">
@@ -683,7 +688,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                           {canWrite && v.status !== 'terminé' && v.status !== 'annulé' && (
                             <button onClick={() => {
                               setEditingVisitId(v.id);
-                              setVisitForm({ siteId: v.siteId, scheduledDate: v.scheduledDate, scheduledTime: v.scheduledTime, technician: v.technician, purpose: v.purpose, status: v.status, notes: v.notes, withMaintenance: v.withMaintenance, equipmentIds: v.equipmentIds, maintenanceDesc: v.maintenanceDesc });
+                              setVisitForm({ siteId: v.siteId, siteName: v.siteName || '', visitSiteId: v.visitSiteId ?? null, visitSiteName: v.visitSiteName || '', scheduledDate: v.scheduledDate, scheduledTime: v.scheduledTime, technician: v.technician, purpose: v.purpose, status: v.status, notes: v.notes, withMaintenance: v.withMaintenance, equipmentIds: v.equipmentIds, maintenanceDesc: v.maintenanceDesc });
                               setShowVisitForm(true);
                             }} className="p-1.5 rounded-lg text-[#1a6fa6] hover:bg-[#e8f3fc]" title="Modifier">
                               <Edit className="w-4 h-4" />
@@ -725,7 +730,7 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                   {visitActionDialog.action === 'reporté' && 'Reporter la visite'}
                   {visitActionDialog.action === 'annulé' && 'Annuler la visite'}
                 </h3>
-                <p className="text-xs text-gray-500">{visitActionDialog.visit.siteName} · {new Date(visitActionDialog.visit.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FR')}</p>
+                <p className="text-xs text-gray-500">{visitActionDialog.visit.siteName}{visitActionDialog.visit.visitSiteName ? ` → ${visitActionDialog.visit.visitSiteName}` : ''} · {new Date(visitActionDialog.visit.scheduledDate + 'T00:00:00').toLocaleDateString('fr-FF')}</p>
               </div>
             </div>
             {visitActionDialog.action === 'reporté' && (
@@ -823,26 +828,28 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
             </div>
 
             <div className="p-6 space-y-4">
-              {/* Site */}
+              {/* Site / Lieu de départ */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Site <span className="text-red-500">*</span></label>
-                {visitForm.siteId && (() => {
-                  const s = sites.find(s => s.id === visitForm.siteId);
-                  return s ? (
+                <label className="block text-sm font-medium text-gray-700 mb-1">Site de départ <span className="text-red-500">*</span></label>
+                {(visitForm.siteId || visitForm.siteName) && (() => {
+                  const s = visitForm.siteId ? sites.find(s => s.id === visitForm.siteId) : null;
+                  const displayName = s?.name ?? visitForm.siteName;
+                  const subInfo = s ? `${s.city}${s.country ? `, ${s.country}` : ''}` : 'Lieu personnalisé';
+                  return (
                     <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-gradient-to-br from-indigo-50 to-blue-100/30 border border-indigo-200 rounded-lg">
                       <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-sm shrink-0"><Globe className="w-3 h-3" /></div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
-                        <p className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''}</p>
+                        <p className="text-sm font-semibold text-gray-800 truncate">{displayName}</p>
+                        <p className="text-xs text-gray-400">{subInfo}</p>
                       </div>
-                      <button type="button" onClick={() => { setVisitForm(f => ({ ...f, siteId: null, equipmentIds: [] })); setSiteSearchQuery(''); }}
+                      <button type="button" onClick={() => { setVisitForm(f => ({ ...f, siteId: null, siteName: '', equipmentIds: [] })); setSiteSearchQuery(''); }}
                         className="text-indigo-400 hover:text-[#155a8a] shrink-0" title="Changer de site">
                         <XCircle className="w-4 h-4" />
                       </button>
                     </div>
-                  ) : null;
+                  );
                 })()}
-                {!visitForm.siteId && (
+                {!visitForm.siteId && !visitForm.siteName && (
                   <div className="relative">
                     <div className="flex items-center gap-2 border border-gray-300 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-[#1a6fa6] focus-within:border-[#1a6fa6]">
                       <Search className="w-4 h-4 text-gray-400 shrink-0" />
@@ -851,8 +858,8 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                         value={siteSearchQuery}
                         onChange={e => { setSiteSearchQuery(e.target.value); setShowVisitSiteDropdown(true); }}
                         onFocus={() => setShowVisitSiteDropdown(true)}
-                        onBlur={() => setTimeout(() => setShowVisitSiteDropdown(false), 150)}
-                        placeholder="Rechercher un site…"
+                        onBlur={() => setTimeout(() => setShowVisitSiteDropdown(false), 200)}
+                        placeholder="Rechercher un site ou saisir un lieu…"
                         className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder-gray-400"
                       />
                       {siteSearchQuery && (
@@ -872,12 +879,10 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                         : pool;
                       return (
                         <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
-                          {results.length === 0 ? (
-                            <p className="text-sm text-gray-400 text-center py-4">Aucun site trouvé.</p>
-                          ) : results.map(s => (
+                          {results.map(s => (
                             <button key={s.id} type="button"
                               onMouseDown={() => {
-                                setVisitForm(f => ({ ...f, siteId: s.id, equipmentIds: [] }));
+                                setVisitForm(f => ({ ...f, siteId: s.id, siteName: '', equipmentIds: [] }));
                                 setSiteSearchQuery('');
                                 setShowVisitSiteDropdown(false);
                                 setEqSearchQuery('');
@@ -890,6 +895,103 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                               </div>
                             </button>
                           ))}
+                          {q && (
+                            <button type="button"
+                              onMouseDown={() => {
+                                setVisitForm(f => ({ ...f, siteId: null, siteName: siteSearchQuery.trim(), equipmentIds: [] }));
+                                setSiteSearchQuery('');
+                                setShowVisitSiteDropdown(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 text-left border-t border-green-100 bg-green-50/50">
+                              <span className="text-sm text-green-600 font-medium shrink-0">+</span>
+                              <p className="text-sm text-green-700">Utiliser « {siteSearchQuery.trim()} » comme lieu</p>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Site à visiter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Site à visiter <span className="text-gray-400 font-normal">(optionnel)</span></label>
+                {(visitForm.visitSiteId || visitForm.visitSiteName) && (() => {
+                  const s = visitForm.visitSiteId ? sites.find(s => s.id === visitForm.visitSiteId) : null;
+                  const displayName = s?.name ?? visitForm.visitSiteName;
+                  const subInfo = s ? `${s.city}${s.country ? `, ${s.country}` : ''}` : 'Lieu personnalisé';
+                  return (
+                    <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-gradient-to-br from-emerald-50 to-green-100/30 border border-emerald-200 rounded-lg">
+                      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center text-white shadow-sm shrink-0"><MapPin className="w-3 h-3" /></div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{displayName}</p>
+                        <p className="text-xs text-gray-400">{subInfo}</p>
+                      </div>
+                      <button type="button" onClick={() => { setVisitForm(f => ({ ...f, visitSiteId: null, visitSiteName: '' })); setVisitSiteSearchQuery(''); }}
+                        className="text-emerald-400 hover:text-green-600 shrink-0" title="Changer">
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })()}
+                {!visitForm.visitSiteId && !visitForm.visitSiteName && (
+                  <div className="relative">
+                    <div className="flex items-center gap-2 border border-gray-300 rounded-lg bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-green-500 focus-within:border-green-500">
+                      <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                      <input
+                        type="text"
+                        value={visitSiteSearchQuery}
+                        onChange={e => { setVisitSiteSearchQuery(e.target.value); setShowVisitSiteSearchDropdown(true); }}
+                        onFocus={() => setShowVisitSiteSearchDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowVisitSiteSearchDropdown(false), 200)}
+                        placeholder="Rechercher un site ou saisir un lieu à visiter…"
+                        className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder-gray-400"
+                      />
+                      {visitSiteSearchQuery && (
+                        <button type="button" onClick={() => { setVisitSiteSearchQuery(''); setShowVisitSiteSearchDropdown(false); }}
+                          className="text-gray-400 hover:text-gray-600">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    {showVisitSiteSearchDropdown && (() => {
+                      const q = visitSiteSearchQuery.trim().toLowerCase();
+                      const pool = userAllowedSiteIds.length > 0
+                        ? sites.filter(s => userAllowedSiteIds.includes(s.id))
+                        : sites;
+                      const results = q
+                        ? pool.filter(s => s.name.toLowerCase().includes(q) || s.city?.toLowerCase().includes(q) || s.country?.toLowerCase().includes(q))
+                        : pool;
+                      return (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                          {results.map(s => (
+                            <button key={s.id} type="button"
+                              onMouseDown={() => {
+                                setVisitForm(f => ({ ...f, visitSiteId: s.id, visitSiteName: '' }));
+                                setVisitSiteSearchQuery('');
+                                setShowVisitSiteSearchDropdown(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 text-left border-b border-gray-50 last:border-0">
+                              <MapPin className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                                <p className="text-xs text-gray-400">{s.city}{s.country ? `, ${s.country}` : ''}</p>
+                              </div>
+                            </button>
+                          ))}
+                          {q && (
+                            <button type="button"
+                              onMouseDown={() => {
+                                setVisitForm(f => ({ ...f, visitSiteId: null, visitSiteName: visitSiteSearchQuery.trim() }));
+                                setVisitSiteSearchQuery('');
+                                setShowVisitSiteSearchDropdown(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 text-left border-t border-green-100 bg-green-50/50">
+                              <span className="text-sm text-green-600 font-medium shrink-0">+</span>
+                              <p className="text-sm text-green-700">Utiliser « {visitSiteSearchQuery.trim()} » comme lieu</p>
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
@@ -993,9 +1095,11 @@ const VisitsModule = ({ visits, sites, equipments, maintenanceRecords, canWrite,
                           )}
                         </div>
                         {showEqDropdown && (() => {
-                          const pool = (visitForm.siteId
-                            ? equipments.filter(e => e.siteId === visitForm.siteId)
-                            : equipments
+                          const pool = (visitForm.visitSiteId
+                            ? equipments.filter(e => e.siteId === visitForm.visitSiteId)
+                            : visitForm.siteId
+                              ? equipments.filter(e => e.siteId === visitForm.siteId)
+                              : equipments
                           ).filter(e => !visitForm.equipmentIds.includes(e.id));
                           const query = eqSearchQuery.trim().toLowerCase();
                           const results = query

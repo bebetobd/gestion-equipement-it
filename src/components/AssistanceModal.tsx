@@ -14,6 +14,7 @@ interface Props {
 
 const defaultForm: MaintenanceForm = {
   equipmentId: null,
+  equipmentIds: [],
   failureDesc: '',
   diagnosis: '',
   solution: '',
@@ -25,6 +26,7 @@ const defaultForm: MaintenanceForm = {
   callerName: '',
   callerPhone: '',
   callerReport: '',
+  photos: [],
 };
 
 export default function AssistanceModal({ equipments, sites, onClose, onToast, onSaved }: Props) {
@@ -40,7 +42,7 @@ export default function AssistanceModal({ equipments, sites, onClose, onToast, o
     try {
       const r = await fetch(`${API_BASE_URL}/api/maintenance`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
       if (r.ok) {

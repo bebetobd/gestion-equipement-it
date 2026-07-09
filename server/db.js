@@ -345,7 +345,7 @@ async function _initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS site_visits (
       id               SERIAL PRIMARY KEY,
-      site_id          INTEGER NOT NULL,
+      site_id          INTEGER,
       site_name        VARCHAR(200) NOT NULL DEFAULT '',
       scheduled_date   DATE NOT NULL,
       scheduled_time   VARCHAR(10) NOT NULL DEFAULT '',
@@ -366,6 +366,10 @@ async function _initDB() {
   await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS validated_at TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS validated_by VARCHAR(200) NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS rescheduled_date DATE`);
+  await pool.query(`ALTER TABLE site_visits ALTER COLUMN site_id DROP NOT NULL`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS visit_site_id INTEGER`);
+  await pool.query(`ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS visit_site_name VARCHAR(200) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE equipments ADD COLUMN IF NOT EXISTS comment TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS visit_id INTEGER REFERENCES site_visits(id) ON DELETE SET NULL`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS site_name VARCHAR(200) NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS request_type VARCHAR(20) NOT NULL DEFAULT 'maintenance'`);
@@ -374,6 +378,8 @@ async function _initDB() {
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS tech_confirmed BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT NULL`);
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS review_comment TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS equipment_ids INTEGER[] NOT NULL DEFAULT '{}'`);
+  await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS photos TEXT[] NOT NULL DEFAULT '{}'`);
 
   // Licences logicielles
   await pool.query(`
@@ -643,13 +649,13 @@ export async function getMaintenance({ status, equipmentId, limit = 200 } = {}) 
 
 export async function createMaintenance(data) {
 
-  const { equipmentId, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType, callerName, callerPhone, callerReport } = data;
+  const { equipmentId, equipmentIds, equipmentName, equipmentType, department, failureDesc, diagnosis, solution, partsReplaced, technician, openedBy, priority, status, visitId, siteName, requestType, callerName, callerPhone, callerReport, photos } = data;
   const { rows } = await pool.query(
     `INSERT INTO maintenance_records
-       (equipment_id, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name, request_type, caller_name, caller_phone, caller_report)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       (equipment_id, equipment_ids, equipment_name, equipment_type, department, failure_desc, diagnosis, solution, parts_replaced, technician, opened_by, priority, status, visit_id, site_name, request_type, caller_name, caller_phone, caller_report, photos)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      RETURNING *`,
-    [equipmentId ?? null, equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '', requestType || 'maintenance', callerName || '', callerPhone || '', callerReport || '']
+    [equipmentId ?? null, equipmentIds || [], equipmentName || '', equipmentType || '', department || '', failureDesc || '', diagnosis || '', solution || '', partsReplaced || '', technician || '', openedBy || '', priority || 'normale', status || 'ouvert', visitId ?? null, siteName || '', requestType || 'maintenance', callerName || '', callerPhone || '', callerReport || '', photos || []]
   );
   return rowToMaintenance(rows[0]);
 }
@@ -659,7 +665,7 @@ export async function updateMaintenance(id, data) {
   const fields = [];
   const params = [];
   let i = 1;
-  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name', requestType: 'request_type', assignedTechId: 'assigned_tech_id', userConfirmed: 'user_confirmed', techConfirmed: 'tech_confirmed', rating: 'rating', reviewComment: 'review_comment', callerName: 'caller_name', callerPhone: 'caller_phone', callerReport: 'caller_report' };
+  const map = { failureDesc: 'failure_desc', diagnosis: 'diagnosis', solution: 'solution', partsReplaced: 'parts_replaced', technician: 'technician', status: 'status', priority: 'priority', startedAt: 'started_at', closedAt: 'closed_at', notes: 'notes', visitId: 'visit_id', siteName: 'site_name', requestType: 'request_type', assignedTechId: 'assigned_tech_id', userConfirmed: 'user_confirmed', techConfirmed: 'tech_confirmed', rating: 'rating', reviewComment: 'review_comment', callerName: 'caller_name', callerPhone: 'caller_phone', callerReport: 'caller_report', photos: 'photos' };
   for (const [key, col] of Object.entries(map)) {
     if (data[key] !== undefined) { fields.push(`${col} = $${i++}`); params.push(data[key]); }
   }
@@ -717,6 +723,8 @@ export function rowToMaintenance(row) {
     callerName: row.caller_name || '',
     callerPhone: row.caller_phone || '',
     callerReport: row.caller_report || '',
+    equipmentIds: row.equipment_ids ?? [],
+    photos: row.photos ?? [],
     deletedAt: row.deleted_at ?? null,
   };
 }
@@ -783,6 +791,7 @@ export function rowToEquipment(row) {
     supplierId: row.supplier_id ?? null,
     quantity: row.quantity ?? 1,
     minQuantity: row.min_quantity ?? 0,
+    comment: row.comment ?? '',
     deletedAt: row.deleted_at ?? null,
   };
 }
@@ -1062,6 +1071,7 @@ export async function getVisits({ siteId, status, from, to } = {}) {
   const { rows } = await pool.query(q, params);
   return rows.map(r => ({
     id: r.id, siteId: r.site_id, siteName: r.site_name,
+    visitSiteId: r.visit_site_id ?? null, visitSiteName: r.visit_site_name ?? '',
     scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
     scheduledTime: r.scheduled_time, technician: r.technician,
     purpose: r.purpose, status: r.status, notes: r.notes,
@@ -1076,15 +1086,16 @@ export async function getVisits({ siteId, status, from, to } = {}) {
   }));
 }
 
-export async function createVisit({ siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, createdBy, withMaintenance, equipmentIds, maintenanceDesc }) {
+export async function createVisit({ siteId, siteName, visitSiteId, visitSiteName, scheduledDate, scheduledTime, technician, purpose, status, notes, createdBy, withMaintenance, equipmentIds, maintenanceDesc }) {
 
   const { rows } = await pool.query(
-    `INSERT INTO site_visits (site_id, site_name, scheduled_date, scheduled_time, technician, purpose, status, notes, created_by, with_maintenance, equipment_ids, maintenance_desc)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-    [siteId, siteName, scheduledDate, scheduledTime||'', technician, purpose, status||'planifié', notes||'', createdBy||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'']
+    `INSERT INTO site_visits (site_id, site_name, visit_site_id, visit_site_name, scheduled_date, scheduled_time, technician, purpose, status, notes, created_by, with_maintenance, equipment_ids, maintenance_desc)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [siteId || null, siteName, visitSiteId || null, visitSiteName || '', scheduledDate, scheduledTime||'', technician, purpose, status||'planifié', notes||'', createdBy||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'']
   );
   const r = rows[0];
   return { id: r.id, siteId: r.site_id, siteName: r.site_name,
+    visitSiteId: r.visit_site_id ?? null, visitSiteName: r.visit_site_name ?? '',
     scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
     scheduledTime: r.scheduled_time, technician: r.technician,
     purpose: r.purpose, status: r.status, notes: r.notes,
@@ -1092,14 +1103,15 @@ export async function createVisit({ siteId, siteName, scheduledDate, scheduledTi
     withMaintenance: r.with_maintenance, equipmentIds: r.equipment_ids ?? [], maintenanceDesc: r.maintenance_desc };
 }
 
-export async function updateVisit(id, { siteId, siteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate }) {
+export async function updateVisit(id, { siteId, siteName, visitSiteId, visitSiteName, scheduledDate, scheduledTime, technician, purpose, status, notes, withMaintenance, equipmentIds, maintenanceDesc, validationComment, validatedAt, validatedBy, rescheduledDate }) {
 
   const { rows } = await pool.query(
-    `UPDATE site_visits SET site_id=$1,site_name=$2,scheduled_date=$3,scheduled_time=$4,technician=$5,purpose=$6,status=$7,notes=$8,with_maintenance=$9,equipment_ids=$10,maintenance_desc=$11,validation_comment=$12,validated_at=$13,validated_by=$14,rescheduled_date=$15 WHERE id=$16 RETURNING *`,
-    [siteId, siteName, scheduledDate, scheduledTime||'', technician, purpose, status, notes||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'', validationComment||'', validatedAt||null, validatedBy||'', rescheduledDate||null, id]
+    `UPDATE site_visits SET site_id=$1,site_name=$2,visit_site_id=$3,visit_site_name=$4,scheduled_date=$5,scheduled_time=$6,technician=$7,purpose=$8,status=$9,notes=$10,with_maintenance=$11,equipment_ids=$12,maintenance_desc=$13,validation_comment=$14,validated_at=$15,validated_by=$16,rescheduled_date=$17 WHERE id=$18 RETURNING *`,
+    [siteId || null, siteName, visitSiteId || null, visitSiteName || '', scheduledDate, scheduledTime||'', technician, purpose, status, notes||'', withMaintenance||false, equipmentIds||[], maintenanceDesc||'', validationComment||'', validatedAt||null, validatedBy||'', rescheduledDate||null, id]
   );
   const r = rows[0];
   return { id: r.id, siteId: r.site_id, siteName: r.site_name,
+    visitSiteId: r.visit_site_id ?? null, visitSiteName: r.visit_site_name ?? '',
     scheduledDate: r.scheduled_date?.toISOString?.()?.slice(0,10) ?? r.scheduled_date,
     scheduledTime: r.scheduled_time, technician: r.technician,
     purpose: r.purpose, status: r.status, notes: r.notes,

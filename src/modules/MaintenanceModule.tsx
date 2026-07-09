@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Trash2, Edit, Monitor, Wrench, AlertTriangle, Search, CircleCheck,
-  CheckCircle, Clock, Headset, LayoutList, LayoutGrid, Download, X
+  CheckCircle, Clock, Headset, LayoutList, LayoutGrid, Download, X, Globe, CheckSquare, Upload
 } from 'lucide-react';
 import * as ExportHelpers from '../utils/exportHelpers';
 import jsPDF from 'jspdf';
@@ -15,7 +15,7 @@ import { ModuleShell } from '../components/ModuleShell';
 import { Pagination as SharedPagination } from '../components/Pagination';
 import { authHeaders } from '../utils/helpers';
 import { API_BASE_URL, PAGE_SIZE } from '../constants/index';
-import type { Equipment, Site, MaintenanceRecord, MaintenanceForm, MaintenanceStatus, MaintenancePriority } from '../types/index';
+import type { Equipment, Site, SiteVisit, MaintenanceRecord, MaintenanceForm, MaintenanceStatus, MaintenancePriority } from '../types/index';
 
 function Section({ icon, title, color, children }: { icon: React.ReactNode; title: string; color: 'red' | 'yellow' | 'green' | 'blue'; children: React.ReactNode }) {
   const border = { red: 'border-red-200', yellow: 'border-yellow-200', green: 'border-green-200', blue: 'border-blue-200' }[color];
@@ -58,9 +58,9 @@ const maintenancePriorityStyle: Record<string, string> = {
 };
 
 const defaultMaintenanceForm: MaintenanceForm = {
-  equipmentId: null, failureDesc: '', diagnosis: '', solution: '',
+  equipmentId: null, equipmentIds: [], failureDesc: '', diagnosis: '', solution: '',
   partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance',
-  callerName: '', callerPhone: '', callerReport: ''
+  callerName: '', callerPhone: '', callerReport: '', photos: []
 };
 
 const fmtDate = (iso: string | null) => iso
@@ -74,6 +74,7 @@ interface Props {
   onConfirm: (c: { message: string; onConfirm: () => void } | null) => void;
   equipments: Equipment[];
   sites: Site[];
+  visits: SiteVisit[];
   canWrite: boolean;
   canModify: boolean;
   currentUserName: string;
@@ -87,12 +88,14 @@ interface Props {
 
 export default function MaintenanceModule({
   onClose, onUnauthorized, onToast, onConfirm,
-  equipments, sites, canWrite, canModify, currentUserName, userAllowedSiteIds,
+  equipments, sites, visits, canWrite, canModify, currentUserName, userAllowedSiteIds,
   maintenanceRecords, onRefresh, onRefreshEquipment,
   initialFormType, initialEquipmentId
 }: Props) {
   const [showKanban, setShowKanban] = useState(false);
   const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
+  const [showBySite, setShowBySite] = useState(false);
+  const [selectedTicketIds, setSelectedTicketIds] = useState<number[]>([]);
   const [maintenanceFilter, setMaintenanceFilter] = useState<string>('all');
   const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceRecord | null>(null);
   const [showMaintenanceForm, setShowMaintenanceForm] = useState(false);
@@ -111,6 +114,20 @@ export default function MaintenanceModule({
   const [maintenanceTrashLoading, setMaintenanceTrashLoading] = useState(false);
   const [maintenancePage, setMaintenancePage] = useState(1);
   const [loading, setLoading] = useState(false);
+
+  const isMaintenanceBlockedByVisit = (record: MaintenanceRecord): boolean => {
+    if (!record.visitId) return false;
+    const visit = visits.find(v => v.id === record.visitId);
+    return !!visit && visit.status !== 'en_cours';
+  };
+
+  const getMaintenanceSiteName = (record: MaintenanceRecord): string => {
+    if (record.visitId) {
+      const visit = visits.find(v => v.id === record.visitId);
+      if (visit?.visitSiteName) return visit.visitSiteName;
+    }
+    return record.siteName || '';
+  };
 
   useEffect(() => { setMaintenancePage(1); }, [maintenanceFilter]);
 
@@ -157,7 +174,7 @@ export default function MaintenanceModule({
   // ── API helpers ──
 
   const apiFetch = async (url: string, opts?: RequestInit) => {
-    const r = await fetch(`${API_BASE_URL}${url}`, { ...opts, headers: { ...authHeaders(), ...(opts?.headers || {}) } });
+    const r = await fetch(`${API_BASE_URL}${url}`, { ...opts, headers: { ...authHeaders(), 'Content-Type': 'application/json', ...(opts?.headers || {}) } });
     if (r.status === 401) onUnauthorized();
     return r;
   };
@@ -180,15 +197,44 @@ export default function MaintenanceModule({
           method: 'POST', body: JSON.stringify(maintenanceForm),
         });
         if (r.ok) {
+          const count = maintenanceForm.equipmentIds?.length ?? 0;
           await r.json();
           onRefresh(maintenanceFilter);
           onRefreshEquipment();
+          onToast({ message: count > 1 ? `${count} tickets créés avec succès.` : 'Ticket créé avec succès.', type: 'success' });
+        } else {
+          const d = await r.json().catch(() => ({}));
+          onToast({ message: d.message || 'Erreur lors de la création.', type: 'error' });
         }
       }
       setShowMaintenanceForm(false);
       setMaintForm(defaultMaintenanceForm);
       setMaintenanceEditId(null);
     } catch { onToast({ message: 'Erreur lors de la sauvegarde.', type: 'error' }); }
+  };
+
+  const handleBatchResolve = async () => {
+    if (selectedTicketIds.length === 0) return;
+    onConfirm({
+      message: `Résoudre ${selectedTicketIds.length} ticket(s) ?`,
+      onConfirm: async () => {
+        onConfirm(null);
+        try {
+          let resolved = 0;
+          for (const id of selectedTicketIds) {
+            const r = await apiFetch(`/api/maintenance/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ status: 'résolu', solution: 'Résolution groupée par site' }),
+            });
+            if (r.ok) resolved++;
+          }
+          setSelectedTicketIds([]);
+          onRefresh(maintenanceFilter);
+          onRefreshEquipment();
+          onToast({ message: `${resolved} ticket(s) résolu(s).`, type: 'success' });
+        } catch { onToast({ message: 'Erreur lors de la résolution groupée.', type: 'error' }); }
+      }
+    });
   };
 
   const handleDeleteMaintenance = (id: number) => {
@@ -281,14 +327,18 @@ export default function MaintenanceModule({
       {/* Tabs */}
       <div className="px-6 pt-3 pb-0 flex gap-1 shrink-0 border-b border-gray-200 bg-white items-center">
         <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(false); }}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && !showKanban ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && !showKanban && !showBySite ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <LayoutList className="w-3.5 h-3.5" /> Liste
         </button>
-        <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(true); }}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && showKanban ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+        <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(false); setShowBySite(true); setSelectedTicketIds([]); }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${showBySite ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <Globe className="w-3.5 h-3.5" /> Par site
+        </button>
+        <button onClick={() => { setShowMaintenanceReport(false); setShowKanban(true); setShowBySite(false); }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${!showMaintenanceReport && showKanban && !showBySite ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <LayoutGrid className="w-3.5 h-3.5" /> Kanban
         </button>
-        <button onClick={() => { setShowMaintenanceReport(true); setShowKanban(false); if (maintenanceFilter !== 'all') { setMaintenanceFilter('all'); onRefresh('all'); } }}
+        <button onClick={() => { setShowMaintenanceReport(true); setShowKanban(false); setShowBySite(false); if (maintenanceFilter !== 'all') { setMaintenanceFilter('all'); onRefresh('all'); } }}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${showMaintenanceReport ? 'border-[#1a6fa6] text-[#1a6fa6]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           Rapport
         </button>
@@ -602,12 +652,16 @@ export default function MaintenanceModule({
                           </div>
                         )}
                         <div className="flex gap-1 mt-2 pt-2 border-t border-gray-50 flex-wrap">
-                          {(['en_attente','ouvert','en_cours','résolu'] as const).filter(s => s !== st).map(s => (
-                            <button key={s} onClick={e => { e.stopPropagation(); handleStatusChange(m.id, s); }}
-                              className="flex-1 text-xs py-1 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors text-center min-w-0 truncate">
-                              → {statusLabels[s]}
-                            </button>
-                          ))}
+                          {(['en_attente','ouvert','en_cours','résolu'] as const).filter(s => s !== st).map(s => {
+                            const blocked = isMaintenanceBlockedByVisit(m);
+                            return (
+                              <button key={s} onClick={e => { e.stopPropagation(); if (!blocked) handleStatusChange(m.id, s); }}
+                                disabled={blocked}
+                                className={`flex-1 text-xs py-1 rounded-lg transition-colors text-center min-w-0 truncate ${blocked ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : 'bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                                → {statusLabels[s]}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
@@ -651,7 +705,7 @@ export default function MaintenanceModule({
                     <p className="text-sm font-medium text-gray-800 line-clamp-2">{ticket.failureDesc}</p>
                     {ticket.callerName && <p className="text-xs text-purple-600 mt-1 flex items-center gap-1"><Headset className="w-3 h-3" />{ticket.callerName}{ticket.callerPhone ? ` — ${ticket.callerPhone}` : ''}</p>}
                     {ticket.equipmentName && <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Monitor className="w-3 h-3" />{ticket.equipmentName}</p>}
-                    {ticket.visitId && <p className="text-xs text-blue-600 mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />Lié à une visite{ticket.siteName ? ` — ${ticket.siteName}` : ''}</p>}
+                    {ticket.visitId && <p className="text-xs text-blue-600 mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />Lié à une visite{getMaintenanceSiteName(ticket) ? ` — ${getMaintenanceSiteName(ticket)}` : ''}</p>}
                     <p className="text-xs text-gray-400 mt-1">{fmtDate(ticket.openedAt)} · {ticket.openedBy}</p>
                   </div>
                 ))}
@@ -680,7 +734,7 @@ export default function MaintenanceModule({
                   {selectedMaintenance.visitId && (
                     <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5" />
-                      Ticket lié à une visite planifiée{selectedMaintenance.siteName ? ` — ${selectedMaintenance.siteName}` : ''}
+                      Ticket lié à une visite planifiée{getMaintenanceSiteName(selectedMaintenance) ? ` — ${getMaintenanceSiteName(selectedMaintenance)}` : ''}
                     </p>
                   )}
                 </div>
@@ -691,7 +745,7 @@ export default function MaintenanceModule({
                     </span>
                   )}
                   {canWrite && selectedMaintenance.status !== 'résolu' && (
-                    <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status, requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                    <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, equipmentIds: selectedMaintenance.equipmentIds || [], failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: selectedMaintenance.status, requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport, photos: selectedMaintenance.photos || [] }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
                       className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1 transition-colors">
                       <Edit className="w-3.5 h-3.5" /> Modifier
                     </button>
@@ -725,6 +779,23 @@ export default function MaintenanceModule({
                   </div>
                 )}
 
+                {/* Photos du ticket */}
+                {(selectedMaintenance.photos && selectedMaintenance.photos.length > 0) && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Upload className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm font-semibold text-gray-700">Photos ({selectedMaintenance.photos.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedMaintenance.photos.map((photo, i) => (
+                        <a key={i} href={photo} target="_blank" rel="noopener noreferrer">
+                          <img src={photo} alt={`Photo ${i+1}`} className="w-24 h-24 object-cover rounded-lg border border-gray-200 hover:border-[#1a6fa6] transition-colors cursor-pointer" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <Section icon={<AlertTriangle className="w-4 h-4 text-red-500" />} title="Description de la panne" color="red">
                   <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedMaintenance.failureDesc || <em className="text-gray-400">Non renseigné</em>}</p>
                   <p className="text-xs text-gray-400 mt-2">Signalé le {fmtDate(selectedMaintenance.openedAt)} par {selectedMaintenance.openedBy}</p>
@@ -742,46 +813,49 @@ export default function MaintenanceModule({
                   {selectedMaintenance.closedAt && <p className="text-xs text-gray-400 mt-2">Résolu le {fmtDate(selectedMaintenance.closedAt)}</p>}
                 </Section>
 
-                {/* Notes */}
-                {(selectedMaintenance.notes || showNoteForm) && (
-                  <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-blue-50 p-4">
+                {/* Notes / Chat */}
+                <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-blue-50 p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-sm"><Edit className="w-3 h-3" /></div>
-                      <span className="text-sm font-semibold text-gray-700">Informations complémentaires</span>
+                      <span className="text-sm font-semibold text-gray-700">Discussion</span>
+                      <span className="text-xs text-gray-400 ml-auto">{(selectedMaintenance.notes || '').split('\n\n---\n\n').filter(Boolean).length} message(s)</span>
                     </div>
                     {selectedMaintenance.notes && (
-                      <div className="space-y-3 mb-3">
-                        {selectedMaintenance.notes.split('\n\n---\n\n').map((entry, i) => (
-                          <div key={i} className="bg-white rounded-lg border border-blue-100 p-3 text-sm text-gray-700 whitespace-pre-wrap">{entry}</div>
-                        ))}
+                      <div className="space-y-2 mb-3 max-h-48 overflow-y-auto">
+                        {selectedMaintenance.notes.split('\n\n---\n\n').map((entry, i) => {
+                          const isSystem = entry.startsWith('[Système]');
+                          const lines = entry.split('\n');
+                          const author = lines[0] || '';
+                          const content = isSystem ? entry.replace('[Système] ', '') : lines.slice(1).join('\n') || entry;
+                          return (
+                            <div key={i} className={`rounded-lg p-3 text-sm whitespace-pre-wrap ${isSystem ? 'bg-indigo-100 text-indigo-700 text-xs italic' : 'bg-white border border-blue-100 text-gray-700'}`}>
+                              {!isSystem && <p className="text-xs text-blue-500 font-semibold mb-1">{author}</p>}
+                              {content}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
-                    {showNoteForm && (
-                      <div className="space-y-2">
-                        <textarea
-                          value={noteText}
-                          onChange={e => setNoteText(e.target.value)}
-                          rows={3}
-                          placeholder="Saisir une nouvelle information…"
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent resize-none"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            disabled={noteLoading || !noteText.trim()}
-                            onClick={handleAddNote}
-                            className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-[#1a6fa6] to-blue-700 text-white text-sm font-semibold hover:from-[#155a8a] hover:to-[#0d4a73] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
-                          >
-                            {noteLoading ? 'Enregistrement…' : 'Enregistrer'}
-                          </button>
-                          <button onClick={() => { setShowNoteForm(false); setNoteText(''); }}
-                            className="px-4 py-1.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                            Annuler
-                          </button>
-                        </div>
+                    <div className="space-y-2">
+                      <textarea
+                        value={noteText}
+                        onChange={e => setNoteText(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddNote(); } }}
+                        rows={2}
+                        placeholder="Ajouter un commentaire… (Ctrl+Entrée pour envoyer)"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent resize-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          disabled={noteLoading || !noteText.trim()}
+                          onClick={handleAddNote}
+                          className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-[#1a6fa6] to-blue-700 text-white text-sm font-semibold hover:from-[#155a8a] hover:to-[#0d4a73] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
+                        >
+                          {noteLoading ? 'Envoi…' : 'Envoyer'}
+                        </button>
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                </div>
               </div>
 
               {/* Assistance actions */}
@@ -827,20 +901,39 @@ export default function MaintenanceModule({
               )}
 
               {/* Quick status change */}
-              {canWrite && selectedMaintenance.status !== 'résolu' && (
-                <div className="mt-4 pt-4 border-t flex gap-2">
-                  {selectedMaintenance.status === 'ouvert' && (
-                    <button onClick={() => handleStatusChange(selectedMaintenance.id, 'en_cours')}
-                      className="flex-1 py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-orange-500 text-white text-sm font-semibold hover:from-yellow-600 hover:to-orange-600 shadow-sm transition-all">
-                      Démarrer la réparation
-                    </button>
-                  )}
-                  <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu', requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
-                    className="flex-1 py-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-semibold hover:from-green-700 hover:to-emerald-700 shadow-sm transition-all">
-                    Marquer comme résolu
-                  </button>
-                </div>
-              )}
+              {canWrite && selectedMaintenance.status !== 'résolu' && (() => {
+                const blocked = isMaintenanceBlockedByVisit(selectedMaintenance);
+                const visit = selectedMaintenance.visitId ? visits.find(v => v.id === selectedMaintenance.visitId) : null;
+                return (
+                  <div className="mt-4 pt-4 border-t">
+                    {blocked && (
+                      <div className="mb-3 p-3 rounded-xl bg-orange-50 border border-orange-200 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-orange-700">Visite non démarrée</p>
+                          <p className="text-xs text-orange-600 mt-0.5">
+                            La visite liée est en statut « {visit?.status === 'planifié' ? 'Planifié' : visit?.status === 'reporté' ? 'Reporté' : visit?.status === 'annulé' ? 'Annulé' : visit?.status || 'inconnu'} ». 
+                            Mettez-la en « En cours » pour pouvoir traiter ce ticket.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      {selectedMaintenance.status === 'ouvert' && (
+                        <button onClick={() => handleStatusChange(selectedMaintenance.id, 'en_cours')} disabled={blocked}
+                          className={`flex-1 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all ${blocked ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600'}`}>
+                          Démarrer la réparation
+                        </button>
+                      )}
+                      <button onClick={() => { setMaintForm({ equipmentId: selectedMaintenance.equipmentId, equipmentIds: selectedMaintenance.equipmentIds || [], failureDesc: selectedMaintenance.failureDesc, diagnosis: selectedMaintenance.diagnosis, solution: selectedMaintenance.solution, partsReplaced: selectedMaintenance.partsReplaced, technician: selectedMaintenance.technician, priority: selectedMaintenance.priority, status: 'résolu', requestType: selectedMaintenance.requestType, callerName: selectedMaintenance.callerName, callerPhone: selectedMaintenance.callerPhone, callerReport: selectedMaintenance.callerReport, photos: selectedMaintenance.photos || [] }); setMaintenanceEditId(selectedMaintenance.id); setShowMaintenanceForm(true); }}
+                        disabled={blocked}
+                        className={`flex-1 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all ${blocked ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700'}`}>
+                        Marquer comme résolu
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -870,12 +963,49 @@ export default function MaintenanceModule({
                   )}
                   {!maintenanceEditId && (
                     <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1">Équipement concerné</label>
-                      <select value={maintenanceForm.equipmentId ?? ''} onChange={e => setMaintForm(f => ({ ...f, equipmentId: e.target.value ? Number(e.target.value) : null }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent outline-none">
-                        <option value="">— Sélectionner un équipement —</option>
-                        {equipments.filter(eq => !maintenanceForm.siteId || eq.siteId === maintenanceForm.siteId).map(eq => <option key={eq.id} value={eq.id}>{eq.reference ? `[${eq.reference}] ` : ''}{eq.name} ({eq.location})</option>)}
-                      </select>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Équipement(s) concerné(s) <span className="text-gray-400 font-normal">(multi-sélection)</span></label>
+                      {(() => {
+                        const filtered = equipments.filter(eq => !maintenanceForm.siteId || eq.siteId === maintenanceForm.siteId);
+                        const selected = maintenanceForm.equipmentIds || [];
+                        const allSelected = filtered.length > 0 && filtered.every(eq => selected.includes(eq.id));
+                        return (
+                          <div className="border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                            {filtered.length > 0 && (
+                              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+                                <button type="button" onClick={() => {
+                                  const allIds = filtered.map(eq => eq.id);
+                                  setMaintForm(f => ({ ...f, equipmentIds: allSelected ? [] : allIds, equipmentId: allSelected ? null : (f.equipmentId || allIds[0] || null) }));
+                                }} className="text-xs font-medium text-[#1a6fa6] hover:underline">
+                                  {allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                                </button>
+                                <span className="text-[10px] text-gray-400">{selected.length}/{filtered.length}</span>
+                              </div>
+                            )}
+                            {filtered.length === 0 ? (
+                              <p className="text-xs text-gray-400 text-center py-3">Aucun équipement disponible.</p>
+                            ) : filtered.map(eq => {
+                              const checked = selected.includes(eq.id);
+                              return (
+                                <label key={eq.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-gray-50 last:border-0 transition-colors ${checked ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
+                                  <input type="checkbox" checked={checked}
+                                    onChange={() => {
+                                      setMaintForm(f => ({
+                                        ...f,
+                                        equipmentIds: checked ? f.equipmentIds.filter(i => i !== eq.id) : [...f.equipmentIds, eq.id],
+                                        equipmentId: checked && f.equipmentIds.length === 1 ? null : (checked ? f.equipmentId : (f.equipmentIds.length === 0 ? eq.id : f.equipmentId))
+                                      }));
+                                    }}
+                                    className="rounded text-orange-500 w-3.5 h-3.5" />
+                                  <span className="text-sm text-gray-700 truncate">{eq.reference ? `[${eq.reference}] ` : ''}{eq.name} ({eq.location})</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                      {(maintenanceForm.equipmentIds?.length ?? 0) > 0 && (
+                        <p className="text-xs text-orange-600 mt-1">{maintenanceForm.equipmentIds.length} équipement(s) sélectionné(s)</p>
+                      )}
                     </div>
                   )}
                   {!maintenanceEditId && (
@@ -963,6 +1093,37 @@ export default function MaintenanceModule({
                       </select>
                     </div>
                   )}
+                  {/* Photos */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Photos</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {(maintenanceForm.photos || []).map((photo, i) => (
+                        <div key={i} className="relative group">
+                          <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                          <button type="button" onClick={() => setMaintForm(f => ({ ...f, photos: (f.photos || []).filter((_, j) => j !== i) }))}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow">
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-medium text-gray-600 cursor-pointer transition-colors">
+                      <Upload className="w-3.5 h-3.5" />
+                      Ajouter une photo
+                      <input type="file" accept="image/*" multiple className="hidden"
+                        onChange={e => {
+                          const files = Array.from(e.target.files || []);
+                          files.forEach(file => {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              setMaintForm(f => ({ ...f, photos: [...(f.photos || []), reader.result as string] }));
+                            };
+                            reader.readAsDataURL(file);
+                          });
+                          e.target.value = '';
+                        }} />
+                    </label>
+                  </div>
                   <div className="flex gap-3 pt-2">
                     <button onClick={() => { setShowMaintenanceForm(false); setMaintenanceEditId(null); }}
                       className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">Annuler</button>
@@ -977,6 +1138,112 @@ export default function MaintenanceModule({
           )}
         </div>
       )}
+
+      {/* ── Par site view ── */}
+      {showBySite && !showMaintenanceReport && !showKanban && (() => {
+        const bySiteMap = new Map<string, MaintenanceRecord[]>();
+        assistanceViewRecords.forEach(m => {
+          const siteName = getMaintenanceSiteName(m) || 'Sans site';
+          if (!bySiteMap.has(siteName)) bySiteMap.set(siteName, []);
+          bySiteMap.get(siteName)!.push(m);
+        });
+        const sortedSites = Array.from(bySiteMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        return (
+          <div className="flex-1 overflow-y-auto p-6">
+            {sortedSites.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <Globe className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p>Aucune maintenance enregistrée.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {selectedTicketIds.length > 0 && (
+                  <div className="sticky top-0 z-10 bg-white border border-orange-200 rounded-xl p-4 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckSquare className="w-5 h-5 text-orange-500" />
+                      <span className="text-sm font-semibold text-gray-800">{selectedTicketIds.length} ticket(s) sélectionné(s)</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setSelectedTicketIds([])} className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">Annuler</button>
+                      {canWrite && (
+                        <button onClick={handleBatchResolve} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700 shadow-sm transition-all">
+                          Résoudre tout
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {sortedSites.map(([siteName, tickets]) => {
+                  const unresolved = tickets.filter(t => t.status !== 'résolu');
+                  const allSelected = unresolved.length > 0 && unresolved.every(t => selectedTicketIds.includes(t.id));
+                  return (
+                    <div key={siteName} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                      <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-50 to-white border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#1a6fa6] to-blue-600 flex items-center justify-center text-white shadow-sm">
+                            <Globe className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold text-gray-900">{siteName}</h3>
+                            <p className="text-xs text-gray-400">{tickets.length} ticket(s) · {unresolved.length} actif(s)</p>
+                          </div>
+                        </div>
+                        {canWrite && unresolved.length > 0 && (
+                          <button onClick={() => {
+                            if (allSelected) {
+                              setSelectedTicketIds(prev => prev.filter(id => !unresolved.some(t => t.id === id)));
+                            } else {
+                              setSelectedTicketIds(prev => [...new Set([...prev, ...unresolved.map(t => t.id)])]);
+                            }
+                          }} className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${allSelected ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                            {allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="divide-y divide-gray-50">
+                        {tickets.map(m => {
+                          const isSelected = selectedTicketIds.includes(m.id);
+                          const statusColors: Record<string, string> = {
+                            en_attente: 'bg-blue-100 text-blue-700', ouvert: 'bg-red-100 text-red-700',
+                            en_cours: 'bg-yellow-100 text-yellow-700', résolu: 'bg-green-100 text-green-700',
+                          };
+                          return (
+                            <div key={m.id} className={`flex items-center gap-4 px-5 py-3 transition-colors ${isSelected ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
+                              {canWrite && m.status !== 'résolu' && (
+                                <input type="checkbox" checked={isSelected}
+                                  onChange={() => setSelectedTicketIds(prev => isSelected ? prev.filter(id => id !== m.id) : [...prev, m.id])}
+                                  className="rounded text-orange-500 w-4 h-4 shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="text-xs font-mono text-gray-400">#{m.id}</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColors[m.status] ?? 'bg-gray-100 text-gray-600'}`}>{m.status}</span>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{m.priority}</span>
+                                </div>
+                                <p className="text-sm font-medium text-gray-800 truncate">{m.failureDesc || '—'}</p>
+                                <div className="flex items-center gap-3 mt-1">
+                                  {m.equipmentName && <span className="text-xs text-[#1a6fa6] flex items-center gap-1"><Monitor className="w-3 h-3" />{m.equipmentName}</span>}
+                                  {m.technician && <span className="text-xs text-gray-500">🔧 {m.technician}</span>}
+                                </div>
+                              </div>
+                              {canWrite && m.status !== 'résolu' && (
+                                <button onClick={() => { setSelectedMaintenance(m); setShowMaintenanceForm(true); setMaintenanceEditId(m.id); setMaintForm({ equipmentId: m.equipmentId, equipmentIds: m.equipmentIds || [], failureDesc: m.failureDesc, diagnosis: m.diagnosis, solution: m.solution, partsReplaced: m.partsReplaced, technician: m.technician, priority: m.priority, status: m.status, requestType: m.requestType, callerName: m.callerName, callerPhone: m.callerPhone, callerReport: m.callerReport, photos: m.photos || [] }); }}
+                                  className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors shrink-0">
+                                  <Edit className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Rating modal ── */}
       {showRatingModal && (

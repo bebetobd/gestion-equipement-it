@@ -6,7 +6,7 @@ import {
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
-  Moon, Sun, Eye, EyeOff, Headset, Zap
+  Moon, Sun, Eye, EyeOff, Headset, Zap, Bell
 } from 'lucide-react';
 import * as ExportHelpers from './utils/exportHelpers';
 import { QRCodeSVG } from 'qrcode.react';
@@ -62,8 +62,10 @@ type VisitStatus = 'planifié' | 'en_cours' | 'terminé' | 'annulé' | 'reporté
 
 interface SiteVisit {
   id: number;
-  siteId: number;
+  siteId: number | null;
   siteName: string;
+  visitSiteId: number | null;
+  visitSiteName: string;
   scheduledDate: string;
   scheduledTime: string;
   technician: string;
@@ -83,6 +85,7 @@ interface SiteVisit {
 
 interface Equipment {
   id: number;
+  reference?: string;
   name: string;
   type: EquipmentType;
   brand: string;
@@ -106,6 +109,7 @@ interface Equipment {
   minQuantity: number;
   activeCount?: number;
   defectCount?: number;
+  comment: string;
 }
 
 interface EquipmentFormData extends Omit<Equipment, 'id'> {}
@@ -139,6 +143,7 @@ type MaintenancePriority = 'faible' | 'normale' | 'haute' | 'critique';
 interface MaintenanceRecord {
   id: number;
   equipmentId: number | null;
+  equipmentIds: number[];
   equipmentName: string;
   equipmentType: string;
   department: string;
@@ -219,6 +224,7 @@ interface ReformForm {
 
 interface MaintenanceForm {
   equipmentId: number | null;
+  equipmentIds: number[];
   failureDesc: string;
   diagnosis: string;
   solution: string;
@@ -233,8 +239,9 @@ interface MaintenanceForm {
 }
 
 const defaultFormData: EquipmentFormData = {
+  reference: '',
   name: '',
-  type: 'ordinateur',
+  type: '' as EquipmentType,
   brand: '',
   model: '',
   serialNumber: '',
@@ -255,16 +262,35 @@ const defaultFormData: EquipmentFormData = {
   minQuantity: 0,
   activeCount: 1,
   defectCount: 0,
+  comment: '',
 };
 
 const equipmentTypes = [
-  { value: 'ordinateur' as EquipmentType, label: 'Ordinateur', icon: Monitor },
-  { value: 'reseau' as EquipmentType, label: 'Équipement Réseau', icon: Wifi },
-  { value: 'serveur' as EquipmentType, label: 'Serveur', icon: Server },
-  { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer },
-  { value: 'accessoires' as EquipmentType, label: 'Accessoires', icon: ClipboardList },
-  { value: 'autre' as EquipmentType, label: 'Autre', icon: Archive }
+  { value: 'ordinateur' as EquipmentType, label: 'Ordinateur', icon: Monitor, prefix: 'ORD' },
+  { value: 'reseau' as EquipmentType, label: 'Équipement Réseau', icon: Wifi, prefix: 'RES' },
+  { value: 'serveur' as EquipmentType, label: 'Serveur', icon: Server, prefix: 'SRV' },
+  { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer, prefix: 'IMP' },
+  { value: 'scanner' as EquipmentType, label: 'Scanner', icon: ClipboardList, prefix: 'SCN' },
+  { value: 'accessoires' as EquipmentType, label: 'Accessoires', icon: ClipboardList, prefix: 'ACC' },
+  { value: 'autre' as EquipmentType, label: 'Autre', icon: Archive, prefix: 'AUT' }
 ];
+
+function generateReference(type: EquipmentType, existingEquipments: Equipment[], quantity: number = 1): string {
+  if (!type) return '';
+  const prefix = equipmentTypes.find(t => t.value === type)?.prefix || 'AUT';
+  const existing = existingEquipments.filter(e => e.type === type && e.reference).map(e => e.reference as string).filter(r => r.startsWith(prefix + '-'));
+  let maxNum = 0;
+  for (const ref of existing) {
+    const num = parseInt(ref.split('-')[1], 10);
+    if (!isNaN(num) && num > maxNum) maxNum = num;
+  }
+  const first = maxNum + 1;
+  const last = first + quantity - 1;
+  if (quantity <= 1) {
+    return prefix + '-' + String(first).padStart(3, '0');
+  }
+  return prefix + '-' + String(first).padStart(3, '0') + ' → ' + prefix + '-' + String(last).padStart(3, '0');
+}
 
 const roleDisplay: Record<string, { label: string; classes: string }> = {
   admin: { label: 'Administrateur', classes: 'bg-red-100 text-red-700' },
@@ -307,6 +333,7 @@ const sampleEquipments: Equipment[] = [
     interventionDetails: 'Mise à jour système et nettoyage complet',
     quantity: 1,
     minQuantity: 0,
+    comment: '',
   },
   {
     id: 2,
@@ -328,6 +355,7 @@ const sampleEquipments: Equipment[] = [
     interventionDetails: '',
     quantity: 1,
     minQuantity: 0,
+    comment: '',
   },
   {
     id: 3,
@@ -349,6 +377,7 @@ const sampleEquipments: Equipment[] = [
     interventionDetails: 'Remplacement toner et maintenance préventive',
     quantity: 1,
     minQuantity: 0,
+    comment: '',
   }
 ];
 
@@ -604,7 +633,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceRecord | null>(null);
   const [showMaintenanceForm, setShowMaintenanceForm] = useState(false);
   const [maintenanceEditId, setMaintenanceEditId] = useState<number | null>(null);
-  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance', callerName: '', callerPhone: '', callerReport: '' };
+  const defaultMaintenanceForm: MaintenanceForm = { equipmentId: null, equipmentIds: [], failureDesc: '', diagnosis: '', solution: '', partsReplaced: '', technician: '', priority: 'normale', status: 'ouvert', requestType: 'maintenance', callerName: '', callerPhone: '', callerReport: '' };
   const [maintenanceForm, setMaintForm] = useState<MaintenanceForm>(defaultMaintenanceForm);
   const [showMaintenanceReport, setShowMaintenanceReport] = useState(false);
   const [maintTechFilter, setMaintTechFilter] = useState<string[]>([]);
@@ -652,7 +681,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [visitFilter, setVisitFilter] = useState({ siteId: '', status: '', from: '', to: '' });
   const [showVisitForm, setShowVisitForm] = useState(false);
   const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
-  const defaultVisitForm = { siteId: null as number | null, scheduledDate: '', scheduledTime: '', technician: '', purpose: '', status: 'planifié' as VisitStatus, notes: '', withMaintenance: false, equipmentIds: [] as number[], maintenanceDesc: '' };
+  const defaultVisitForm = { siteId: null as number | null, siteName: '', scheduledDate: '', scheduledTime: '', technician: '', purpose: '', status: 'planifié' as VisitStatus, notes: '', withMaintenance: false, equipmentIds: [] as number[], maintenanceDesc: '' };
   const [visitForm, setVisitForm] = useState(defaultVisitForm);
   const [visitSaving, setVisitSaving] = useState(false);
   const [visitActionDialog, setVisitActionDialog] = useState<{ visit: SiteVisit; action: 'terminé' | 'annulé' | 'reporté'; comment: string; newDate: string; maintenanceAction: 'sur_place' | 'programmer' | 'laisser' } | null>(null);
@@ -1140,6 +1169,74 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, [darkModeAuto]);
+
+  // ── Notifications proactives ────────────────────────────────────────────────
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+
+  const notifications = useMemo(() => {
+    const items: { id: string; icon: string; title: string; body: string; color: string; type: 'warning' | 'danger' | 'info' }[] = [];
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // Garanties expirées
+    equipments.forEach(e => {
+      const w = getWarrantyInfo(e.warranty);
+      if (w?.status === 'expired') {
+        items.push({ id: `w-exp-${e.id}`, icon: '🔴', title: 'Garantie expirée', body: `${e.name} (${e.brand} ${e.model})`, color: 'red', type: 'danger' });
+      } else if (w?.status === 'critical') {
+        items.push({ id: `w-expiring-${e.id}`, icon: '🟡', title: 'Garantie expire bientôt', body: `${e.name} — ${w.days}j`, color: 'yellow', type: 'warning' });
+      }
+    });
+
+    // Maintenance préventive due
+    equipments.forEach(e => {
+      if (e.lastMaintenance) {
+        const last = new Date(e.lastMaintenance);
+        const diffDays = Math.floor((now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays > 90) {
+          items.push({ id: `maint-due-${e.id}`, icon: '🔧', title: 'Maintenance préventive due', body: `${e.name} — ${diffDays} jours depuis dernière`, color: 'orange', type: 'warning' });
+        }
+      }
+    });
+
+    // Licences expirées / expirant
+    (licenses || []).forEach((l: any) => {
+      const exp = l.expiry_date || l.endDate;
+      if (exp) {
+        const end = new Date(exp);
+        const diffDays = Math.floor((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) {
+          items.push({ id: `lic-exp-${l.id}`, icon: '🔴', title: 'Licence expirée', body: `${l.name || 'Licence #'+l.id}`, color: 'red', type: 'danger' });
+        } else if (diffDays <= 30) {
+          items.push({ id: `lic-expiring-${l.id}`, icon: '🟡', title: 'Licence expire bientôt', body: `${l.name || 'Licence #'+l.id} — ${diffDays}j`, color: 'yellow', type: 'warning' });
+        }
+      }
+    });
+
+    // Tickets critiques ouverts
+    maintenanceRecords
+      .filter(m => m.priority === 'critique' && m.status !== 'résolu')
+      .forEach(m => items.push({ id: `crit-${m.id}`, icon: '🔴', title: 'Ticket critique', body: `${m.failureDesc || m.equipmentName || 'Ticket #'+m.id}`, color: 'red', type: 'danger' }));
+
+    // Visites aujourd'hui
+    visits
+      .filter(v => v.scheduledDate === todayStr && v.status === 'planifié')
+      .forEach(v => items.push({ id: `visit-${v.id}`, icon: '📅', title: 'Visite aujourd\'hui', body: `${v.siteName} — ${v.technician}`, color: 'blue', type: 'info' }));
+
+    return items;
+  }, [equipments, maintenanceRecords, visits, licenses]);
+
+  const notifCount = notifications.length;
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) setShowNotifDropdown(false);
+    };
+    if (showNotifDropdown) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNotifDropdown]);
 
   // Session timeout — 25 min warning, 30 min auto-logout
   useEffect(() => {
@@ -2128,7 +2225,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const handleSubmit = async () => {
-    const requiredFields = ['name', 'brand', 'location', 'department'];
+    const requiredFields = ['name', 'brand', 'location', 'type'];
     const missingField = requiredFields.find((field) => !formData[field as keyof EquipmentFormData]?.toString().trim());
 
     if (missingField) {
@@ -2394,7 +2491,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const fetchSites = async () => {
     try {
       const r = await fetch(`${API_BASE_URL}/api/sites`, { headers: authHeaders() });
-      if (r.ok) setSites(await r.json());
+      if (r.ok) { const data = await r.json(); setSites(data.sort((a: any, b: any) => a.name.localeCompare(b.name))); }
     } catch (err) { console.error(err); }
   };
 
@@ -2489,7 +2586,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   };
 
   const saveVisit = async () => {
-    if (!visitForm.siteId) { setToast({ message: 'Veuillez sélectionner un site.', type: 'error' }); return; }
+    if (!visitForm.siteId && !visitForm.siteName.trim()) { setToast({ message: 'Veuillez sélectionner un site ou saisir un nom de lieu.', type: 'error' }); return; }
     if (!visitForm.scheduledDate) { setToast({ message: 'Veuillez choisir une date.', type: 'error' }); return; }
     if (!visitForm.technician.trim()) { setToast({ message: 'Veuillez indiquer le technicien.', type: 'error' }); return; }
     if (!visitForm.purpose.trim()) { setToast({ message: "Veuillez indiquer l'objet de la visite.", type: 'error' }); return; }
@@ -2862,6 +2959,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     const lowerSearch = searchTerm.toLowerCase();
     const matchesSearch =
       equipment.name.toLowerCase().includes(lowerSearch) ||
+      (equipment.reference || '').toLowerCase().includes(lowerSearch) ||
       equipment.location.toLowerCase().includes(lowerSearch) ||
       equipment.department.toLowerCase().includes(lowerSearch) ||
       equipment.brand.toLowerCase().includes(lowerSearch) ||
@@ -2888,7 +2986,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-  const filteredVisits = visits.filter((visit) => selectedSiteIds.length === 0 || (visit.siteId != null && selectedSiteIds.includes(visit.siteId)));
+  const filteredVisits = visits.filter((visit) => selectedSiteIds.length === 0 || (visit.siteId == null || selectedSiteIds.includes(visit.siteId)));
   const filteredMaintenance = maintenanceRecords.filter((maintenance) => {
     if (selectedSiteIds.length === 0) return true;
     const siteId = (maintenance as MaintenanceRecord & { siteId?: number | null }).siteId;
@@ -2915,6 +3013,29 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     garantiesExpirees: filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'expired').length,
     garantiesCritiques: filteredEquipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'critical').length,
     stockBas: filteredEquipments.filter(e => e.type === 'accessoires' && (e.minQuantity ?? 0) > 0 && e.quantity <= (e.minQuantity ?? 0)).length,
+    // KPI temps réel
+    mttr: (() => {
+      const resolved = filteredMaintenance.filter(m => m.status === 'résolu' && m.openedAt && m.closedAt);
+      if (resolved.length === 0) return 0;
+      const totalHours = resolved.reduce((sum, m) => {
+        const open = new Date(m.openedAt).getTime();
+        const close = new Date(m.closedAt!).getTime();
+        return sum + (close - open) / (1000 * 60 * 60);
+      }, 0);
+      return Math.round(totalHours / resolved.length * 10) / 10;
+    })(),
+    ticketsResolusSemaine: filteredMaintenance.filter(m => {
+      if (m.status !== 'résolu' || !m.closedAt) return false;
+      const close = new Date(m.closedAt);
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      return close >= weekAgo;
+    }).length,
+    ticketsCreesSemaine: filteredMaintenance.filter(m => {
+      if (!m.openedAt) return false;
+      const open = new Date(m.openedAt);
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      return open >= weekAgo;
+    }).length,
   };
 
   const lowStockItems = filteredEquipments.filter(e => e.type === 'accessoires' && (e.minQuantity ?? 0) > 0 && e.quantity <= (e.minQuantity ?? 0));
@@ -3125,6 +3246,46 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
             )}
           </button>
+          {/* Notifications */}
+          <div className="relative" ref={notifDropdownRef}>
+            <button onClick={() => setShowNotifDropdown(v => !v)}
+              className="relative w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors" title="Notifications">
+              <Bell className="w-4 h-4" />
+              {notifCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1">{notifCount > 99 ? '99+' : notifCount}</span>
+              )}
+            </button>
+            {showNotifDropdown && (
+              <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-[200] max-h-[70vh] flex flex-col">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <h3 className="text-sm font-bold text-gray-800">Notifications</h3>
+                  <span className="text-xs text-gray-400">{notifCount} alerte(s)</span>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {notifications.length === 0 ? (
+                    <div className="p-6 text-center text-gray-400">
+                      <CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Tout est OK !</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-50">
+                      {notifications.map(n => (
+                        <div key={n.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-start gap-2.5">
+                            <span className="text-lg shrink-0 mt-0.5">{n.icon}</span>
+                            <div className="min-w-0">
+                              <p className={`text-xs font-semibold ${n.type === 'danger' ? 'text-red-700' : n.type === 'warning' ? 'text-yellow-700' : 'text-blue-700'}`}>{n.title}</p>
+                              <p className="text-xs text-gray-500 truncate">{n.body}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           {/* Ping all */}
           <button onClick={pingAllEquipments}
             className="w-9 h-9 flex items-center justify-center text-white/80 hover:bg-white/12 rounded transition-colors"
@@ -3418,6 +3579,24 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               sub: kpiStats.visitesToday > 0 ? `⚡ ${kpiStats.visitesToday} aujourd'hui` : kpiStats.visitesEnCours > 0 ? `${kpiStats.visitesEnCours} en cours` : 'Interventions à venir',
               onClick: () => { closeAllModules(); setShowVisitModule(true); fetchVisits(); },
             },
+            {
+              label: 'MTTR (temps moyen)',
+              value: kpiStats.mttr > 0 ? `${kpiStats.mttr}h` : '—',
+              icon: <Clock className="w-5 h-5 text-cyan-500" />,
+              iconBg: 'bg-gradient-to-br from-cyan-50 to-cyan-100',
+              barGradient: 'from-cyan-400 to-teal-500',
+              sub: `Résolu(s) cette semaine: ${kpiStats.ticketsResolusSemaine}`,
+              onClick: openMaintenanceModule,
+            },
+            {
+              label: 'Tickets / semaine',
+              value: kpiStats.ticketsCreesSemaine,
+              icon: <Activity className="w-5 h-5 text-violet-500" />,
+              iconBg: 'bg-gradient-to-br from-violet-50 to-violet-100',
+              barGradient: 'from-violet-400 to-purple-500',
+              sub: `${kpiStats.ticketsResolusSemaine} résolu(s)`,
+              onClick: openMaintenanceModule,
+            },
           ].map(({ label, value, icon, iconBg, barGradient, sub, onClick }) => (
             <div key={label} onClick={onClick}
               className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-4 cursor-pointer transition-all duration-300 group relative overflow-hidden bling-shine hover:-translate-y-1 hover:shadow-lg hover:border-transparent active:scale-[0.97]">
@@ -3537,7 +3716,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                 const statusIcon = m.status === 'résolu' ? '✓' : m.status === 'en_cours' ? '◐' : '○';
                 return (
                   <div key={m.id || i} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                    onClick={() => { if (canWrite) { setSelectedMaintenance(m); setShowMaintenanceForm(true); setMaintenanceEditId(m.id); setMaintForm({ equipmentId: m.equipmentId, failureDesc: m.failureDesc || '', diagnosis: m.diagnosis || '', solution: m.solution || '', partsReplaced: m.partsReplaced || '', technician: m.technician || '', priority: m.priority || 'normale', status: m.status || 'ouvert', requestType: m.requestType || 'maintenance', callerName: m.callerName || '', callerPhone: m.callerPhone || '', callerReport: m.callerReport || '' }); } }}>
+                    onClick={() => { if (canWrite) { setSelectedMaintenance(m); setShowMaintenanceForm(true); setMaintenanceEditId(m.id); setMaintForm({ equipmentId: m.equipmentId, equipmentIds: m.equipmentIds || [], failureDesc: m.failureDesc || '', diagnosis: m.diagnosis || '', solution: m.solution || '', partsReplaced: m.partsReplaced || '', technician: m.technician || '', priority: m.priority || 'normale', status: m.status || 'ouvert', requestType: m.requestType || 'maintenance', callerName: m.callerName || '', callerPhone: m.callerPhone || '', callerReport: m.callerReport || '' }); } }}>
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 ${prioColor}`}>
                       {statusIcon}
                     </div>
@@ -3604,6 +3783,33 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
                 </button>
               )}
+              <button onClick={() => {
+                const now = new Date();
+                const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+                const sheets: any[] = [];
+                sheets.push({ name: 'Équipements', rows: equipments.map(e => ({ Référence: e.reference || '', Nom: e.name, Type: e.type, Marque: e.brand, Modèle: e.model, Site: sites.find(s => s.id === e.siteId)?.name || '', Statut: e.status, Location: e.location })) });
+                sheets.push({ name: 'Maintenance', rows: maintenanceRecords.filter(m => m.openedAt >= weekAgoStr).map(m => ({ '#': m.id, Équipement: m.equipmentName, Panne: m.failureDesc?.substring(0, 80), Priorité: m.priority, Statut: m.status, Technicien: m.technician, Ouvert: m.openedAt?.slice(0, 10) })) });
+                sheets.push({ name: 'Visites', rows: visits.filter(v => v.scheduledDate >= weekAgoStr).map(v => ({ '#': v.id, 'Site départ': v.siteName, 'Site visité': v.visitSiteName || '', Date: v.scheduledDate, Technicien: v.technician, Statut: v.status })) });
+                sheets.push({ name: 'KPI', rows: [
+                  { Indicateur: 'Total équipements', Valeur: equipments.length },
+                  { Indicateur: 'Équipements actifs', Valeur: equipments.filter(e => e.status === 'actif').length },
+                  { Indicateur: 'Tickets ouverts', Valeur: maintenanceRecords.filter(m => m.status !== 'résolu').length },
+                  { Indicateur: 'Garanties expirées', Valeur: equipments.filter(e => getWarrantyInfo(e.warranty)?.status === 'expired').length },
+                  { Indicateur: 'Visites cette semaine', Valeur: visits.filter(v => v.scheduledDate >= weekAgoStr).length },
+                ]});
+                ExportHelpers.exportMultiSheetXlsx(sheets, `rapport-hebdo-${now.toISOString().slice(0,10)}.xlsx`);
+                setToast({ message: 'Rapport hebdomadaire généré !', type: 'success' });
+              }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-left transition-all group">
+                <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Download className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Rapport hebdomadaire</p>
+                  <p className="text-xs text-gray-400">Exporter les stats de la semaine</p>
+                </div>
+              </button>
             </div>
           </div>
         </div>
@@ -3740,7 +3946,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             {/* Search */}
             <div className="relative ml-auto">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Recherche..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              <input type="text" placeholder="Rechercher par nom, référence, marque..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-8 pr-3 py-1.5 border border-gray-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent bg-[#f8f9fa] w-64 focus:bg-white transition-all"
               />
             </div>
@@ -3858,6 +4064,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                           <span className="text-gray-400 shrink-0">{getTypeIcon(equipment.type)}</span>
                           <div className="min-w-0">
                             <div className="text-sm font-medium text-[#212529] flex items-center gap-1 flex-wrap">
+                              {equipment.reference && <span className="text-[10px] font-bold px-1.5 py-px rounded bg-[#e8f3fc] text-[#1a6fa6] shrink-0">{equipment.reference}</span>}
                               <span className="truncate">{equipment.name}</span>
                               {(equipment.quantity ?? 1) > 1 && <span className="text-[10px] font-bold px-1 py-px rounded bg-[#e8f3fc] text-[#1a6fa6] shrink-0">×{equipment.quantity}</span>}
                               {(() => { const w = getWarrantyInfo(equipment.warranty); if (!w || w.status === 'ok') return null; return <span className={`text-[10px] font-semibold px-1 py-px rounded border shrink-0 ${w.color}`}>{w.status === 'expired' ? '⚠' : `⏱${w.label}`}</span>; })()}
@@ -4006,12 +4213,23 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Référence</label>
+                    <input
+                      type="text"
+                      value={formData.reference}
+                      readOnly
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-500 cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
                     <select
                       value={formData.type}
-                      onChange={(e) => setFormData({ ...formData, type: e.target.value as EquipmentType })}
+                      onChange={(e) => { const t = e.target.value as EquipmentType; setFormData({ ...formData, type: t, reference: editingId === null ? generateReference(t, equipments, formData.quantity) : formData.reference }); }}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     >
+                      <option value="">— Sélectionner un type —</option>
                       {equipmentTypes.map((type) => (
                         <option key={type.value} value={type.value}>
                           {type.label}
@@ -4036,16 +4254,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       type="text"
                       value={formData.model}
                       onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Numéro de série</label>
-                    <input
-                      type="text"
-                      value={formData.serialNumber}
-                      onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                     />
                   </div>
@@ -4086,7 +4294,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                         setFormData({
                           ...formData,
                           quantity: qty,
-                          activeCount: Math.min(formData.activeCount ?? qty, qty)
+                          activeCount: Math.min(formData.activeCount ?? qty, qty),
+                          reference: editingId === null ? generateReference(formData.type, equipments, qty) : formData.reference
                         });
                       }}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
@@ -4164,16 +4373,6 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Département *</label>
-                    <input
-                      type="text"
-                      value={formData.department}
-                      onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Statut *</label>
                     <select
                       value={formData.status}
@@ -4225,6 +4424,17 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                       onChange={(e) => setFormData({ ...formData, userName: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent"
                       placeholder="Nom de l'utilisateur"
+                    />
+                  </div>
+
+                  <div className="col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Commentaire</label>
+                    <textarea
+                      value={formData.comment || ''}
+                      onChange={(e) => setFormData({ ...formData, comment: e.target.value })}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1a6fa6] focus:border-transparent resize-none"
+                      placeholder="Notes ou informations complémentaires…"
                     />
                   </div>
                 </div>
@@ -4592,6 +4802,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         onConfirm={setConfirmModal}
         equipments={equipments}
         sites={sites}
+        visits={visits}
         canWrite={canWrite}
         canModify={canModify}
         currentUserName={currentUser.name}

@@ -11,9 +11,41 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "start": "node --env-file=.env server/server.js",
-    "deploy": "npm run build && npm run start"
+    "deploy": "npm run build && npm run start",
+    "electron:dev": "npm run build && electron .",
+    "electron:build": "npm run build && electron-builder --win --linux",
+    "android:sync": "npx cap sync android"
+  },
+  "main": "electron.js",
+  "build": {
+    "appId": "com.gestionit.app",
+    "productName": "Gestion IT",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.js",
+      "public/icon-192.svg"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "public/icon-192.svg"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "public/icon-192.svg"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon-192.svg"
+    }
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "bcryptjs": "^3.0.3",
     "concurrently": "^9.2.1",
     "cors": "^2.8.6",
@@ -40,6 +72,8 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.4.37",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.6.3",

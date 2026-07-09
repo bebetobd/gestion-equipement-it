@@ -14,14 +14,16 @@ export interface ITEquipmentManagerProps {
   onLogout: () => void;
 }
 
-export type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'accessoires' | 'autre';
+export type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'scanner' | 'accessoires' | 'autre';
 export type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant' | 'réformé';
 export type VisitStatus = 'planifié' | 'en_cours' | 'terminé' | 'annulé' | 'reporté';
 
 export interface SiteVisit {
   id: number;
-  siteId: number;
+  siteId: number | null;
   siteName: string;
+  visitSiteId: number | null;
+  visitSiteName: string;
   scheduledDate: string;
   scheduledTime: string;
   technician: string;
@@ -63,6 +65,7 @@ export interface Equipment {
   supplierId?: number | null;
   quantity: number;
   minQuantity: number;
+  comment: string;
   deletedAt?: string | null;
 }
 
@@ -97,6 +100,7 @@ export type MaintenancePriority = 'faible' | 'normale' | 'haute' | 'critique';
 export interface MaintenanceRecord {
   id: number;
   equipmentId: number | null;
+  equipmentIds: number[];
   equipmentName: string;
   equipmentType: string;
   department: string;
@@ -123,6 +127,7 @@ export interface MaintenanceRecord {
   callerName: string;
   callerPhone: string;
   callerReport: string;
+  photos?: string[];
 }
 
 export interface Site {
@@ -177,6 +182,7 @@ export interface ReformForm {
 
 export interface MaintenanceForm {
   equipmentId: number | null;
+  equipmentIds: number[];
   failureDesc: string;
   diagnosis: string;
   solution: string;
@@ -189,6 +195,7 @@ export interface MaintenanceForm {
   callerPhone: string;
   callerReport: string;
   siteId?: number | null;
+  photos?: string[];
 }
 
 export interface UserAccount {
