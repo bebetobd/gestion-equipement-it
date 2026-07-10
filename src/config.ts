@@ -2,7 +2,7 @@
  * Frontend configuration and API utilities
  */
 
-const getApiBaseUrl = () => 'https://gestion-equipement-it.onrender.com';
+const getApiBaseUrl = () => '';
 
 export const API_BASE_URL = getApiBaseUrl();
 

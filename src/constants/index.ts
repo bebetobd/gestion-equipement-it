@@ -45,7 +45,7 @@ export const roleDisplay: Record<string, { label: string; classes: string }> = {
   user: { label: 'Utilisateur', classes: 'bg-gray-100 text-gray-700' }
 };
 
-export const API_BASE_URL = 'https://gestion-equipement-it.onrender.com';
+export const API_BASE_URL = '';
 
 export const API_BASE = `${API_BASE_URL}/api/equipments`;
 export const API_USERS = `${API_BASE_URL}/api/users`;

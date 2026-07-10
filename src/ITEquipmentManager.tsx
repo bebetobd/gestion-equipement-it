@@ -298,7 +298,7 @@ const roleDisplay: Record<string, { label: string; classes: string }> = {
   user: { label: 'Utilisateur', classes: 'bg-gray-100 text-gray-700' }
 };
 
-const API_BASE_URL = 'https://gestion-equipement-it.onrender.com';
+const API_BASE_URL = '';
 
 const API_BASE = `${API_BASE_URL}/api/equipments`;
 const API_USERS = `${API_BASE_URL}/api/users`;
