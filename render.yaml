@@ -12,6 +12,8 @@ services:
         generateValue: true
       - key: JWT_EXPIRES_IN
         value: 8h
+      - key: DATABASE_URL
+        sync: false
       - key: DEFAULT_ADMIN_PASSWORD
         value: admin2024
       - key: DEFAULT_TECH_PASSWORD
