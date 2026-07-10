@@ -2919,7 +2919,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     en_cours:   'bg-yellow-100 text-yellow-700',
     résolu:     'bg-green-100 text-green-700',
   };
-  const getWarrantyInfo = (warranty: string) => {
+  function getWarrantyInfo(warranty: string) {
     if (!warranty) return null;
     const d = new Date(warranty);
     if (isNaN(d.getTime())) return null;
@@ -2928,7 +2928,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     if (diffDays <= 30) return { status: 'critical' as const, days: diffDays, label: `${diffDays}j`, color: 'bg-orange-100 text-orange-700 border-orange-200' };
     if (diffDays <= 90) return { status: 'warning' as const, days: diffDays, label: `${Math.ceil(diffDays/30)}m`, color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
     return { status: 'ok' as const, days: diffDays, label: `${Math.floor(diffDays/30)}m`, color: 'bg-green-100 text-green-700 border-green-200' };
-  };
+  }
 
   const maintenanceStatusLabel: Record<string, string> = {
     en_attente: 'En attente',
