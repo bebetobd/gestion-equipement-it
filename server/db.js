@@ -1313,8 +1313,3 @@ export async function getWorkLogReport({ userId, fromDate, toDate, type, siteId,
     totalMinutes: parseInt(r.total_minutes || 0, 10)
   }));
 }
-
-export async function deleteSupplier(id) {
-  const { rows } = await pool.query('UPDATE suppliers SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
-  return rows[0] || null;
-}
