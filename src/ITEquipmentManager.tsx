@@ -6,7 +6,7 @@ import {
   RefreshCcw, LogOut, Activity, ArrowRightLeft, FileText, Upload, File,
   Wrench, CircleCheck, Archive, Globe, Building2, ClipboardList,
   MessageCircle, Send, X, Ban, ShieldCheck, QrCode, LayoutGrid, LayoutList, ChevronUp,
-  Moon, Sun, Eye, EyeOff, Headset, Zap, Bell
+  Moon, Sun, Eye, EyeOff, Headset, Zap, Bell, Camera
 } from 'lucide-react';
 import * as ExportHelpers from './utils/exportHelpers';
 import { QRCodeSVG } from 'qrcode.react';
@@ -272,6 +272,7 @@ const equipmentTypes = [
   { value: 'serveur' as EquipmentType, label: 'Serveur', icon: Server, prefix: 'SRV' },
   { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer, prefix: 'IMP' },
   { value: 'scanner' as EquipmentType, label: 'Scanner', icon: ClipboardList, prefix: 'SCN' },
+  { value: 'camera' as EquipmentType, label: 'Caméra', icon: Camera, prefix: 'CAM' },
   { value: 'accessoires' as EquipmentType, label: 'Accessoires', icon: ClipboardList, prefix: 'ACC' },
   { value: 'autre' as EquipmentType, label: 'Autre', icon: Archive, prefix: 'AUT' }
 ];
