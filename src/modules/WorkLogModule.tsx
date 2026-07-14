@@ -41,7 +41,7 @@ interface Props {
   isAdmin: boolean;
   currentUserName: string;
   currentUserId: number;
-  equipments: { id: number; name: string }[];
+  equipments: { id: number; name: string; siteId?: number | null }[];
   sites: { id: number; name: string }[];
   onClose: () => void;
   onToast: (t: { message: string; type: 'error' | 'success' | 'info' }) => void;
@@ -400,19 +400,21 @@ export default function WorkLogModule({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Site</label>
+              <select value={form.siteId} onChange={e => { setForm({ ...form, siteId: e.target.value, equipmentId: '' }); }}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                <option value="">—</option>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Équipement</label>
               <select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
                 <option value="">—</option>
-                {equipments.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Site</label>
-              <select value={form.siteId} onChange={e => setForm({ ...form, siteId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
-                <option value="">—</option>
-                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {equipments
+                  .filter(eq => !form.siteId || eq.siteId === Number(form.siteId))
+                  .map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
             </div>
           </div>
