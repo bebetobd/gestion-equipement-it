@@ -20,6 +20,7 @@ import MonitoringModule from './modules/MonitoringModule';
 import UsersModule from './modules/UsersModule';
 import ActivityLogModule from './modules/ActivityLogModule';
 import VisitsModule from './modules/VisitsModule';
+import WorkLogModule from './modules/WorkLogModule';
 import AssistanceModal from './components/AssistanceModal';
 import {
   TableRow as DocxTableRow,
@@ -626,6 +627,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // Maintenance
   const [showMaintenanceModule, setShowMaintenanceModule] = useState(false);
+  const [showWorkLogModule, setShowWorkLogModule] = useState(false);
   const [showAssistanceModal, setShowAssistanceModal] = useState(false);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
@@ -2825,6 +2827,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowTransferModule(false);
     setShowTransferReport(false);
     setShowMaintenanceModule(false);
+    setShowWorkLogModule(false);
     setShowMaintenanceForm(false);
     setShowMaintenanceReport(false);
     setSelectedMaintenance(null);
@@ -2853,6 +2856,11 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowAssistanceFilter(false);
     setSelectedMaintenance(null);
     fetchMaintenance(maintenanceFilter);
+  };
+
+  const openWorkLogModule = () => {
+    closeAllModules();
+    setShowWorkLogModule(true);
   };
 
   const openWarrantyModule = () => {
@@ -3168,6 +3176,12 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               return <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`}>{total}</span>;
             })()}
           </button>
+          {canWrite && (
+            <button type="button" onClick={openWorkLogModule}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <Clock className="w-3.5 h-3.5 shrink-0" /> Feuille de temps
+            </button>
+          )}
           {canWrite && (
             <button type="button" onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
               className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
@@ -4811,6 +4825,21 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         onRefresh={fetchMaintenance}
         onRefreshEquipment={fetchEquipments}
       />
+      )}
+
+      {showWorkLogModule && (
+        <WorkLogModule
+          onClose={() => setShowWorkLogModule(false)}
+          onToast={setToast}
+          onConfirm={setConfirmModal}
+          equipments={equipments}
+          sites={sites}
+          canWrite={canWrite}
+          canModify={canModify}
+          isAdmin={isAdmin}
+          currentUserName={currentUser.name}
+          currentUserId={currentUser.id}
+        />
       )}
 
       {showAssistanceModal && (

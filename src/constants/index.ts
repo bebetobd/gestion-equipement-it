@@ -126,3 +126,20 @@ export const sampleEquipments = [
 ];
 
 export const PAGE_SIZE = 50;
+
+export const workLogTypes = [
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'assistance', label: 'Assistance' },
+  { value: 'installation', label: 'Installation' },
+  { value: 'visite', label: 'Visite de site' },
+  { value: 'formation', label: 'Formation' },
+  { value: 'admin', label: 'Administration' },
+  { value: 'autre', label: 'Autre' },
+];
+
+export const workLogStatuses = [
+  { value: 'termine', label: 'Terminé', color: 'bg-green-100 text-green-700' },
+  { value: 'en_cours', label: 'En cours', color: 'bg-blue-100 text-blue-700' },
+  { value: 'planifie', label: 'Planifié', color: 'bg-yellow-100 text-yellow-700' },
+  { value: 'annule', label: 'Annulé', color: 'bg-red-100 text-red-700' },
+];

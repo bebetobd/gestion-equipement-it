@@ -255,6 +255,29 @@ async function _initDB() {
     CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_records(status)
   `);
 
+  // Table work_logs (Feuille de temps)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS work_logs (
+      id                 SERIAL PRIMARY KEY,
+      user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      work_date          DATE NOT NULL DEFAULT CURRENT_DATE,
+      start_time         TIME,
+      end_time           TIME,
+      duration_minutes   INTEGER,
+      type               VARCHAR(50) NOT NULL DEFAULT 'maintenance',
+      equipment_id       INTEGER REFERENCES equipments(id) ON DELETE SET NULL,
+      site_id            INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+      description        TEXT NOT NULL DEFAULT '',
+      status             VARCHAR(30) NOT NULL DEFAULT 'termine',
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_user_id    ON work_logs(user_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_work_date  ON work_logs(work_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_type       ON work_logs(type)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_equipment  ON work_logs(equipment_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_site       ON work_logs(site_id)`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_activity_log (
       id         SERIAL PRIMARY KEY,
@@ -280,6 +303,28 @@ async function _initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`);
   // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
   await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
+
+  // Work Logs table (Feuille de temps)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS work_logs (
+      id                 SERIAL PRIMARY KEY,
+      user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      work_date          DATE NOT NULL DEFAULT CURRENT_DATE,
+      start_time         TIME,
+      end_time           TIME,
+      duration_minutes   INTEGER,
+      type               VARCHAR(50) NOT NULL DEFAULT 'maintenance',
+      equipment_id       INTEGER REFERENCES equipments(id) ON DELETE SET NULL,
+      site_id            INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+      description        TEXT NOT NULL DEFAULT '',
+      status             VARCHAR(30) NOT NULL DEFAULT 'termine',
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_user_id   ON work_logs(user_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_date      ON work_logs(work_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_equipment ON work_logs(equipment_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_site      ON work_logs(site_id)`);
 
   // Migration: add caller info to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS caller_name VARCHAR(200) NOT NULL DEFAULT ''`);
@@ -1156,6 +1201,117 @@ export async function updateSupplier(id, { name, contactName, email, phone, addr
   if (!r) return null;
   return { id: r.id, name: r.name, contactName: r.contact_name, email: r.email, phone: r.phone,
     address: r.address, city: r.city, country: r.country, notes: r.notes, createdAt: r.created_at };
+}
+
+export async function deleteSupplier(id) {
+  const { rows } = await pool.query('UPDATE suppliers SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING *', [id]);
+  return rows[0] || null;
+}
+
+// ── Work Logs (Feuille de temps) ───────────────────────────────────────────────
+export async function getWorkLogs({ userId, fromDate, toDate, type, equipmentId, siteId, page = 1, limit = 50 }) {
+  const conditions = [];
+  const params = [];
+  let i = 1;
+
+  if (userId) { conditions.push(`user_id = $${i++}`); params.push(userId); }
+  if (fromDate) { conditions.push(`work_date >= $${i++}`); params.push(fromDate); }
+  if (toDate) { conditions.push(`work_date <= $${i++}`); params.push(toDate); }
+  if (type) { conditions.push(`type = $${i++}`); params.push(type); }
+  if (equipmentId) { conditions.push(`equipment_id = $${i++}`); params.push(equipmentId); }
+  if (siteId) { conditions.push(`site_id = $${i++}`); params.push(siteId); }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const offset = (page - 1) * limit;
+
+  const { rows } = await pool.query(
+    `SELECT wl.*, u.name AS user_name, u.username, e.name AS equipment_name, s.name AS site_name
+     FROM work_logs wl
+     LEFT JOIN users u ON wl.user_id = u.id
+     LEFT JOIN equipments e ON wl.equipment_id = e.id
+     LEFT JOIN sites s ON wl.site_id = s.id
+     ${where}
+     ORDER BY wl.work_date DESC, wl.created_at DESC
+     LIMIT $${i++} OFFSET $${i}`,
+    [...params, limit, offset]
+  );
+
+  const { rows: count } = await pool.query(`SELECT COUNT(*) FROM work_logs ${where}`, params);
+  return { rows: rows.map(r => ({
+    id: r.id, userId: r.user_id, userName: r.user_name, username: r.username,
+    workDate: r.work_date?.toISOString?.()?.slice(0,10) ?? r.work_date,
+    startTime: r.start_time, endTime: r.end_time, durationMinutes: r.duration_minutes,
+    type: r.type, equipmentId: r.equipment_id, equipmentName: r.equipment_name,
+    siteId: r.site_id, siteName: r.site_name,
+    description: r.description, status: r.status, createdAt: r.created_at
+  })), total: parseInt(count[0].count, 10) };
+}
+
+export async function createWorkLog(data) {
+  const { userId, workDate, startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status } = data;
+  const { rows } = await pool.query(
+    `INSERT INTO work_logs (user_id, work_date, start_time, end_time, duration_minutes, type, equipment_id, site_id, description, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [userId, workDate || new Date().toISOString().slice(0,10), startTime || null, endTime || null,
+     durationMinutes || null, type || 'maintenance', equipmentId || null, siteId || null,
+     description || '', status || 'termine']
+  );
+  return rows[0];
+}
+
+export async function updateWorkLog(id, data) {
+  const { startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status } = data;
+  const fields = [], params = []; let i = 1;
+  if (startTime !== undefined) { fields.push(`start_time = $${i++}`); params.push(startTime); }
+  if (endTime !== undefined) { fields.push(`end_time = $${i++}`); params.push(endTime); }
+  if (durationMinutes !== undefined) { fields.push(`duration_minutes = $${i++}`); params.push(durationMinutes); }
+  if (type !== undefined) { fields.push(`type = $${i++}`); params.push(type); }
+  if (equipmentId !== undefined) { fields.push(`equipment_id = $${i++}`); params.push(equipmentId); }
+  if (siteId !== undefined) { fields.push(`site_id = $${i++}`); params.push(siteId); }
+  if (description !== undefined) { fields.push(`description = $${i++}`); params.push(description); }
+  if (status !== undefined) { fields.push(`status = $${i++}`); params.push(status); }
+  if (!fields.length) return null;
+  params.push(id);
+  const { rows } = await pool.query(`UPDATE work_logs SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`, params);
+  return rows[0] || null;
+}
+
+export async function deleteWorkLog(id) {
+  const { rows } = await pool.query('DELETE FROM work_logs WHERE id = $1 RETURNING *', [id]);
+  return rows[0] || null;
+}
+
+export async function getWorkLogReport({ userId, fromDate, toDate, type, siteId, groupBy = 'day' }) {
+  const conditions = ['1=1'];
+  const params = []; let i = 1;
+  if (userId) { conditions.push(`user_id = $${i++}`); params.push(userId); }
+  if (fromDate) { conditions.push(`work_date >= $${i++}`); params.push(fromDate); }
+  if (toDate) { conditions.push(`work_date <= $${i++}`); params.push(toDate); }
+  if (type) { conditions.push(`type = $${i++}`); params.push(type); }
+  if (siteId) { conditions.push(`site_id = $${i++}`); params.push(siteId); }
+
+  let dateTrunc = 'day';
+  if (groupBy === 'week') dateTrunc = 'week';
+  else if (groupBy === 'month') dateTrunc = 'month';
+
+  const { rows } = await pool.query(
+    `SELECT date_trunc($1, work_date)::date AS period,
+            type,
+            COUNT(*) AS count,
+            SUM(duration_minutes) AS total_minutes
+     FROM work_logs
+     WHERE ${conditions.join(' AND ')}
+     GROUP BY date_trunc($1, work_date), type
+     ORDER BY period DESC, type`,
+    [dateTrunc, ...params]
+  );
+
+  return rows.map(r => ({
+    period: r.period?.toISOString?.()?.slice(0,10) ?? r.period,
+    type: r.type,
+    count: parseInt(r.count, 10),
+    totalMinutes: parseInt(r.total_minutes || 0, 10)
+  }));
 }
 
 export async function deleteSupplier(id) {

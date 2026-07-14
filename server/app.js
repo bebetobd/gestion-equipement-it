@@ -8,7 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { sendMail, sendMonthlyReport } from './mailer.js';
 const execAsync = promisify(exec);
-import { query, rowToEquipment, rowToMaintenance, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen, getSuppliers, createSupplier, updateSupplier, deleteSupplier, initDB } from './db.js';
+import { query, rowToEquipment, rowToMaintenance, logEquipmentEvent, getEquipmentHistory, getEventsByDateRange, getEventsByDepartment, addDocument, getDocuments, getDocumentData, deleteDocument, getMaintenance, createMaintenance, updateMaintenance, deleteMaintenance, appendMaintenanceNote, getTransferEvents, getSites, createSite, updateSite, deleteSite, queryActivityLog, deleteSession, getChatMessages, sendChatMessage, markChatRead, getChatUnread, createChatGroup, getUserGroups, getVisits, createVisit, updateVisit, deleteVisit, updateSessionLastSeen, getSuppliers, createSupplier, updateSupplier, deleteSupplier, initDB, getWorkLogs, createWorkLog, updateWorkLog, deleteWorkLog, getWorkLogReport } from './db.js';
 import {
   authenticate,
   requireAdmin,
@@ -1580,6 +1580,64 @@ app.post('/api/equipments/:id/reform', authenticate, requirePermission('modifica
     'Réforme équipement', `"${old.name}"${isPartial ? ` (×${qty} réformé(s))` : ' réformé'}`, ip);
 
   res.json(result);
+}));
+
+res.json(result);
+  }));
+  });
+
+// ─── Feuille de temps (Work Logs) ──────────────────────────────────────────────
+app.get('/api/worklogs', authenticate, asyncHandler(async (req, res) => {
+  const { userId, from, to, type, equipmentId, siteId, page = 1, limit = 50 } = req.query;
+  const isAdmin = req.user.role === 'admin';
+  const result = await getWorkLogs({
+    userId: isAdmin && userId ? Number(userId) : (isAdmin ? undefined : req.user.id),
+    fromDate: from,
+    toDate: to,
+    type,
+    equipmentId: equipmentId ? Number(equipmentId) : undefined,
+    siteId: siteId ? Number(siteId) : undefined,
+    page: Number(page),
+    limit: Math.min(Number(limit), 100)
+  });
+  res.json(result);
+}));
+
+app.post('/api/worklogs', authenticate, asyncHandler(async (req, res) => {
+  const { workDate, startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status } = req.body;
+  if (!workDate) return res.status(400).json({ message: 'Date de travail requise' });
+  const wl = await createWorkLog({ userId: req.user.id, workDate, startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status });
+  res.status(201).json(wl);
+}));
+
+app.put('/api/worklogs/:id', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide' });
+  const updated = await updateWorkLog(id, req.body);
+  if (!updated) return res.status(404).json({ message: 'Entrée introuvable' });
+  res.json(updated);
+}));
+
+app.delete('/api/worklogs/:id', authenticate, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'ID invalide' });
+  const deleted = await deleteWorkLog(id);
+  if (!deleted) return res.status(404).json({ message: 'Entrée introuvable' });
+  res.status(204).send();
+}));
+
+app.get('/api/worklogs/report', authenticate, asyncHandler(async (req, res) => {
+  const { from, to, type, siteId, groupBy = 'day' } = req.query;
+  const isAdmin = req.user.role === 'admin';
+  const report = await getWorkLogReport({
+    userId: isAdmin && req.query.userId ? Number(req.query.userId) : (isAdmin ? undefined : req.user.id),
+    fromDate: from,
+    toDate: to,
+    type,
+    siteId: siteId ? Number(siteId) : undefined,
+    groupBy
+  });
+  res.json(report);
 }));
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
