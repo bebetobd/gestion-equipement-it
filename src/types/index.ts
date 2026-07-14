@@ -14,7 +14,7 @@ export interface ITEquipmentManagerProps {
   onLogout: () => void;
 }
 
-export type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'scanner' | 'accessoires' | 'autre';
+export type EquipmentType = 'ordinateur' | 'reseau' | 'serveur' | 'imprimante' | 'scanner' | 'accessoires' | 'camera' | 'autre';
 export type EquipmentStatus = 'actif' | 'inactif' | 'maintenance' | 'defaillant' | 'réformé';
 export type VisitStatus = 'planifié' | 'en_cours' | 'terminé' | 'annulé' | 'reporté';
 

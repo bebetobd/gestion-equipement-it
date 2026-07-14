@@ -1,4 +1,4 @@
-import { Monitor, Wifi, Server, Printer, ClipboardList, Archive } from 'lucide-react';
+import { Monitor, Wifi, Server, Printer, ClipboardList, Archive, Camera } from 'lucide-react';
 import type { EquipmentType, EquipmentStatus, Permission } from '../types';
 
 export const PERMISSION_CONFIG: { value: Permission; label: string; desc: string; color: string }[] = [
@@ -35,6 +35,7 @@ export const equipmentTypes = [
   { value: 'reseau' as EquipmentType, label: 'Équipement Réseau', icon: Wifi },
   { value: 'serveur' as EquipmentType, label: 'Serveur', icon: Server },
   { value: 'imprimante' as EquipmentType, label: 'Imprimante', icon: Printer },
+  { value: 'camera' as EquipmentType, label: 'Caméra', icon: Camera },
   { value: 'accessoires' as EquipmentType, label: 'Accessoires', icon: ClipboardList },
   { value: 'autre' as EquipmentType, label: 'Autre', icon: Archive }
 ];
