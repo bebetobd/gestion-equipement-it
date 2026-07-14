@@ -304,27 +304,8 @@ async function _initDB() {
   // Débloquer les comptes edem, pasca, piteur s'ils étaient bloqués
   await pool.query(`UPDATE users SET blocked = FALSE WHERE username IN ('edem', 'pasca', 'piteur') AND blocked = TRUE`);
 
-  // Work Logs table (Feuille de temps)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS work_logs (
-      id                 SERIAL PRIMARY KEY,
-      user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      work_date          DATE NOT NULL DEFAULT CURRENT_DATE,
-      start_time         TIME,
-      end_time           TIME,
-      duration_minutes   INTEGER,
-      type               VARCHAR(50) NOT NULL DEFAULT 'maintenance',
-      equipment_id       INTEGER REFERENCES equipments(id) ON DELETE SET NULL,
-      site_id            INTEGER REFERENCES sites(id) ON DELETE SET NULL,
-      description        TEXT NOT NULL DEFAULT '',
-      status             VARCHAR(30) NOT NULL DEFAULT 'termine',
-      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_user_id   ON work_logs(user_id)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_date      ON work_logs(work_date)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_equipment ON work_logs(equipment_id)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_logs_site      ON work_logs(site_id)`);
+  // Migration: add team_members array to work_logs
+  await pool.query(`ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS team_members INTEGER[] NOT NULL DEFAULT '{}'`);
 
   // Migration: add caller info to maintenance_records
   await pool.query(`ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS caller_name VARCHAR(200) NOT NULL DEFAULT ''`);
@@ -1225,7 +1206,12 @@ export async function getWorkLogs({ userId, fromDate, toDate, type, equipmentId,
   const offset = (page - 1) * limit;
 
   const { rows } = await pool.query(
-    `SELECT wl.*, u.name AS user_name, u.username, e.name AS equipment_name, s.name AS site_name
+    `SELECT wl.*, u.name AS user_name, u.username, e.name AS equipment_name, s.name AS site_name,
+            COALESCE((
+              SELECT json_agg(json_build_object('id', tm.id, 'name', tm.name) ORDER BY tm.name)
+              FROM unnest(wl.team_members) AS tmid
+              JOIN users tm ON tm.id = tmid
+            ), '[]'::json) AS team_member_info
      FROM work_logs wl
      LEFT JOIN users u ON wl.user_id = u.id
      LEFT JOIN equipments e ON wl.equipment_id = e.id
@@ -1243,24 +1229,26 @@ export async function getWorkLogs({ userId, fromDate, toDate, type, equipmentId,
     startTime: r.start_time, endTime: r.end_time, durationMinutes: r.duration_minutes,
     type: r.type, equipmentId: r.equipment_id, equipmentName: r.equipment_name,
     siteId: r.site_id, siteName: r.site_name,
-    description: r.description, status: r.status, createdAt: r.created_at
+    description: r.description, status: r.status, createdAt: r.created_at,
+    teamMembers: r.team_members || [],
+    teamMemberInfo: r.team_member_info || []
   })), total: parseInt(count[0].count, 10) };
 }
 
 export async function createWorkLog(data) {
-  const { userId, workDate, startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status } = data;
+  const { userId, workDate, startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status, teamMembers } = data;
   const { rows } = await pool.query(
-    `INSERT INTO work_logs (user_id, work_date, start_time, end_time, duration_minutes, type, equipment_id, site_id, description, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    `INSERT INTO work_logs (user_id, work_date, start_time, end_time, duration_minutes, type, equipment_id, site_id, description, status, team_members)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
     [userId, workDate || new Date().toISOString().slice(0,10), startTime || null, endTime || null,
      durationMinutes || null, type || 'maintenance', equipmentId || null, siteId || null,
-     description || '', status || 'termine']
+     description || '', status || 'termine', teamMembers || []]
   );
   return rows[0];
 }
 
 export async function updateWorkLog(id, data) {
-  const { startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status } = data;
+  const { startTime, endTime, durationMinutes, type, equipmentId, siteId, description, status, teamMembers } = data;
   const fields = [], params = []; let i = 1;
   if (startTime !== undefined) { fields.push(`start_time = $${i++}`); params.push(startTime); }
   if (endTime !== undefined) { fields.push(`end_time = $${i++}`); params.push(endTime); }
@@ -1270,6 +1258,7 @@ export async function updateWorkLog(id, data) {
   if (siteId !== undefined) { fields.push(`site_id = $${i++}`); params.push(siteId); }
   if (description !== undefined) { fields.push(`description = $${i++}`); params.push(description); }
   if (status !== undefined) { fields.push(`status = $${i++}`); params.push(status); }
+  if (teamMembers !== undefined) { fields.push(`team_members = $${i++}`); params.push(teamMembers); }
   if (!fields.length) return null;
   params.push(id);
   const { rows } = await pool.query(`UPDATE work_logs SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`, params);

@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Plus, X, Download, Trash2, Edit, ChevronLeft, ChevronRight, Search,
-  MapPin, CheckCircle, Package, FileText, Clock
+  Plus, X, Download, Trash2, Edit, ChevronLeft, ChevronRight,
+  CheckCircle, FileText, Clock
 } from 'lucide-react';
 import { ModuleShell } from '../components/ModuleShell';
-import { authHeaders, formatDuration } from '../utils/helpers';
+import { authHeaders } from '../utils/helpers';
 import { API_BASE_URL, PAGE_SIZE, workLogTypes, workLogStatuses } from '../constants';
-
 
 export const MODULE_NAME = 'Feuille de temps';
 
@@ -25,6 +24,8 @@ export interface WorkLog {
   siteName?: string;
   description: string;
   status: string;
+  teamMembers: number[];
+  teamMemberInfo: { id: number; name: string }[];
 }
 
 export interface WorkLogReportItem {
@@ -47,6 +48,12 @@ interface Props {
   onConfirm: (c: { message: string; onConfirm: () => void }) => void;
 }
 
+interface UserOption {
+  id: number;
+  name: string;
+  username: string;
+}
+
 const emptyForm = {
   workDate: '',
   startTime: '',
@@ -57,7 +64,16 @@ const emptyForm = {
   siteId: '',
   description: '',
   status: 'termine',
+  teamMembers: [] as number[],
 };
+
+function calcDuration(start: string, end: string): number | null {
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const diff = (eh * 60 + em) - (sh * 60 + sm);
+  return diff > 0 ? diff : null;
+}
 
 export default function WorkLogModule({
   canWrite, canModify, isAdmin, currentUserName, currentUserId,
@@ -80,10 +96,20 @@ export default function WorkLogModule({
   const [reportType, setReportType] = useState('');
   const [reportSiteId, setReportSiteId] = useState('');
   const [reportGroupBy, setReportGroupBy] = useState<'day' | 'week' | 'month'>('day');
+  const [users, setUsers] = useState<UserOption[]>([]);
+
+  useEffect(() => { fetchLogs(); }, [page]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [page]);
+    if (showForm && users.length === 0) {
+      fetch(`${API_BASE_URL}/api/users`, { headers: authHeaders() })
+        .then(r => r.ok ? r.json() : [])
+        .then(d => setUsers(Array.isArray(d) ? d : d.rows || []))
+        .catch(() => {});
+    }
+  }, [showForm]);
+
+  useEffect(() => { fetchReport(); }, [reportFrom, reportTo, reportGroupBy, reportType, reportSiteId]);
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -100,10 +126,6 @@ export default function WorkLogModule({
     finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchReport();
-  }, [reportFrom, reportTo, reportGroupBy, reportType, reportSiteId]);
-
   const fetchReport = async () => {
     setReportLoading(true);
     try {
@@ -115,6 +137,25 @@ export default function WorkLogModule({
       if (r.ok) setReportData(await r.json());
     } catch { /* ignore */ }
     finally { setReportLoading(false); }
+  };
+
+  const onTimeChange = (field: 'startTime' | 'endTime', value: string) => {
+    const next = { ...form, [field]: value };
+    const dur = calcDuration(
+      field === 'startTime' ? value : next.startTime,
+      field === 'endTime' ? value : next.endTime
+    );
+    if (dur !== null) next.durationMinutes = String(dur);
+    setForm(next);
+  };
+
+  const toggleTeamMember = (uid: number) => {
+    setForm(prev => ({
+      ...prev,
+      teamMembers: prev.teamMembers.includes(uid)
+        ? prev.teamMembers.filter(id => id !== uid)
+        : [...prev.teamMembers, uid]
+    }));
   };
 
   const handleSave = async () => {
@@ -133,6 +174,7 @@ export default function WorkLogModule({
       siteId: form.siteId ? Number(form.siteId) : undefined,
       description: form.description.trim(),
       status: form.status,
+      teamMembers: form.teamMembers,
     };
     try {
       const r = await fetch(`${API_BASE_URL}/api/worklogs`, {
@@ -166,6 +208,7 @@ export default function WorkLogModule({
       siteId: log.siteId ? String(log.siteId) : '',
       description: log.description,
       status: log.status,
+      teamMembers: log.teamMembers || [],
     });
     setShowForm(true);
   };
@@ -190,12 +233,13 @@ export default function WorkLogModule({
     if (!r.ok) return;
     const data = await r.json();
     const rows = data.rows.map((l: WorkLog) => [
-      l.workDate, l.userName, l.type, l.equipmentName || '', l.siteName || '',
+      l.workDate, l.userName, (l.teamMemberInfo || []).map((m: any) => m.name).join(', '),
+      l.type, l.equipmentName || '', l.siteName || '',
       l.startTime || '', l.endTime || '',
       l.durationMinutes ? String(l.durationMinutes) : '',
       l.description, l.status
     ]);
-    const header = ['Date', 'Technicien', 'Type', 'Équipement', 'Site', 'Début', 'Fin', 'Durée(min)', 'Description', 'Statut'];
+    const header = ['Date', 'Technicien', 'Équipe', 'Type', 'Équipement', 'Site', 'Début', 'Fin', 'Durée(min)', 'Description', 'Statut'];
     const csv = [header, ...rows].map((r: string[]) => r.map((v: string) => `"${v.replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -319,13 +363,13 @@ export default function WorkLogModule({
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Début</label>
               <input type="time" value={form.startTime}
-                onChange={e => setForm({ ...form, startTime: e.target.value })}
+                onChange={e => onTimeChange('startTime', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Fin</label>
               <input type="time" value={form.endTime}
-                onChange={e => setForm({ ...form, endTime: e.target.value })}
+                onChange={e => onTimeChange('endTime', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
             </div>
             <div>
@@ -334,6 +378,25 @@ export default function WorkLogModule({
                 onChange={e => setForm({ ...form, durationMinutes: e.target.value })} min="1"
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Intervenants</label>
+            <div className="flex flex-wrap gap-1.5 p-2 border border-gray-200 rounded-lg min-h-[2.2rem]">
+              {users.filter(u => u.id !== currentUserId).map(u => {
+                const selected = form.teamMembers.includes(u.id);
+                return (
+                  <button key={u.id} type="button" onClick={() => toggleTeamMember(u.id)}
+                    className={`px-2 py-0.5 text-xs rounded-full border transition ${
+                      selected
+                        ? 'bg-[#1a6fa6] text-white border-[#1a6fa6]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                    }`}>
+                    {u.name}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">Cliquez pour ajouter/retirer des intervenants</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -420,7 +483,7 @@ export default function WorkLogModule({
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
                     <th className="px-4 py-2 text-left text-gray-500 font-medium">Date</th>
-                    <th className="px-4 py-2 text-left text-gray-500 font-medium">Technicien</th>
+                    <th className="px-4 py-2 text-left text-gray-500 font-medium">Intervenant(s)</th>
                     <th className="px-4 py-2 text-left text-gray-500 font-medium">Type</th>
                     <th className="px-4 py-2 text-left text-gray-500 font-medium">Détails</th>
                     <th className="px-4 py-2 text-left text-gray-500 font-medium">Durée</th>
@@ -431,7 +494,18 @@ export default function WorkLogModule({
                   {logs.map(log => (
                     <tr key={log.id} className="hover:bg-gray-50">
                       <td className="px-4 py-2 whitespace-nowrap">{new Date(log.workDate).toLocaleDateString('fr-FR')}</td>
-                      <td className="px-4 py-2">{log.userName}</td>
+                      <td className="px-4 py-2">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium text-gray-800">{log.userName}</span>
+                          {log.teamMemberInfo && log.teamMemberInfo.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {log.teamMemberInfo.map((m: any) => (
+                                <span key={m.id} className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">{m.name}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-2">
                         <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-700">
                           {workLogTypes.find(t => t.value === log.type)?.label || log.type}
@@ -447,13 +521,11 @@ export default function WorkLogModule({
                       </td>
                       <td className="px-4 py-2 text-right whitespace-nowrap">
                         <button onClick={() => editLog(log)}
-                          className="p-1 rounded hover:bg-blue-50 text-blue-600"
-                          title="Modifier">
+                          className="p-1 rounded hover:bg-blue-50 text-blue-600" title="Modifier">
                           <Edit className="w-4 h-4" />
                         </button>
                         <button onClick={() => deleteLog(log.id)}
-                          className="p-1 rounded hover:bg-red-50 text-red-600 ml-1"
-                          title="Supprimer">
+                          className="p-1 rounded hover:bg-red-50 text-red-600 ml-1" title="Supprimer">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
