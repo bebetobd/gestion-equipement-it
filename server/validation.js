@@ -100,7 +100,7 @@ export const validators = {
    * @returns {object} { valid: boolean, error?: string }
    */
   equipmentType(type) {
-    const validTypes = ['ordinateur', 'reseau', 'serveur', 'imprimante', 'accessoires', 'autre'];
+    const validTypes = ['ordinateur', 'reseau', 'serveur', 'imprimante', 'scanner', 'camera', 'accessoires', 'autre'];
     if (!type || !validTypes.includes(type)) {
       return { valid: false, error: `Equipment type must be one of: ${validTypes.join(', ')}` };
     }
