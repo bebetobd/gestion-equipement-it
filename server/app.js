@@ -1582,10 +1582,6 @@ app.post('/api/equipments/:id/reform', authenticate, requirePermission('modifica
   res.json(result);
 }));
 
-res.json(result);
-  }));
-  });
-
 // ─── Feuille de temps (Work Logs) ──────────────────────────────────────────────
 app.get('/api/worklogs', authenticate, asyncHandler(async (req, res) => {
   const { userId, from, to, type, equipmentId, siteId, page = 1, limit = 50 } = req.query;
