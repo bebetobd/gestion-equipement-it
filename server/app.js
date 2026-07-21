@@ -2181,22 +2181,83 @@ app.get('/api/ping/:ip', authenticate, asyncHandler(async (req, res) => {
 app.post('/api/network-monitor', authenticate, asyncHandler(async (req, res) => {
   try {
     const allowedSiteIds = req.user.allowedSiteIds ?? [];
-    let equipments;
+
+    // 1. Récupère les équipements de la base avec IP
+    let dbEquipments;
     if (req.user.role !== 'admin' && allowedSiteIds.length > 0) {
-      ({ rows: equipments } = await query(
+      ({ rows: dbEquipments } = await query(
         "SELECT id, name, ip_address, type, location, department FROM equipments WHERE ip_address != '' AND ip_address IS NOT NULL AND site_id = ANY($1::integer[]) AND deleted_at IS NULL ORDER BY id",
         [allowedSiteIds]
       ));
     } else {
-      ({ rows: equipments } = await query(
+      ({ rows: dbEquipments } = await query(
         "SELECT id, name, ip_address, type, location, department FROM equipments WHERE ip_address != '' AND ip_address IS NOT NULL AND deleted_at IS NULL ORDER BY id"
       ));
     }
-    const results = await Promise.allSettled(equipments.map(eq => {
+
+    // 2. Découverte réseau : ARP + ping sweep
+    const discoveredIps = new Set<string>();
+    const discoveredDevices: { ip: string; mac: string; hostname: string; reachable: boolean }[] = [];
+
+    // 2a. Lecture ARP table
+    try {
+      const arpCmd = process.platform === 'win32' ? 'arp -a' : 'arp -n';
+      const { stdout: arpOut } = await execAsync(arpCmd, { timeout: 5000 });
+      const arpLines = arpOut.split('\n');
+      for (const line of arpLines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const ip = parts[0];
+          const mac = parts[1];
+          if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip) && /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/.test(mac.replace(/-/g, ':').toUpperCase())) {
+            if (ip.startsWith('192.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+              discoveredIps.add(ip);
+              discoveredDevices.push({ ip, mac: mac.replace(/-/g, ':').toUpperCase(), hostname: '', reachable: false });
+            }
+          }
+        }
+      }
+    } catch { /* ARP non disponible */ }
+
+    // 2b. Ping sweep des IPs découvertes
+    const pingResults = new Map<string, boolean>();
+    await Promise.allSettled([...discoveredIps].map(async (ip) => {
+      const cmd = process.platform === 'win32' ? `ping -n 1 -w 800 ${ip}` : `ping -c 1 -W 1 ${ip}`;
+      try {
+        await execAsync(cmd, { timeout: 2000 });
+        pingResults.set(ip, true);
+      } catch {
+        pingResults.set(ip, false);
+      }
+    }));
+
+    for (const d of discoveredDevices) {
+      d.reachable = pingResults.get(d.ip) ?? false;
+    }
+
+    // 2c. Résolution hostname via ping -a
+    await Promise.allSettled(discoveredDevices.filter(d => d.reachable).slice(0, 20).map(async (d) => {
+      if (process.platform === 'win32') {
+        try {
+          const { stdout } = await execAsync(`ping -a -n 1 -w 500 ${d.ip}`, { timeout: 2000 });
+          const match = stdout.match(/Pinging\s+(\S+)/);
+          if (match) d.hostname = match[1];
+        } catch { /* */ }
+      }
+    }));
+
+    // 3. Ping des équipements base de données
+    const dbResults = await Promise.allSettled(dbEquipments.map(eq => {
       const cmd = process.platform === 'win32' ? `ping -n 1 -w 1000 ${eq.ip_address}` : `ping -c 1 -W 1 ${eq.ip_address}`;
       return execAsync(cmd, { timeout: 3000 }).then(() => ({ ...eq, reachable: true })).catch(() => ({ ...eq, reachable: false }));
     }));
-    res.json(results.map(r => r.status === 'fulfilled' ? r.value : { id: null, name: 'Erreur', ip_address: '', reachable: false, type: '', location: '', department: '' }));
+    const dbMapped = dbResults.map(r => r.status === 'fulfilled' ? r.value : { id: null, name: 'Erreur', ip_address: '', reachable: false, type: '', location: '', department: '' });
+
+    res.json({
+      db: dbMapped,
+      discovered: discoveredDevices,
+      stats: { dbTotal: dbMapped.length, dbOnline: dbMapped.filter(e => e.reachable).length, discoveredTotal: discoveredDevices.length, discoveredOnline: discoveredDevices.filter(d => d.reachable).length }
+    });
   } catch (err) {
     handleError(err, res, 'Erreur lors du monitoring réseau.');
   }
