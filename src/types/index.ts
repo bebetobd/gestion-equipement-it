@@ -5,6 +5,7 @@ export interface AuthUser {
   role: string;
   permissions: string[];
   allowedSiteIds?: number[];
+  modules?: string[];
 }
 
 export type Permission = 'lecture' | 'ecriture' | 'modification';
@@ -205,6 +206,7 @@ export interface UserAccount {
   role: 'admin' | 'technicien' | 'user';
   permissions: string[];
   allowedSiteIds: number[];
+  modules?: string[];
   blocked?: boolean;
 }
 
@@ -215,6 +217,7 @@ export interface UserFormData {
   password: string;
   permissions: Permission[];
   allowedSiteIds: number[];
+  modules: string[];
 }
 
 export interface SessionInfo {
