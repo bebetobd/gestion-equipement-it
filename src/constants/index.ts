@@ -144,3 +144,20 @@ export const workLogStatuses = [
   { value: 'planifie', label: 'Planifié', color: 'bg-yellow-100 text-yellow-700' },
   { value: 'annule', label: 'Annulé', color: 'bg-red-100 text-red-700' },
 ];
+
+export const AVAILABLE_MODULES: { value: string; label: string }[] = [
+  { value: 'transfers', label: 'Transferts' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'feuille_de_temps', label: 'Feuille de temps' },
+  { value: 'visites', label: 'Visites de site' },
+  { value: 'garanties', label: 'Garanties' },
+  { value: 'renouv_garantie', label: 'Renouv. Garantie' },
+  { value: 'rapports', label: 'Rapports' },
+  { value: 'calendrier', label: 'Calendrier' },
+  { value: 'carte', label: 'Carte' },
+  { value: 'licences', label: 'Licences' },
+  { value: 'contrats', label: 'Contrats' },
+  { value: 'achats', label: "Demandes d'achat" },
+  { value: 'anomalies', label: 'Anomalies' },
+  { value: 'monitoring_reseau', label: 'Monitoring Réseau' },
+];

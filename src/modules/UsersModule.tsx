@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Users as UsersIcon, Plus, Edit, User, ChevronLeft, Trash2, ShieldCheck, Ban, X } from 'lucide-react';
 import { ModuleShell } from '../components/ModuleShell';
 import type { UserAccount, UserFormData, Permission, Site } from '../types';
-import { PERMISSION_CONFIG, roleDisplay, API_USERS } from '../constants';
+import { PERMISSION_CONFIG, roleDisplay, API_USERS, AVAILABLE_MODULES } from '../constants';
 import { authHeaders } from '../utils/helpers';
 
 interface UsersModuleProps {
@@ -18,23 +18,23 @@ interface UsersModuleProps {
 export default function UsersModule({ userAccounts, sites, currentUserId, onClose, onRefresh, onToast, onUnauthorized }: UsersModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
+  const [formData, setFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
   const [formError, setFormError] = useState<string | null>(null);
 
   const [showAccess, setShowAccess] = useState(false);
   const [accessTarget, setAccessTarget] = useState<UserAccount | null>(null);
-  const [accessForm, setAccessForm] = useState<{ role: UserAccount['role']; permissions: Permission[]; allowedSiteIds: number[] }>({ role: 'technicien', permissions: ['lecture'], allowedSiteIds: [] });
+  const [accessForm, setAccessForm] = useState<{ role: UserAccount['role']; permissions: Permission[]; allowedSiteIds: number[]; modules: string[] }>({ role: 'technicien', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
   const [accessError, setAccessError] = useState<string | null>(null);
 
   const openCreate = () => {
-    setFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
+    setFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
     setEditingId(null);
     setFormError(null);
     setShowForm(true);
   };
 
   const openEdit = (user: UserAccount) => {
-    setFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? ['lecture']) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [] });
+    setFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? ['lecture']) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [], modules: user.modules ?? [] });
     setEditingId(user.id);
     setFormError(null);
     setShowForm(true);
@@ -42,7 +42,7 @@ export default function UsersModule({ userAccounts, sites, currentUserId, onClos
 
   const openAccess = (user: UserAccount) => {
     setAccessTarget(user);
-    setAccessForm({ role: user.role, permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [] });
+    setAccessForm({ role: user.role, permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [], modules: user.modules ?? [] });
     setAccessError(null);
     setShowAccess(true);
   };
@@ -52,7 +52,7 @@ export default function UsersModule({ userAccounts, sites, currentUserId, onClos
     if (!editingId && !formData.password.trim()) { setFormError('Mot de passe requis.'); return; }
     setFormError(null);
     try {
-      const payload = { username: formData.username.trim(), name: formData.name.trim(), role: formData.role, password: formData.password.trim() || undefined, permissions: formData.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : formData.permissions, allowedSiteIds: formData.role === 'admin' ? [] : formData.allowedSiteIds };
+      const payload = { username: formData.username.trim(), name: formData.name.trim(), role: formData.role, password: formData.password.trim() || undefined, permissions: formData.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : formData.permissions, allowedSiteIds: formData.role === 'admin' ? [] : formData.allowedSiteIds, modules: formData.role === 'admin' ? [] : formData.modules };
       const url = editingId ? `${API_USERS}/${editingId}` : API_USERS;
       const method = editingId ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
@@ -83,7 +83,7 @@ export default function UsersModule({ userAccounts, sites, currentUserId, onClos
   const handleAccessSave = async () => {
     if (!accessTarget) return;
     try {
-      const payload = { username: accessTarget.username, name: accessTarget.name, role: accessForm.role, permissions: accessForm.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : accessForm.permissions, allowedSiteIds: accessForm.role === 'admin' ? [] : accessForm.allowedSiteIds };
+      const payload = { username: accessTarget.username, name: accessTarget.name, role: accessForm.role, permissions: accessForm.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : accessForm.permissions, allowedSiteIds: accessForm.role === 'admin' ? [] : accessForm.allowedSiteIds, modules: accessForm.role === 'admin' ? [] : accessForm.modules };
       const r = await fetch(`${API_USERS}/${accessTarget.id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
       if (r.status === 401) { onUnauthorized(); return; }
       if (!r.ok) { setAccessError('Erreur'); return; }
@@ -308,7 +308,42 @@ export default function UsersModule({ userAccounts, sites, currentUserId, onClos
                     {formData.allowedSiteIds.length === 0 && sites.length > 0 && <p className="text-xs text-gray-400 mt-1">Accès à tous les sites.</p>}
                   </div>
                 )}
-                <div className="flex justify-end gap-3 pt-2">
+                {formData.role !== 'admin' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Modules autorisés</label>
+                    <div className="flex flex-wrap gap-1.5 p-2 border border-gray-200 rounded-lg min-h-[2.2rem]">
+                      {AVAILABLE_MODULES.map(mod => {
+                        const checked = formData.modules.includes(mod.value);
+                        return (
+                          <button key={mod.value} type="button" onClick={() => { const next = checked ? formData.modules.filter(m => m !== mod.value) : [...formData.modules, mod.value]; setFormData({ ...formData, modules: next }); }}
+                            className={`px-2.5 py-1 text-xs rounded-full border transition ${checked ? 'bg-[#1a6fa6] text-white border-[#1a6fa6]' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                            {mod.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {formData.modules.length === 0 && <p className="text-xs text-gray-400 mt-1">Aucun module sélectionné — seuls les modules publics seront visibles.</p>}
+                  </div>
+                )}
+              {accessForm.role !== 'admin' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Modules autorisés</label>
+                  <div className="flex flex-wrap gap-1.5 p-2 border border-gray-200 rounded-lg min-h-[2.2rem]">
+                    {AVAILABLE_MODULES.map(mod => {
+                      const checked = accessForm.modules.includes(mod.value);
+                      return (
+                        <button key={mod.value} type="button" onClick={() => { const next = checked ? accessForm.modules.filter(m => m !== mod.value) : [...accessForm.modules, mod.value]; setAccessForm(f => ({ ...f, modules: next })); }}
+                          className={`px-2.5 py-1 text-xs rounded-full border transition ${checked ? 'bg-[#1a6fa6] text-white border-[#1a6fa6]' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                          {mod.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {accessForm.modules.length === 0 && <p className="text-xs text-gray-400 mt-1">Aucun module sélectionné — seuls les modules publics seront visibles.</p>}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
                   <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">Annuler</button>
                   <button type="button" onClick={handleSubmit} className="flex-1 py-2.5 bg-gradient-to-r from-blue-500 to-cyan-600 text-white rounded-xl text-sm font-semibold hover:from-blue-600 hover:to-cyan-700 shadow-sm transition-all">{editingId ? 'Modifier' : 'Ajouter'}</button>
                 </div>

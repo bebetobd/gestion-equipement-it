@@ -17,6 +17,7 @@ import * as XLSX from 'xlsx';
 import MaintenanceModule from './modules/MaintenanceModule';
 import ReportsModule from './modules/ReportsModule';
 import MonitoringModule from './modules/MonitoringModule';
+import NetworkMonitorModule from './modules/NetworkMonitorModule';
 import UsersModule from './modules/UsersModule';
 import ActivityLogModule from './modules/ActivityLogModule';
 import VisitsModule from './modules/VisitsModule';
@@ -42,6 +43,7 @@ interface AuthUser {
   role: string;
   permissions: string[];
   allowedSiteIds?: number[];
+  modules?: string[];
 }
 
 type Permission = 'lecture' | 'ecriture' | 'modification';
@@ -50,6 +52,23 @@ const PERMISSION_CONFIG: { value: Permission; label: string; desc: string; color
   { value: 'lecture',      label: 'Lecture',       desc: 'Consulter la liste des équipements',      color: 'blue'   },
   { value: 'ecriture',     label: 'Écriture',      desc: 'Ajouter de nouveaux équipements',          color: 'green'  },
   { value: 'modification', label: 'Modification',  desc: 'Modifier et supprimer des équipements',    color: 'orange' }
+];
+
+const AVAILABLE_MODULES: { value: string; label: string; icon: string }[] = [
+  { value: 'transfers', label: 'Transferts', icon: 'ArrowRightLeft' },
+  { value: 'maintenance', label: 'Maintenance', icon: 'Wrench' },
+  { value: 'feuille_de_temps', label: 'Feuille de temps', icon: 'Clock' },
+  { value: 'visites', label: 'Visites de site', icon: 'MapPin' },
+  { value: 'garanties', label: 'Garanties', icon: 'ShieldCheck' },
+  { value: 'renouv_garantie', label: 'Renouv. Garantie', icon: 'RefreshCcw' },
+  { value: 'rapports', label: 'Rapports', icon: 'Calendar' },
+  { value: 'calendrier', label: 'Calendrier', icon: 'LayoutGrid' },
+  { value: 'carte', label: 'Carte', icon: 'Map' },
+  { value: 'licences', label: 'Licences', icon: 'Key' },
+  { value: 'contrats', label: 'Contrats', icon: 'FileText' },
+  { value: 'achats', label: 'Demandes d\'achat', icon: 'ShoppingCart' },
+  { value: 'anomalies', label: 'Anomalies', icon: 'AlertTriangle' },
+  { value: 'monitoring_reseau', label: 'Monitoring Réseau', icon: 'Activity' },
 ];
 
 interface ITEquipmentManagerProps {
@@ -391,6 +410,7 @@ interface UserAccount {
   permissions: string[];
   allowedSiteIds: number[];
   blocked?: boolean;
+  modules?: string[];
 }
 
 interface UserFormData {
@@ -400,6 +420,7 @@ interface UserFormData {
   password: string;
   permissions: Permission[];
   allowedSiteIds: number[];
+  modules: string[];
 }
 
 interface SessionInfo {
@@ -565,6 +586,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const canWrite  = isAdmin || (currentUser.permissions ?? []).includes('ecriture');
   const canModify = isAdmin || (currentUser.permissions ?? []).includes('modification');
   const userAllowedSiteIds = currentUser.allowedSiteIds ?? [];
+  const userModules = currentUser.modules ?? [];
+  const hasModule = (mod: string) => userModules.length === 0 || userModules.includes(mod);
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',
@@ -589,7 +612,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
   const [showUserModal, setShowUserModal] = useState(false);
   const [showUserFormModal, setShowUserFormModal] = useState(false);
   const [userEditingId, setUserEditingId] = useState<number | null>(null);
-  const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
+  const [userFormData, setUserFormData] = useState<UserFormData>({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [accessTarget, setAccessTarget] = useState<UserAccount | null>(null);
@@ -696,6 +719,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   // Monitoring
   const [showMonitoringModal, setShowMonitoringModal] = useState(false);
+  const [showNetworkMonitorModule, setShowNetworkMonitorModule] = useState(false);
   const [monitoringTab, setMonitoringTab] = useState<'sessions' | 'activities'>('sessions');
   const [activeSessions, setActiveSessions] = useState<SessionInfo[]>([]);
   const [showWarrantyModule, setShowWarrantyModule] = useState(false);
@@ -1812,14 +1836,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
 
   const openUserCreate = () => {
     setUserEditingId(null);
-    setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
+    setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
     setUserFormError(null);
     setShowUserFormModal(true);
   };
 
   const openUserEdit = (user: UserAccount) => {
     setUserEditingId(user.id);
-    setUserFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [] });
+    setUserFormData({ username: user.username, name: user.name, role: user.role, password: '', permissions: (user.permissions ?? []) as Permission[], allowedSiteIds: user.allowedSiteIds ?? [], modules: user.modules ?? [] });
     setUserFormError(null);
     setShowUserFormModal(true);
   };
@@ -1841,7 +1865,8 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       role: userFormData.role,
       password: userFormData.password.trim() || undefined,
       permissions: userFormData.role === 'admin' ? ['lecture', 'ecriture', 'modification'] : userFormData.permissions,
-      allowedSiteIds: userFormData.role === 'admin' ? [] : userFormData.allowedSiteIds
+      allowedSiteIds: userFormData.role === 'admin' ? [] : userFormData.allowedSiteIds,
+      modules: userFormData.role === 'admin' ? [] : userFormData.modules
     };
 
     try {
@@ -1868,7 +1893,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
       }
 
       setShowUserFormModal(false);
-      setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [] });
+      setUserFormData({ username: '', name: '', role: 'technicien', password: '', permissions: ['lecture'], allowedSiteIds: [], modules: [] });
       await fetchUsers();
     } catch {
       setUserFormError('Impossible de sauvegarder l\'utilisateur.');
@@ -2849,6 +2874,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
     setShowInventory(false);
     setShowTVDashboard(false);
     setShowSettings(false);
+    setShowNetworkMonitorModule(false);
   };
 
   const openMaintenanceModule = () => {
@@ -3158,7 +3184,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               <Monitor className="w-3.5 h-3.5 shrink-0" /> Équipements
             </button>
           )}
-          {canWrite && canModify && (
+          {canWrite && canModify && hasModule('transfers') && (
             <button type="button" onClick={() => { closeAllModules(); setShowTransferModule(true); fetchAllTransfers(); }}
               className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
               <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" /> Transferts
@@ -3168,6 +3194,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
             className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
             <Headset className="w-3.5 h-3.5 shrink-0" /> Assistance
           </button>
+          {hasModule('maintenance') && (
           <button type="button" onClick={() => openMaintenanceModule()}
             className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
             <Wrench className="w-3.5 h-3.5 shrink-0" /> Maintenance
@@ -3177,13 +3204,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               return <span className={`ml-1 text-white text-[10px] rounded-full px-1.5 py-px leading-none font-bold ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`}>{total}</span>;
             })()}
           </button>
-          {canWrite && (
+          )}
+          {canWrite && hasModule('feuille_de_temps') && (
             <button type="button" onClick={openWorkLogModule}
               className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
               <Clock className="w-3.5 h-3.5 shrink-0" /> Feuille de temps
             </button>
           )}
-          {canWrite && (
+          {canWrite && hasModule('visites') && (
             <button type="button" onClick={() => { closeAllModules(); setShowVisitModule(true); fetchVisits(); }}
               className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
               <Clock className="w-3.5 h-3.5 shrink-0" /> Visites de site
@@ -3195,7 +3223,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               })()}
             </button>
           )}
-          {canWrite && (
+          {canWrite && hasModule('garanties') && (
             <button type="button" onClick={openWarrantyModule}
               className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
               <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> Garanties
@@ -3204,24 +3232,36 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
               )}
             </button>
           )}
-          {canWrite && (
+          {canWrite && hasModule('renouv_garantie') && (
             <button type="button" onClick={() => { closeAllModules(); setShowWarrantyRenewModule(true); }}
               className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
               <RefreshCcw className="w-3.5 h-3.5 shrink-0" /> Renouv. Garantie
             </button>
           )}
-          <button type="button" onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
-            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
-            <Calendar className="w-3.5 h-3.5 shrink-0" /> Rapports
-          </button>
-          <button type="button" onClick={() => { closeAllModules(); setShowUnifiedCalendar(true); }}
-            className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
-            <LayoutGrid className="w-3.5 h-3.5 shrink-0" /> Calendrier
-          </button>
-          <button type="button" onClick={() => setShowMap(true)}
-            className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
-            <MapPin className="w-3.5 h-3.5 shrink-0" /> Carte
-          </button>
+          {hasModule('rapports') && (
+            <button type="button" onClick={() => { closeAllModules(); setShowReportsModal(true); setReportsTab('equipment'); fetchReportByDepartment(); }}
+              className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
+              <Calendar className="w-3.5 h-3.5 shrink-0" /> Rapports
+            </button>
+          )}
+          {hasModule('calendrier') && (
+            <button type="button" onClick={() => { closeAllModules(); setShowUnifiedCalendar(true); }}
+              className="h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors">
+              <LayoutGrid className="w-3.5 h-3.5 shrink-0" /> Calendrier
+            </button>
+          )}
+          {hasModule('carte') && (
+            <button type="button" onClick={() => setShowMap(true)}
+              className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
+              <MapPin className="w-3.5 h-3.5 shrink-0" /> Carte
+            </button>
+          )}
+          {hasModule('monitoring_reseau') && (
+            <button type="button" onClick={() => { closeAllModules(); setShowNetworkMonitorModule(true); }}
+              className={`h-11 px-4 text-white/85 text-sm hover:bg-white/12 hover:text-white border-r border-white/10 shrink-0 flex items-center gap-2 whitespace-nowrap transition-colors ${(showWarrantyModule || showUnifiedCalendar || showCalendar) ? 'hidden' : ''}`}>
+              <Activity className="w-3.5 h-3.5 shrink-0" /> Réseau
+            </button>
+          )}
           {isAdmin && (
             <>
               <button type="button" onClick={() => { closeAllModules(); setShowActivityLog(true); fetchActivityLog(); }}
@@ -3786,7 +3826,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                   <p className="text-xs text-gray-400">Support rapide utilisateur</p>
                 </div>
               </button>
-              {canWrite && (
+          {canWrite && (
                 <button onClick={openNewEquipmentForm}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-left transition-all group">
                   <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -4132,7 +4172,7 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
-                          {canWrite && (
+          {canWrite && hasModule('feuille_de_temps') && (
                             <button
                               onClick={() => openSignalerPanne(equipment)}
                               className="text-orange-500 hover:text-orange-700"
@@ -6329,6 +6369,14 @@ const ITEquipmentManager = ({ currentUser, onLogout }: ITEquipmentManagerProps) 
         <MonitoringModule
           onClose={() => setShowMonitoringModal(false)}
           onUnauthorized={handleUnauthorized}
+        />
+      )}
+
+      {showNetworkMonitorModule && (
+        <NetworkMonitorModule
+          onClose={() => setShowNetworkMonitorModule(false)}
+          onUnauthorized={handleUnauthorized}
+          onToast={setToast}
         />
       )}
 

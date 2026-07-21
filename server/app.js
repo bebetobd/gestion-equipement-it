@@ -430,13 +430,14 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
     loginAttempts.delete(ip);
 
     const permissions = user.permissions ?? [];
+    const userModules = user.modules ?? [];
     if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is not set');
     const jwtSecret = process.env.JWT_SECRET;
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '8h';
 
     const allowedSiteIds = user.allowed_site_ids ?? [];
     const token = jwt.sign(
-      { id: user.id, username: user.username, name: user.name, role: user.role, permissions, allowedSiteIds },
+      { id: user.id, username: user.username, name: user.name, role: user.role, permissions, allowedSiteIds, modules: userModules },
       jwtSecret,
       { expiresIn: jwtExpiresIn }
     );
@@ -473,6 +474,7 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
         role: user.role,
         permissions,
         allowedSiteIds,
+        modules: userModules,
         mustChangePassword: user.must_change_password ?? false,
       }
     });
@@ -569,16 +571,17 @@ app.post('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res)
   }
 
   try {
-    const { username, name, role, password, permissions, allowedSiteIds } = req.body;
+    const { username, name, role, password, permissions, allowedSiteIds, modules } = req.body;
     const hashed = await bcrypt.hash(password, 10);
     const safePerms = Array.isArray(permissions) ? permissions : ['lecture'];
     const safeSites = Array.isArray(allowedSiteIds) ? allowedSiteIds.map(Number).filter(Boolean) : [];
+    const safeModules = Array.isArray(modules) ? modules : [];
 
     const { rows } = await query(
-      `INSERT INTO users (username, name, role, password, permissions, allowed_site_ids, must_change_password)
-       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
-       RETURNING id, username, name, role, permissions, allowed_site_ids`,
-      [username.trim(), name.trim(), role, hashed, safePerms, safeSites]
+      `INSERT INTO users (username, name, role, password, permissions, allowed_site_ids, modules, must_change_password)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)
+       RETURNING id, username, name, role, permissions, allowed_site_ids, modules`,
+      [username.trim(), name.trim(), role, hashed, safePerms, safeSites, safeModules]
     );
 
     logActivity(
@@ -590,7 +593,7 @@ app.post('/api/users', authenticate, requireAdmin, asyncHandler(async (req, res)
       getClientIp(req)
     );
 
-    res.status(201).json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [] });
+    res.status(201).json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [], modules: rows[0].modules ?? [] });
   } catch (err) {
     handleError(err, res, 'Erreur lors de la création.');
   }
@@ -640,6 +643,14 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
     }
   }
 
+  const { modules } = req.body;
+  if (modules) {
+    const modsVal = validators.modules(modules);
+    if (!modsVal.valid) {
+      return res.status(400).json({ message: `modules: ${modsVal.error}` });
+    }
+  }
+
   try {
     let updateFields = [];
     let params = [];
@@ -666,6 +677,10 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       updateFields.push(`permissions = $${paramCount++}`);
       params.push(permissions);
     }
+    if (modules) {
+      updateFields.push(`modules = $${paramCount++}`);
+      params.push(modules);
+    }
     const { allowedSiteIds } = req.body;
     if (allowedSiteIds !== undefined) {
       const safeSites = Array.isArray(allowedSiteIds) ? allowedSiteIds.map(Number).filter(Boolean) : [];
@@ -678,11 +693,11 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
     }
 
     // Audit : récupérer l'état avant modification
-    const { rows: before } = await query('SELECT role, permissions, allowed_site_ids, blocked FROM users WHERE id=$1', [id]);
+    const { rows: before } = await query('SELECT role, permissions, allowed_site_ids, modules, blocked FROM users WHERE id=$1', [id]);
     const oldState = before[0] || {};
 
     params.push(id);
-    const updateSQL = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, role, permissions, allowed_site_ids`;
+    const updateSQL = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, role, permissions, allowed_site_ids, modules`;
 
     const { rows } = await query(updateSQL, params);
 
@@ -697,6 +712,11 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       const oldPerms = (oldState.permissions || []).join(', ');
       const newPerms = permissions.join(', ');
       if (oldPerms !== newPerms) changes.push(`permissions: [${oldPerms}] → [${newPerms}]`);
+    }
+    if (modules) {
+      const oldMods = (oldState.modules || []).join(', ');
+      const newMods = modules.join(', ');
+      if (oldMods !== newMods) changes.push(`modules: [${oldMods}] → [${newMods}]`);
     }
     if (allowedSiteIds !== undefined) {
       const oldSites = (oldState.allowed_site_ids || []).join(', ');
@@ -713,7 +733,7 @@ app.put('/api/users/:id', authenticate, requireAdmin, asyncHandler(async (req, r
       getClientIp(req)
     );
 
-    res.json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [] });
+    res.json({ ...rows[0], allowedSiteIds: rows[0].allowed_site_ids ?? [], modules: rows[0].modules ?? [] });
   } catch (err) {
     handleError(err, res, 'Erreur lors de la modification.');
   }
@@ -2154,6 +2174,31 @@ app.get('/api/ping/:ip', authenticate, asyncHandler(async (req, res) => {
     res.json({ reachable: true, ip });
   } catch {
     res.json({ reachable: false, ip });
+  }
+}));
+
+// ─── Surveillance réseau batch ─────────────────────────────────────────────────
+app.post('/api/network-monitor', authenticate, asyncHandler(async (req, res) => {
+  try {
+    const allowedSiteIds = req.user.allowedSiteIds ?? [];
+    let equipments;
+    if (req.user.role !== 'admin' && allowedSiteIds.length > 0) {
+      ({ rows: equipments } = await query(
+        "SELECT id, name, ip_address, type, location, department FROM equipments WHERE ip_address != '' AND ip_address IS NOT NULL AND site_id = ANY($1::integer[]) AND deleted_at IS NULL ORDER BY id",
+        [allowedSiteIds]
+      ));
+    } else {
+      ({ rows: equipments } = await query(
+        "SELECT id, name, ip_address, type, location, department FROM equipments WHERE ip_address != '' AND ip_address IS NOT NULL AND deleted_at IS NULL ORDER BY id"
+      ));
+    }
+    const results = await Promise.allSettled(equipments.map(eq => {
+      const cmd = process.platform === 'win32' ? `ping -n 1 -w 1000 ${eq.ip_address}` : `ping -c 1 -W 1 ${eq.ip_address}`;
+      return execAsync(cmd, { timeout: 3000 }).then(() => ({ ...eq, reachable: true })).catch(() => ({ ...eq, reachable: false }));
+    }));
+    res.json(results.map(r => r.status === 'fulfilled' ? r.value : { id: null, name: 'Erreur', ip_address: '', reachable: false, type: '', location: '', department: '' }));
+  } catch (err) {
+    handleError(err, res, 'Erreur lors du monitoring réseau.');
   }
 }));
 
